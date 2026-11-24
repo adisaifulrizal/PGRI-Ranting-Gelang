@@ -1698,7 +1698,13 @@ export const KeuanganView: React.FC<KeuanganViewProps> = ({
         groups[sch].unpaid.push(t);
       }
     });
-    return Object.values(groups).sort((a, b) => a.school.localeCompare(b.school, 'id'));
+    return Object.values(groups).sort((a, b) => {
+      const aIsSdNu = a.school.startsWith('SD NU');
+      const bIsSdNu = b.school.startsWith('SD NU');
+      if (aIsSdNu && !bIsSdNu) return 1;
+      if (!aIsSdNu && bIsSdNu) return -1;
+      return a.school.localeCompare(b.school, 'id');
+    });
   }, [sortedTeachers, cashPayments, rekapMonth, rekapYear]);
 
   // Cetak / Unduh LPJ Keuangan Resmi PGRI Ranting Gelang (PC: Jendela Cetak | Ponsel: Auto Download PDF)
@@ -4397,7 +4403,7 @@ export const KeuanganView: React.FC<KeuanganViewProps> = ({
                   <tbody className="text-sm">
                     {transactionsWithRunningBalance.length > 0 ? (
                       transactionsWithRunningBalance.map((tx, index) => (
-                        <tr key={tx.id} className={`border-b border-stone-100 [.dark_&]:border-stone-800/60 dark:border-stone-800/60 border-l-2 ${tx.type === 'Pemasukan' ? 'border-l-emerald-500/70' : 'border-l-red-500/70'} hover:bg-[#faf8f5] [.dark_&]:hover:bg-stone-800/60 dark:hover:bg-stone-800/60 transition-colors duration-150 group`}>
+                        <tr key={tx.id} className="border-b border-stone-100 [.dark_&]:border-stone-800/60 dark:border-stone-800/60 hover:bg-[#faf8f5] [.dark_&]:hover:bg-stone-800/60 dark:hover:bg-stone-800/60 transition-colors duration-150 group">
                           <td className="py-3.5 px-2 text-center font-bold text-stone-500 [.dark_&]:text-stone-400 dark:text-stone-400">
                             {index + 1}
                           </td>
@@ -4513,28 +4519,12 @@ export const KeuanganView: React.FC<KeuanganViewProps> = ({
                     </span>
                   </div>
                   <p className="text-sm text-stone-500 [.dark_&]:text-stone-400 dark:text-stone-400 mt-1">
-                    Riwayat dan status pembayaran (berlaku mulai {MONTH_OPTIONS.find(m => m.id === duesStartMonth)?.name || 'November'} {duesStartYear}).
+                    Riwayat dan status pembayaran (berlaku mulai {MONTH_OPTIONS.find(m => m.id === duesStartMonth)?.name || 'November'} {duesStartYear})
                   </p>
                 </div>
 
                 {/* Filter Controls di Sebelah Kanan + Tombol Unduh PDF */}
                 <div className="flex flex-wrap items-center gap-2.5 w-full xl:w-auto">
-                  {/* Filter Nama Sekolah */}
-                  <div className="w-full sm:flex-initial sm:w-48">
-                    <select
-                      value={filterSchool}
-                      onChange={(e) => setFilterSchool(e.target.value)}
-                      className="w-full px-3.5 py-2.5 rounded-xl bg-[#faf8f5] [.dark_&]:bg-stone-800 dark:bg-stone-800 border border-stone-200 [.dark_&]:border-stone-700 dark:border-stone-700 text-stone-800 [.dark_&]:text-stone-100 dark:text-stone-100 text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-red-800/20 focus:border-red-700 cursor-pointer truncate"
-                    >
-                      <option value="Semua" className={isDark ? "bg-stone-800 text-stone-100" : "bg-white text-stone-800"}>Semua Sekolah</option>
-                      {schoolOptions.map((sch) => (
-                        <option key={sch} value={sch} className={isDark ? "bg-stone-800 text-stone-100" : "bg-white text-stone-800"}>
-                          {sch}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-
                   {/* 4. Filter Tahun Pembayaran */}
                   <div className="flex-1 sm:flex-initial sm:w-32">
                     <select
@@ -4568,6 +4558,22 @@ export const KeuanganView: React.FC<KeuanganViewProps> = ({
                       {MONTH_OPTIONS.filter(m => isPeriodActive(filterYear, m.id)).map((m) => (
                         <option key={m.id} value={m.id} className={isDark ? "bg-stone-800 text-stone-100" : "bg-white text-stone-800"}>
                           Bulan {m.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {/* Filter Nama Sekolah */}
+                  <div className="w-full sm:flex-initial sm:w-48">
+                    <select
+                      value={filterSchool}
+                      onChange={(e) => setFilterSchool(e.target.value)}
+                      className="w-full px-3.5 py-2.5 rounded-xl bg-[#faf8f5] [.dark_&]:bg-stone-800 dark:bg-stone-800 border border-stone-200 [.dark_&]:border-stone-700 dark:border-stone-700 text-stone-800 [.dark_&]:text-stone-100 dark:text-stone-100 text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-red-800/20 focus:border-red-700 cursor-pointer truncate"
+                    >
+                      <option value="Semua" className={isDark ? "bg-stone-800 text-stone-100" : "bg-white text-stone-800"}>Semua Sekolah</option>
+                      {schoolOptions.map((sch) => (
+                        <option key={sch} value={sch} className={isDark ? "bg-stone-800 text-stone-100" : "bg-white text-stone-800"}>
+                          {sch}
                         </option>
                       ))}
                     </select>
@@ -4952,8 +4958,8 @@ export const KeuanganView: React.FC<KeuanganViewProps> = ({
       {/* POPUP MODAL: VERIFIKASI PEMBAYARAN KAS (Hanya Admin) */}
       {isVerifikasiModalOpen && (
         <div className={`fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm ${isClosingVerifikasiModal ? 'modal-backdrop-exit' : 'animate-backdrop-fade'}`}>
-          <div className={`bg-white [.dark_&]:bg-stone-900 dark:bg-stone-900 rounded-2xl max-w-2xl w-full p-6 shadow-2xl border border-stone-200/90 [.dark_&]:border-stone-800 dark:border-stone-800 space-y-4 ${isClosingVerifikasiModal ? 'modal-content-exit' : 'animate-modal-pop'}`}>
-            <div className="flex items-center justify-between border-b border-stone-200/80 [.dark_&]:border-stone-800 dark:border-stone-800 pb-3">
+          <div className={`bg-white [.dark_&]:bg-stone-900 dark:bg-stone-900 rounded-2xl max-w-2xl w-full h-[640px] max-h-[90vh] flex flex-col p-6 shadow-2xl border border-stone-200/90 [.dark_&]:border-stone-800 dark:border-stone-800 space-y-4 ${isClosingVerifikasiModal ? 'modal-content-exit' : 'animate-modal-pop'}`}>
+            <div className="flex items-center justify-between border-b border-stone-200/80 [.dark_&]:border-stone-800 dark:border-stone-800 pb-3 shrink-0">
               <div className="flex items-center gap-2.5 text-red-800 [.dark_&]:text-amber-400 dark:text-amber-400">
                 <div className="w-9 h-9 rounded-xl bg-red-50 [.dark_&]:bg-red-950/70 dark:bg-red-950/70 border border-red-200 [.dark_&]:border-red-800/60 dark:border-red-800/60 flex items-center justify-center font-bold">
                   <ShieldCheck className="w-5 h-5" />
@@ -5162,9 +5168,9 @@ export const KeuanganView: React.FC<KeuanganViewProps> = ({
             </div>
 
             {/* List Anggota Terverifikasi */}
-            <div className="max-h-96 overflow-y-auto space-y-2.5 pr-1 dark:[color-scheme:dark] [.dark_&]:[color-scheme:dark]">
+            <div className="flex-1 min-h-0 overflow-y-auto space-y-2.5 pr-1 dark:[color-scheme:dark] [.dark_&]:[color-scheme:dark]">
               {filteredVerifikasiTeachers.length === 0 ? (
-                <div className="py-12 text-center flex flex-col items-center justify-center gap-2">
+                <div className="h-full py-12 text-center flex flex-col items-center justify-center gap-2">
                   <div className="w-10 h-10 rounded-xl bg-stone-100 [.dark_&]:bg-stone-800 dark:bg-stone-800 flex items-center justify-center text-stone-400 animate-pulse">
                     <Users className="w-5 h-5" />
                   </div>
@@ -5245,7 +5251,7 @@ export const KeuanganView: React.FC<KeuanganViewProps> = ({
               )}
             </div>
 
-            <div className="pt-3 border-t border-stone-200/80 [.dark_&]:border-stone-800 dark:border-stone-800 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2.5">
+            <div className="pt-3 border-t border-stone-200/80 [.dark_&]:border-stone-800 dark:border-stone-800 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2.5 shrink-0 mt-auto">
               <div className="flex flex-wrap items-center gap-2">
                 <button
                   type="button"
@@ -5635,15 +5641,6 @@ export const KeuanganView: React.FC<KeuanganViewProps> = ({
 
             <div className="flex flex-wrap items-center gap-2">
               <select
-                value={rekapMonth}
-                onChange={(e) => setRekapMonth(e.target.value)}
-                className="px-3 py-2 rounded-xl border text-xs font-bold bg-[#faf8f5] [.dark_&]:bg-stone-800 dark:bg-stone-800 border-stone-200 [.dark_&]:border-stone-700 dark:border-stone-700 text-stone-800 [.dark_&]:text-stone-100 dark:text-stone-100 focus:outline-none focus:ring-2 focus:ring-red-800/20 focus:border-red-700 cursor-pointer"
-              >
-                {MONTH_OPTIONS.filter(m => isPeriodActive(rekapYear, m.id)).map((m) => (
-                  <option key={m.id} value={m.id} className={isDark ? 'bg-stone-800 text-stone-100' : 'bg-white text-stone-800'}>{m.name}</option>
-                ))}
-              </select>
-              <select
                 value={rekapYear}
                 onChange={(e) => {
                   const nextYear = e.target.value;
@@ -5657,6 +5654,15 @@ export const KeuanganView: React.FC<KeuanganViewProps> = ({
               >
                 {YEAR_OPTIONS.map((y) => (
                   <option key={y} value={y} className={isDark ? 'bg-stone-800 text-stone-100' : 'bg-white text-stone-800'}>{y}</option>
+                ))}
+              </select>
+              <select
+                value={rekapMonth}
+                onChange={(e) => setRekapMonth(e.target.value)}
+                className="px-3 py-2 rounded-xl border text-xs font-bold bg-[#faf8f5] [.dark_&]:bg-stone-800 dark:bg-stone-800 border-stone-200 [.dark_&]:border-stone-700 dark:border-stone-700 text-stone-800 [.dark_&]:text-stone-100 dark:text-stone-100 focus:outline-none focus:ring-2 focus:ring-red-800/20 focus:border-red-700 cursor-pointer"
+              >
+                {MONTH_OPTIONS.filter(m => isPeriodActive(rekapYear, m.id)).map((m) => (
+                  <option key={m.id} value={m.id} className={isDark ? 'bg-stone-800 text-stone-100' : 'bg-white text-stone-800'}>{m.name}</option>
                 ))}
               </select>
               <span className="text-xs text-stone-500 [.dark_&]:text-stone-400 dark:text-stone-400 ml-auto">
@@ -5693,27 +5699,31 @@ export const KeuanganView: React.FC<KeuanganViewProps> = ({
                           </span>
                         </button>
 
-                        <button
-                          type="button"
-                          onClick={() => {
-                            const unpaidListText = grp.unpaid.length > 0
-                              ? grp.unpaid.map((t, i) => `${i + 1}. ${t.name}`).join('\n')
-                              : 'Alhamdulillah, semua anggota sudah lunas.';
-                            const msg =
-                              `📊 *REKAP KONTRIBUSI PGRI RANTING GELANG*\n` +
-                              `Sekolah: *${grp.school}*\n` +
-                              `Periode: *${monthLabel} ${rekapYear}*\n` +
-                              `Status: ${grp.paid.length}/${grp.total} Lunas (${pct}%)\n\n` +
-                              `${grp.unpaid.length > 0 ? `*Daftar Belum Lunas (${grp.unpaid.length} orang):*\n${unpaidListText}\n\n` : `${unpaidListText}\n\n`}` +
-                              `Transfer ke: ${orgConfig.bankName} ${orgConfig.bankAccountNumber} a.n. ${orgConfig.bankAccountHolder}\n` +
-                              `_Mohon bantuannya untuk koordinasi Bapak/Ibu di sekolah. Terima kasih._`;
-                            openWhatsAppShare(msg);
-                          }}
-                          className="px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs flex items-center justify-center gap-1.5 cursor-pointer shrink-0 transition-colors"
-                        >
-                          <Share2 className="w-3.5 h-3.5" />
-                          <span>Kirim Rekap WA</span>
-                        </button>
+                        {isAdmin && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              handleActionClick(() => {
+                                const unpaidListText = grp.unpaid.length > 0
+                                  ? grp.unpaid.map((t, i) => `${i + 1}. ${t.name}`).join('\n')
+                                  : 'Alhamdulillah, semua anggota sudah lunas.';
+                                const msg =
+                                  `📊 *REKAP KONTRIBUSI PGRI RANTING GELANG*\n` +
+                                  `Sekolah: *${grp.school}*\n` +
+                                  `Periode: *${monthLabel} ${rekapYear}*\n` +
+                                  `Status: ${grp.paid.length}/${grp.total} Lunas (${pct}%)\n\n` +
+                                  `${grp.unpaid.length > 0 ? `*Daftar Belum Lunas (${grp.unpaid.length} orang):*\n${unpaidListText}\n\n` : `${unpaidListText}\n\n`}` +
+                                  `Transfer ke: ${orgConfig.bankName} ${orgConfig.bankAccountNumber} a.n. ${orgConfig.bankAccountHolder}\n` +
+                                  `_Mohon bantuannya untuk koordinasi Bapak/Ibu di sekolah. Terima kasih._`;
+                                openWhatsAppShare(msg);
+                              });
+                            }}
+                            className="px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs flex items-center justify-center gap-1.5 cursor-pointer shrink-0 transition-colors"
+                          >
+                            <Share2 className="w-3.5 h-3.5" />
+                            <span>Kirim Rekap WA</span>
+                          </button>
+                        )}
                       </div>
                     </div>
                     <div className="h-1.5 w-full rounded-full bg-stone-200/90 [.dark_&]:bg-stone-700/70 dark:bg-stone-700/70 overflow-hidden">

@@ -17,9 +17,12 @@ import {
   UserCheck,
   Award,
   Wallet,
-  TrendingUp
+  TrendingUp,
+  Building2,
+  ShieldCheck
 } from 'lucide-react';
 import { ActiveTab, ActivityEvent, Teacher, Material, CashPayment, AttendanceRecord } from '../../types';
+import { getOrgConfig } from '../../lib/orgConfig';
 
 interface BerandaViewProps {
   onNavigate: (tab: ActiveTab) => void;
@@ -108,16 +111,49 @@ export const BerandaView: React.FC<BerandaViewProps> = ({
     typeof window !== 'undefined' ? (localStorage.getItem('logo-pgri') || localStorage.getItem('logo-kombel')) : null
   );
 
+  const readKepalaSekolahCount = (): number => {
+    try {
+      const schools = getOrgConfig().schools;
+      if (Array.isArray(schools)) {
+        return schools.filter((s) => String(s || '').trim() !== '').length;
+      }
+    } catch {}
+    return 0;
+  };
+
+  const readPengurusCount = (): number => {
+    try {
+      const saved = typeof window !== 'undefined' ? localStorage.getItem('kombel-pengurus') : null;
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) {
+          return parsed.filter((item: any) => {
+            const name = String(item?.name || '').trim();
+            const lower = name.toLowerCase();
+            return name !== '' && lower !== '-' && !lower.startsWith('semua ');
+          }).length;
+        }
+      }
+    } catch {}
+    // Default jumlah Pengurus dari PengaturanView (DEFAULT_PENGURUS tanpa 'Semua Kepala Sekolah')
+    return 9;
+  };
+
+  const [kepalaSekolahCount, setKepalaSekolahCount] = useState<number>(() => readKepalaSekolahCount());
+  const [pengurusCount, setPengurusCount] = useState<number>(() => readPengurusCount());
+
   useEffect(() => {
-    const syncLogoKombel = () => {
+    const syncLogoAndOrgCounts = () => {
       setLogoKombel(localStorage.getItem('logo-pgri') || localStorage.getItem('logo-kombel'));
+      setKepalaSekolahCount(readKepalaSekolahCount());
+      setPengurusCount(readPengurusCount());
     };
-    syncLogoKombel();
-    window.addEventListener('storage', syncLogoKombel);
-    window.addEventListener('kombel-settings-updated', syncLogoKombel);
+    syncLogoAndOrgCounts();
+    window.addEventListener('storage', syncLogoAndOrgCounts);
+    window.addEventListener('kombel-settings-updated', syncLogoAndOrgCounts);
     return () => {
-      window.removeEventListener('storage', syncLogoKombel);
-      window.removeEventListener('kombel-settings-updated', syncLogoKombel);
+      window.removeEventListener('storage', syncLogoAndOrgCounts);
+      window.removeEventListener('kombel-settings-updated', syncLogoAndOrgCounts);
     };
   }, []);
   
@@ -141,6 +177,45 @@ export const BerandaView: React.FC<BerandaViewProps> = ({
     }
   });
 
+  const [selectedMembersByEvent, setSelectedMembersByEvent] = useState<Record<string, string[]>>(() => {
+    try {
+      const saved = localStorage.getItem('kombel-event-selected-members');
+      const parsed: Record<string, string[]> = saved ? JSON.parse(saved) : {};
+      if (events && events.length > 0) {
+        events.forEach(evt => {
+          if ((evt as any).selectedMemberIds && Array.isArray((evt as any).selectedMemberIds)) {
+            if (!parsed[evt.id]) {
+              parsed[evt.id] = (evt as any).selectedMemberIds;
+            }
+          }
+        });
+      }
+      return parsed;
+    } catch {
+      return {};
+    }
+  });
+
+  useEffect(() => {
+    if (events && events.length > 0) {
+      setSelectedMembersByEvent(prev => {
+        let changed = false;
+        const next = { ...prev };
+        events.forEach(evt => {
+          if ((evt as any).selectedMemberIds && Array.isArray((evt as any).selectedMemberIds)) {
+            const newIds = (evt as any).selectedMemberIds;
+            const currentIds = next[evt.id];
+            if (!currentIds || JSON.stringify(currentIds) !== JSON.stringify(newIds)) {
+              next[evt.id] = newIds;
+              changed = true;
+            }
+          }
+        });
+        return changed ? next : prev;
+      });
+    }
+  }, [events]);
+
   // Sinkronisasi Data via event storage (tanpa JSON.parse berulang tiap detik) & live clock
   useEffect(() => {
     const syncLocalData = () => {
@@ -150,6 +225,9 @@ export const BerandaView: React.FC<BerandaViewProps> = ({
 
         const savedCash = localStorage.getItem('kombel-cashPayments') || localStorage.getItem('kombel-cash-payments');
         if (savedCash) setLocalCashPayments(JSON.parse(savedCash));
+
+        const savedSelectedMembers = localStorage.getItem('kombel-event-selected-members');
+        if (savedSelectedMembers) setSelectedMembersByEvent(JSON.parse(savedSelectedMembers));
       } catch (e) {
         console.warn("Gagal melakukan sync storage", e);
       }
@@ -720,12 +798,190 @@ export const BerandaView: React.FC<BerandaViewProps> = ({
   const paidTeachersCount = paidTeachers.length;
   const cashPaidPercentage = totalCashMembersCount > 0 ? Math.round((paidTeachersCount / totalCashMembersCount) * 100) : 0;
 
+  // Helper kandidat peserta (Profil Kombel: Pembina, Penanggung Jawab, Pengurus + Daftar Anggota)
+  const getAllCandidateMembers = useMemo(() => {
+    let pembinaData = {
+      name: 'Hanifatul Susmiyah, S.Pd',
+      nip: '197306022002122005',
+      school: 'Pengawas Bina Kecamatan Sumberbaru',
+      role: 'Pengawas Bina',
+      phone: '6285859083645'
+    };
+    try {
+      const saved = localStorage.getItem('kombel-pembina');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed && parsed.name) {
+          pembinaData = {
+            name: parsed.name,
+            nip: parsed.nip || pembinaData.nip,
+            school: parsed.instansi || parsed.school || pembinaData.school,
+            role: parsed.role || pembinaData.role,
+            phone: parsed.wa || parsed.phone || pembinaData.phone
+          };
+        }
+      }
+    } catch {}
+
+    let pjData = [
+      {
+        name: 'Ghufron Atok Urrohman, S.Pd',
+        nip: '197805192014121003',
+        school: 'Ketua Kelompok Kerja Kepala Sekolah',
+        role: 'Ketua K3S',
+        phone: '6285859342500'
+      },
+      {
+        name: 'Christian Dri Firman Widodo, S.Pd',
+        nip: '198012262014121002',
+        school: 'Penanggungjawab PGRI Cabang Sumberbaru',
+        role: 'Penanggungjawab',
+        phone: '6281217910263'
+      }
+    ];
+    try {
+      const saved = localStorage.getItem('kombel-penanggungjawab');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          pjData = parsed.map((p: any) => ({
+            name: p.name || '',
+            nip: p.nip || '-',
+            school: p.instansi || p.school || '-',
+            role: p.role || 'Penanggung Jawab',
+            phone: p.wa || p.phone || '-'
+          }));
+        }
+      }
+    } catch {}
+
+    let pengurusData = [
+      {
+        name: 'Risky Firmansyah, S.Pd',
+        nip: '199202152022211002',
+        school: 'SDN Kaliglagah 01',
+        role: 'Ketua PGRI Ranting Gelang',
+        phone: '6282245942601'
+      },
+      {
+        name: 'Adi Saiful Rizal, S.Pd',
+        nip: '199401162025211089',
+        school: 'SDN Gelang 03',
+        role: 'Sekretaris',
+        phone: '6282292232649'
+      },
+      {
+        name: 'Devy Eka Safitri, S.Pd',
+        nip: '199703232025212059',
+        school: 'SDN Sumberagung 03',
+        role: 'Bendahara',
+        phone: '6282247613463'
+      },
+      {
+        name: 'Ninik Dwi Sunanti, S.Pd',
+        nip: '199005122019032023',
+        school: 'SDN Rowotengah 04',
+        role: 'Koord. Bid. Perencanaan & Pelaksanaan Program',
+        phone: '6288219851338'
+      },
+      {
+        name: 'Dewi Utami, S.Pd',
+        nip: '198501072022212002',
+        school: 'SDN Jatiroto 03',
+        role: 'Koord. Bid. Pengembangan Organisasi, Sarana & Prasarana',
+        phone: '6285856483220'
+      },
+      {
+        name: 'Siska Wahyu Purwati, S.Pd',
+        nip: '199110162025212094',
+        school: 'SDN Pringgowirawan 01',
+        role: 'Koord. Bid. Humas & Kerjasama',
+        phone: '6281355629322'
+      }
+    ];
+    try {
+      const saved = localStorage.getItem('kombel-pengurus');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          pengurusData = parsed.map((p: any) => ({
+            name: p.name || '',
+            nip: p.nip || '-',
+            school: p.instansi || p.school || '-',
+            role: p.role || 'Pengurus PGRI Ranting',
+            phone: p.wa || p.phone || '-'
+          }));
+        }
+      }
+    } catch {}
+
+    const rawProfilKombel = [pembinaData, ...pjData, ...pengurusData];
+    const seenNames = new Set<string>();
+    const profilMembers: Teacher[] = [];
+
+    rawProfilKombel.forEach((p, idx) => {
+      const cleanName = (p.name || '').trim();
+      const lower = cleanName.toLowerCase();
+      if (!cleanName || seenNames.has(lower)) return;
+      seenNames.add(lower);
+
+      const matchInTeachers = (effectiveTeachers || []).find(t =>
+        (t.name && t.name.trim().toLowerCase() === lower) ||
+        (p.nip && p.nip !== '-' && t.nip && String(t.nip).trim() === String(p.nip).trim())
+      );
+
+      profilMembers.push({
+        id: matchInTeachers ? String(matchInTeachers.id) : `profil-kombel-${idx}-${p.nip && p.nip !== '-' ? p.nip : cleanName.replace(/\s+/g, '-').toLowerCase()}`,
+        name: cleanName,
+        school: String(matchInTeachers ? matchInTeachers.school : (p.school || '-')).toUpperCase(),
+        nip: matchInTeachers ? (matchInTeachers.nip || p.nip) : (p.nip || '-'),
+        role: p.role || (matchInTeachers ? matchInTeachers.role : 'Pengurus PGRI'),
+        phone: matchInTeachers ? (matchInTeachers.phone || p.phone) : (p.phone || '-'),
+        email: matchInTeachers ? (matchInTeachers.email || '') : '',
+        avatar: matchInTeachers ? (matchInTeachers.avatar || '') : ''
+      });
+    });
+
+    const regularMembers: Teacher[] = [];
+    (effectiveTeachers || []).forEach(t => {
+      const lower = (t.name || '').trim().toLowerCase();
+      if (!seenNames.has(lower)) {
+        regularMembers.push(t);
+      }
+    });
+
+    return [...profilMembers, ...regularMembers];
+  }, [effectiveTeachers]);
+
   // Event terpilih untuk kehadiran
   const currentSelectedAttendanceEvent = useMemo(() => {
     return sortedEvents.find(e => e.id === selectedAttendanceEventId) || sortedEvents[0] || null;
   }, [sortedEvents, selectedAttendanceEventId]);
 
-  // Data Kehadiran Anggota
+  // Daftar peserta terceklist pada event terpilih (sinkron dengan JadwalView)
+  const selectedEventTargetMembers = useMemo(() => {
+    if (!currentSelectedAttendanceEvent) return getAllCandidateMembers;
+    let selectedIds: string[] | null = null;
+    if ((currentSelectedAttendanceEvent as any).selectedMemberIds && Array.isArray((currentSelectedAttendanceEvent as any).selectedMemberIds)) {
+      selectedIds = (currentSelectedAttendanceEvent as any).selectedMemberIds;
+    } else if (selectedMembersByEvent[currentSelectedAttendanceEvent.id] !== undefined) {
+      selectedIds = selectedMembersByEvent[currentSelectedAttendanceEvent.id];
+    }
+
+    if (selectedIds === null) {
+      return getAllCandidateMembers;
+    }
+
+    const idSet = new Set(selectedIds.map(id => String(id).trim()));
+    return getAllCandidateMembers.filter(t =>
+      idSet.has(String(t.id).trim()) ||
+      (t.name && idSet.has(t.name.trim().toLowerCase()))
+    );
+  }, [currentSelectedAttendanceEvent, getAllCandidateMembers, selectedMembersByEvent]);
+
+  const selectedEventTargetCount = selectedEventTargetMembers.length;
+
+  // Data Kehadiran Peserta Terceklist (Sinkron 100% dengan JadwalView)
   let hadirCount = 0;
   let sakitCount = 0;
   let izinCount = 0;
@@ -734,22 +990,65 @@ export const BerandaView: React.FC<BerandaViewProps> = ({
   let tidakHadirPercentage = 0;
 
   if (currentSelectedAttendanceEvent) {
-    const latestEventRecords = effectiveAttendanceList.filter(a => 
-      a.eventId === currentSelectedAttendanceEvent.id || 
-      (a.eventTitle && currentSelectedAttendanceEvent.title && a.eventTitle.trim().toLowerCase() === currentSelectedAttendanceEvent.title.trim().toLowerCase())
+    const rawRecords = effectiveAttendanceList.filter(a =>
+      (a.eventId && String(a.eventId).trim() === String(currentSelectedAttendanceEvent.id).trim()) ||
+      (!a.eventId && a.eventTitle && currentSelectedAttendanceEvent.title && a.eventTitle.trim().toLowerCase() === currentSelectedAttendanceEvent.title.trim().toLowerCase())
     );
 
-    hadirCount = latestEventRecords.filter(a => a.status === 'Hadir' || a.status === 'Verifikasi').length;
-    sakitCount = latestEventRecords.filter(a => a.status === 'Sakit').length;
-    izinCount = latestEventRecords.filter(a => a.status === 'Izin').length;
-    const explicitAlphaCount = latestEventRecords.filter(a => a.status === 'Alpha').length;
+    // Deduplikasi per peserta: 1 peserta hanya dihitung 1 kali per kegiatan
+    const teacherMap = new Map<string, AttendanceRecord>();
+    for (const rec of rawRecords) {
+      const key = rec.teacherId ? String(rec.teacherId).trim() : (rec.teacherName || '').trim().toLowerCase();
+      if (!key) continue;
 
-    const totalTeachersCount = activeTeachersList.length > 0 ? activeTeachersList.length : (effectiveTeachers.length || 7);
-    
-    alphaCount = Math.max(0, totalTeachersCount - (hadirCount + sakitCount + izinCount)) + explicitAlphaCount;
+      if (!teacherMap.has(key)) {
+        teacherMap.set(key, rec);
+      } else {
+        const existing = teacherMap.get(key)!;
+        const priorityOrder: Record<string, number> = {
+          'Hadir': 5,
+          'Sakit': 4,
+          'Izin': 3,
+          'Verifikasi': 2,
+          'Tugas Luar': 2,
+          'Alpha': 1
+        };
+        if ((priorityOrder[rec.status] || 0) > (priorityOrder[existing.status] || 0)) {
+          teacherMap.set(key, rec);
+        }
+      }
+    }
 
-    attendancePercentage = totalTeachersCount > 0 ? Math.round((hadirCount / totalTeachersCount) * 100) : 0;
-    tidakHadirPercentage = totalTeachersCount > 0 ? 100 - attendancePercentage : 0;
+    const eventMemberKeys = new Set([
+      ...selectedEventTargetMembers.map(t => String(t.id).trim()),
+      ...selectedEventTargetMembers.map(t => (t.name || '').trim().toLowerCase())
+    ]);
+
+    const records = Array.from(teacherMap.values()).filter(r =>
+      (r.teacherId && eventMemberKeys.has(String(r.teacherId).trim())) ||
+      (r.teacherName && eventMemberKeys.has(r.teacherName.trim().toLowerCase()))
+    );
+
+    hadirCount = records.filter(a => a.status === 'Hadir').length;
+    sakitCount = records.filter(a => a.status === 'Sakit').length;
+    izinCount = records.filter(a => a.status === 'Izin').length;
+
+    const submittedTeacherKeys = new Set<string>();
+    records.forEach(r => {
+      if (r.teacherId) submittedTeacherKeys.add(String(r.teacherId).trim());
+      if (r.teacherName) submittedTeacherKeys.add(r.teacherName.trim().toLowerCase());
+    });
+
+    const implicitAlphasCount = selectedEventTargetMembers.filter(t =>
+      !submittedTeacherKeys.has(String(t.id).trim()) &&
+      !submittedTeacherKeys.has((t.name || '').trim().toLowerCase())
+    ).length;
+    const explicitAlphasCount = records.filter(r => r.status === 'Alpha').length;
+
+    alphaCount = implicitAlphasCount + explicitAlphasCount;
+
+    attendancePercentage = selectedEventTargetCount > 0 ? Math.round((hadirCount / selectedEventTargetCount) * 100) : 0;
+    tidakHadirPercentage = selectedEventTargetCount > 0 ? 100 - attendancePercentage : 0;
   }
 
   // Ringkasan Eksekutif PGRI Ranting: Purna Tugas & Agenda Terdekat
@@ -766,6 +1065,8 @@ export const BerandaView: React.FC<BerandaViewProps> = ({
   const animatedTotalEvents = useCountUp(totalEventsCount, 550, isEntryReady);
   const animatedMaleCount = useCountUp(maleCount, 550, isEntryReady);
   const animatedFemaleCount = useCountUp(femaleCount, 550, isEntryReady);
+  const animatedKepalaSekolahCount = useCountUp(kepalaSekolahCount, 550, isEntryReady);
+  const animatedPengurusCount = useCountUp(pengurusCount, 550, isEntryReady);
   const animatedCashPercentage = useCountUp(cashPaidPercentage, 550, isEntryReady);
   const animatedRetiringCount = useCountUp(retiringSoonTeachers.length, 550, isEntryReady);
   const animatedAttendancePct = useCountUp(attendancePercentage, 550, isEntryReady);
@@ -1081,40 +1382,91 @@ export const BerandaView: React.FC<BerandaViewProps> = ({
       </div>
 
       {/* 2.2 Ringkasan Eksekutif PGRI Ranting */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 stagger-2">
-        <div
-          onClick={() => onNavigate('keuangan')}
-          className={`${cardBgClass} relative overflow-hidden rounded-2xl p-4 sm:p-5 border flex items-center justify-between gap-3 hover:-translate-y-0.5 ${isLight ? 'hover:border-red-300' : 'hover:border-amber-500/40'} transition-all duration-200 cursor-pointer group`}
-        >
-          <Wallet className={`absolute -right-3 -bottom-3 w-20 h-20 pointer-events-none transition-transform duration-300 group-hover:scale-110 ${isLight ? 'text-emerald-900/[0.04]' : 'text-emerald-400/[0.06]'}`} />
-          <div className="flex items-center gap-3 min-w-0 relative z-10">
-            <div className={`w-11 h-11 rounded-xl flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform duration-200 ${isLight ? 'bg-emerald-50 text-emerald-700 border border-emerald-200/80' : 'bg-emerald-950/60 text-emerald-400 border border-emerald-800/50'}`}>
-              <Wallet className="w-5 h-5" />
-            </div>
-            <div className="min-w-0">
-              <p className={`text-[11px] font-bold uppercase tracking-wider ${isLight ? 'text-stone-500' : 'text-stone-400'}`}>Pelunasan Kontribusi</p>
-              <p className={`font-display tabular-nums text-xl font-black ${isLight ? 'text-stone-900' : 'text-white'}`}>{animatedCashPercentage}% <span className="text-xs font-medium text-stone-400">({paidTeachersCount}/{totalCashMembersCount})</span></p>
-            </div>
-          </div>
-          <TrendingUp className="w-5 h-5 text-emerald-500 shrink-0 relative z-10" />
-        </div>
-
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-5 stagger-2">
+        {/* Card 5 (dibawah Anggota Aktif): Kepala Sekolah */}
         <div
           onClick={() => onNavigate('anggota')}
-          className={`${cardBgClass} relative overflow-hidden rounded-2xl p-4 sm:p-5 border flex items-center justify-between gap-3 hover:-translate-y-0.5 ${isLight ? 'hover:border-red-300' : 'hover:border-amber-500/40'} transition-all duration-200 cursor-pointer group`}
+          className={`${cardBgClass} relative overflow-hidden rounded-2xl p-5 border flex items-center gap-4 hover:-translate-y-0.5 hover:shadow-md ${isLight ? 'hover:border-red-300' : 'hover:border-amber-500/40'} transition-all duration-200 cursor-pointer group`}
         >
-          <Award className={`absolute -right-3 -bottom-3 w-20 h-20 pointer-events-none transition-transform duration-300 group-hover:scale-110 ${isLight ? 'text-amber-900/[0.04]' : 'text-amber-400/[0.06]'}`} />
-          <div className="flex items-center gap-3 min-w-0 relative z-10">
-            <div className={`w-11 h-11 rounded-xl flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform duration-200 ${isLight ? 'bg-amber-50 text-amber-700 border border-amber-200/80' : 'bg-amber-950/60 text-amber-400 border border-amber-800/50'}`}>
-              <Award className="w-5 h-5" />
+          <div className="absolute top-0 inset-x-0 h-[3px] bg-gradient-to-r from-blue-800 to-blue-600" />
+          <div className={`pointer-events-none absolute inset-0 -translate-x-full group-hover:translate-x-full transition-transform duration-700 ease-out bg-gradient-to-r from-transparent ${isLight ? 'via-blue-500/[0.06]' : 'via-white/[0.05]'} to-transparent`} />
+          <Building2 className={`absolute -right-3 -bottom-3 w-20 h-20 pointer-events-none transition-transform duration-300 group-hover:scale-110 ${isLight ? 'text-blue-900/[0.04]' : 'text-blue-400/[0.06]'}`} />
+          <div className="w-12 h-12 sm:w-14 sm:h-14 rounded-xl bg-gradient-to-tr from-blue-800 to-blue-600 text-white flex items-center justify-center shadow-sm group-hover:scale-105 transition-transform duration-200 shrink-0 relative z-10">
+            <Building2 className="w-6 h-6 sm:w-7 sm:h-7" />
+          </div>
+          <div className="relative z-10 min-w-0">
+            <p className={`text-xs font-semibold truncate ${isLight ? 'text-stone-500' : 'text-stone-400'}`}>Kepala Sekolah</p>
+            <p className={`font-display font-mono tabular-nums text-2xl sm:text-3xl font-extrabold tracking-tight flex items-baseline gap-1 ${isLight ? 'text-stone-900' : 'text-stone-100'}`}>
+              {animatedKepalaSekolahCount} <span className="text-[11px] text-stone-400 font-medium font-sans">Orang</span>
+            </p>
+            <p className="text-[10px] font-medium text-stone-400 mt-0.5 truncate">Sekolah Binaan</p>
+          </div>
+        </div>
+
+        {/* Card 6 (dibawah Jumlah): Pengurus */}
+        <div
+          onClick={() => onNavigate('profil')}
+          className={`${cardBgClass} relative overflow-hidden rounded-2xl p-5 border flex items-center gap-4 hover:-translate-y-0.5 hover:shadow-md ${isLight ? 'hover:border-red-300' : 'hover:border-amber-500/40'} transition-all duration-200 cursor-pointer group`}
+        >
+          <div className="absolute top-0 inset-x-0 h-[3px] bg-gradient-to-r from-violet-700 to-violet-500" />
+          <div className={`pointer-events-none absolute inset-0 -translate-x-full group-hover:translate-x-full transition-transform duration-700 ease-out bg-gradient-to-r from-transparent ${isLight ? 'via-violet-500/[0.06]' : 'via-white/[0.05]'} to-transparent`} />
+          <ShieldCheck className={`absolute -right-3 -bottom-3 w-20 h-20 pointer-events-none transition-transform duration-300 group-hover:scale-110 ${isLight ? 'text-violet-900/[0.04]' : 'text-violet-400/[0.06]'}`} />
+          <div className="w-12 h-12 sm:w-14 sm:h-14 rounded-xl bg-gradient-to-tr from-violet-800 to-violet-600 text-white flex items-center justify-center shadow-sm group-hover:scale-105 transition-transform duration-200 shrink-0 relative z-10">
+            <ShieldCheck className="w-6 h-6 sm:w-7 sm:h-7" />
+          </div>
+          <div className="relative z-10 min-w-0">
+            <p className={`text-xs font-semibold truncate ${isLight ? 'text-stone-500' : 'text-stone-400'}`}>Pengurus</p>
+            <p className={`font-display font-mono tabular-nums text-2xl sm:text-3xl font-extrabold tracking-tight flex items-baseline gap-1 ${isLight ? 'text-stone-900' : 'text-stone-100'}`}>
+              {animatedPengurusCount} <span className="text-[11px] text-stone-400 font-medium font-sans">Orang</span>
+            </p>
+            <p className="text-[10px] font-medium text-stone-400 mt-0.5 truncate">Struktur Pengurus</p>
+          </div>
+        </div>
+
+        {/* Card 7 (dibawah Laki - laki): Pelunasan Kontribusi */}
+        <div
+          onClick={() => onNavigate('keuangan')}
+          className={`${cardBgClass} relative overflow-hidden rounded-2xl p-5 border flex items-center justify-between gap-2 hover:-translate-y-0.5 hover:shadow-md ${isLight ? 'hover:border-red-300' : 'hover:border-amber-500/40'} transition-all duration-200 cursor-pointer group`}
+        >
+          <div className="absolute top-0 inset-x-0 h-[3px] bg-gradient-to-r from-emerald-700 to-emerald-500" />
+          <div className={`pointer-events-none absolute inset-0 -translate-x-full group-hover:translate-x-full transition-transform duration-700 ease-out bg-gradient-to-r from-transparent ${isLight ? 'via-emerald-500/[0.06]' : 'via-white/[0.05]'} to-transparent`} />
+          <Wallet className={`absolute -right-3 -bottom-3 w-20 h-20 pointer-events-none transition-transform duration-300 group-hover:scale-110 ${isLight ? 'text-emerald-900/[0.04]' : 'text-emerald-400/[0.06]'}`} />
+          <div className="flex items-center gap-3 sm:gap-4 min-w-0 relative z-10">
+            <div className={`w-12 h-12 sm:w-14 sm:h-14 rounded-xl flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform duration-200 ${isLight ? 'bg-emerald-50 text-emerald-700 border border-emerald-200/80' : 'bg-emerald-950/60 text-emerald-400 border border-emerald-800/50'}`}>
+              <Wallet className="w-6 h-6 sm:w-7 sm:h-7" />
             </div>
             <div className="min-w-0">
-              <p className={`text-[11px] font-bold uppercase tracking-wider ${isLight ? 'text-stone-500' : 'text-stone-400'}`}>Purna Tugas ({currentYearNum}-{currentYearNum + 1})</p>
-              <p className={`font-display tabular-nums text-xl font-black ${isLight ? 'text-stone-900' : 'text-white'}`}>
-                {animatedRetiringCount} <span className="text-xs font-medium text-stone-400">Anggota</span>
+              <p className={`text-xs font-semibold truncate ${isLight ? 'text-stone-500' : 'text-stone-400'}`}>Pelunasan Kontribusi</p>
+              <p className={`font-display font-mono tabular-nums text-2xl sm:text-3xl font-extrabold tracking-tight flex items-baseline gap-1 ${isLight ? 'text-stone-900' : 'text-stone-100'}`}>
+                {animatedCashPercentage}% <span className="text-[11px] font-medium text-stone-400 font-sans">({paidTeachersCount}/{totalCashMembersCount})</span>
               </p>
-              {retiringSoonTeachers.length > 0 && (
-                <p className="text-[10px] text-amber-500 font-semibold truncate">{retiringSoonTeachers.map(t => t.name).join(', ')}</p>
+              <p className="text-[10px] font-medium text-stone-400 mt-0.5 truncate">Status Kas Ranting</p>
+            </div>
+          </div>
+          <TrendingUp className="w-4 h-4 sm:w-5 sm:h-5 text-emerald-500 shrink-0 relative z-10 hidden sm:block" />
+        </div>
+
+        {/* Card 8 (dibawah Perempuan): Purna Tugas */}
+        <div
+          onClick={() => onNavigate('anggota')}
+          className={`${cardBgClass} relative overflow-hidden rounded-2xl p-5 border flex items-center gap-4 hover:-translate-y-0.5 hover:shadow-md ${isLight ? 'hover:border-red-300' : 'hover:border-amber-500/40'} transition-all duration-200 cursor-pointer group`}
+        >
+          <div className="absolute top-0 inset-x-0 h-[3px] bg-gradient-to-r from-amber-600 to-amber-500" />
+          <div className={`pointer-events-none absolute inset-0 -translate-x-full group-hover:translate-x-full transition-transform duration-700 ease-out bg-gradient-to-r from-transparent ${isLight ? 'via-amber-500/[0.06]' : 'via-white/[0.05]'} to-transparent`} />
+          <Award className={`absolute -right-3 -bottom-3 w-20 h-20 pointer-events-none transition-transform duration-300 group-hover:scale-110 ${isLight ? 'text-amber-900/[0.04]' : 'text-amber-400/[0.06]'}`} />
+          <div className="flex items-center gap-3 sm:gap-4 min-w-0 relative z-10">
+            <div className={`w-12 h-12 sm:w-14 sm:h-14 rounded-xl flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform duration-200 ${isLight ? 'bg-amber-50 text-amber-700 border border-amber-200/80' : 'bg-amber-950/60 text-amber-400 border border-amber-800/50'}`}>
+              <Award className="w-6 h-6 sm:w-7 sm:h-7" />
+            </div>
+            <div className="min-w-0">
+              <p className={`text-xs font-semibold truncate ${isLight ? 'text-stone-500' : 'text-stone-400'}`}>Purna Tugas ({currentYearNum}-{currentYearNum + 1})</p>
+              <p className={`font-display font-mono tabular-nums text-2xl sm:text-3xl font-extrabold tracking-tight flex items-baseline gap-1 ${isLight ? 'text-stone-900' : 'text-stone-100'}`}>
+                {animatedRetiringCount} <span className="text-[11px] font-medium text-stone-400 font-sans">Anggota</span>
+              </p>
+              {retiringSoonTeachers.length > 0 ? (
+                <p className="text-[10px] text-amber-500 font-semibold truncate mt-0.5">{retiringSoonTeachers.map(t => t.name).join(', ')}</p>
+              ) : (
+                <p className="text-[10px] font-medium text-stone-400 mt-0.5 truncate">Estimasi Pensiun</p>
               )}
             </div>
           </div>
@@ -1129,8 +1481,8 @@ export const BerandaView: React.FC<BerandaViewProps> = ({
           <div className="flex items-center justify-between gap-2 mb-2">
             <div className="flex items-center gap-2 shrink-0">
               <UserCheck className={`w-4 h-4 ${isLight ? 'text-red-800' : 'text-amber-400'}`} />
-              <h3 className={`text-xs font-extrabold uppercase tracking-wider ${isLight ? 'text-stone-900' : 'text-stone-100'}`}>
-                KEHADIRAN
+              <h3 className={`text-base font-extrabold ${isLight ? 'text-stone-900' : 'text-stone-100'}`}>
+                Kehadiran
               </h3>
             </div>
             <div className="flex items-center gap-2">
@@ -1171,7 +1523,7 @@ export const BerandaView: React.FC<BerandaViewProps> = ({
               <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
                 <span className={`font-display tabular-nums text-2xl sm:text-3xl font-black ${isLight ? 'text-stone-900' : 'text-white'} leading-none`}>{animatedAttendancePct}%</span>
                 <span className={`text-[10px] sm:text-xs font-extrabold uppercase tracking-widest mt-1 ${isLight ? 'text-emerald-700' : 'text-emerald-400'}`}>Hadir</span>
-                <span className="text-[10px] font-medium text-stone-400 mt-0.5">dari {activeTeachersCount} Anggota</span>
+                <span className="text-[10px] font-medium text-stone-400 mt-0.5">dari {selectedEventTargetCount} Peserta</span>
               </div>
             </div>
 
@@ -1183,7 +1535,7 @@ export const BerandaView: React.FC<BerandaViewProps> = ({
                   <span className={`text-[10px] font-extrabold uppercase tracking-wider ${isLight ? 'text-emerald-800' : 'text-emerald-300'}`}>Hadir</span>
                 </div>
                 <p className={`font-display tabular-nums text-xl font-black ${isLight ? 'text-emerald-900' : 'text-white'}`}>{hadirCount}</p>
-                <p className="text-[10px] text-stone-400 font-medium">Anggota</p>
+                <p className="text-[10px] text-stone-400 font-medium">Peserta</p>
               </div>
 
               <div className={`p-3 rounded-xl border ${isLight ? 'bg-amber-50/70 border-amber-200/80' : 'bg-amber-950/40 border-amber-800/50'}`}>
@@ -1192,7 +1544,7 @@ export const BerandaView: React.FC<BerandaViewProps> = ({
                   <span className={`text-[10px] font-extrabold uppercase tracking-wider ${isLight ? 'text-amber-800' : 'text-amber-300'}`}>Sakit</span>
                 </div>
                 <p className={`font-display tabular-nums text-xl font-black ${isLight ? 'text-amber-900' : 'text-white'}`}>{sakitCount}</p>
-                <p className="text-[10px] text-stone-400 font-medium">Anggota</p>
+                <p className="text-[10px] text-stone-400 font-medium">Peserta</p>
               </div>
 
               <div className={`p-3 rounded-xl border ${isLight ? 'bg-blue-50/70 border-blue-200/80' : 'bg-blue-950/40 border-blue-800/50'}`}>
@@ -1201,7 +1553,7 @@ export const BerandaView: React.FC<BerandaViewProps> = ({
                   <span className={`text-[10px] font-extrabold uppercase tracking-wider ${isLight ? 'text-blue-800' : 'text-blue-300'}`}>Izin</span>
                 </div>
                 <p className={`font-display tabular-nums text-xl font-black ${isLight ? 'text-blue-900' : 'text-white'}`}>{izinCount}</p>
-                <p className="text-[10px] text-stone-400 font-medium">Anggota</p>
+                <p className="text-[10px] text-stone-400 font-medium">Peserta</p>
               </div>
 
               <div className={`p-3 rounded-xl border ${isLight ? 'bg-red-50/70 border-red-200/80' : 'bg-red-950/40 border-red-800/50'}`}>
@@ -1424,7 +1776,7 @@ export const BerandaView: React.FC<BerandaViewProps> = ({
                       }
                     }}
                     aria-label="Filter Tahun Kontribusi"
-                    className={`px-2.5 py-1.5 rounded-xl border text-[11px] font-bold focus:outline-none focus:ring-2 focus:ring-red-800/20 focus:border-red-700 transition-all cursor-pointer ${
+                    className={`pl-3 pr-7 py-1.5 rounded-xl border text-[11px] font-bold focus:outline-none focus:ring-2 focus:ring-red-800/20 focus:border-red-700 transition-all cursor-pointer ${
                       isLight
                         ? 'bg-[#faf8f5] border-stone-200 text-stone-800'
                         : 'bg-stone-800 border-stone-700 text-stone-200'
@@ -1442,7 +1794,7 @@ export const BerandaView: React.FC<BerandaViewProps> = ({
                     value={selectedCashMonth}
                     onChange={(e) => setSelectedCashMonth(e.target.value)}
                     aria-label="Filter Bulan Kontribusi"
-                    className={`px-2.5 py-1.5 rounded-xl border text-[11px] font-bold focus:outline-none focus:ring-2 focus:ring-red-800/20 focus:border-red-700 transition-all cursor-pointer ${
+                    className={`pl-3 pr-7 py-1.5 rounded-xl border text-[11px] font-bold focus:outline-none focus:ring-2 focus:ring-red-800/20 focus:border-red-700 transition-all cursor-pointer ${
                       isLight
                         ? 'bg-[#faf8f5] border-stone-200 text-stone-800'
                         : 'bg-stone-800 border-stone-700 text-stone-200'

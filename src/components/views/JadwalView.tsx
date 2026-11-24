@@ -1188,7 +1188,7 @@ export const JadwalView: React.FC<JadwalViewProps> = ({
   // Form Fields for Absensi
   const [selectedTeacherId, setSelectedTeacherId] = useState<string>('');
   const [schoolName, setSchoolName] = useState<string>(currentUser.school || '');
-  const [attendanceStatus, setAttendanceStatus] = useState<'Hadir' | 'Sakit' | 'Izin' | 'Tugas Luar'>('Izin');
+  const [attendanceStatus, setAttendanceStatus] = useState<'Hadir' | 'Sakit' | 'Izin' | 'Tugas Luar' | ''>('');
   const [notes, setNotes] = useState<string>('');
   const [confirmHadirSemua, setConfirmHadirSemua] = useState<boolean>(false);
 
@@ -1478,22 +1478,28 @@ export const JadwalView: React.FC<JadwalViewProps> = ({
     };
   }, [showScannerModal, cameraRetryCount, facingMode]);
 
-  const handleOpenAbsensi = (evt: ActivityEvent) => {
-    const eventStart = getEventStartDateTime(evt);
-    if (!isAdmin && eventStart && currentTime.getTime() < eventStart.getTime()) {
-      setExpiredEventAlert({
-        title: "Absensi Belum Dimulai",
-        message: "Pengisian absensi hanya dapat dilakukan setelah jam kegiatan dimulai.",
-        eventTitle: evt.title
-      });
-      return;
+  // Helper pengecekan apakah masa pengisian absensi sudah berakhir (untuk akses guru)
+  const isAbsensiClosedForGuru = (evt: ActivityEvent): boolean => {
+    if (isAdmin) return false;
+    const currentDeadline = (eventDeadlines[evt.id] && eventDeadlines[evt.id].trim() !== '')
+      ? eventDeadlines[evt.id]
+      : formatToDDMMYYYY(evt.uploadDeadline || '');
+
+    // Jika admin mengisi Batas Waktu Absensi secara manual, gunakan tanggal tersebut
+    if (currentDeadline && currentDeadline.trim() !== '') {
+      const deadlineEnd = parseDeadlineDate(currentDeadline);
+      if (deadlineEnd) {
+        return currentTime.getTime() > deadlineEnd.getTime();
+      }
     }
 
-    const currentDeadline = (eventDeadlines[evt.id] && eventDeadlines[evt.id].trim() !== '') ? eventDeadlines[evt.id] : formatToDDMMYYYY(evt.uploadDeadline || '');
-    const countdown = getCountdownText(currentDeadline);
-    const deadlineEnd = parseDeadlineDate(currentDeadline) || getEventEndDateTime(evt);
+    // Jika Batas Waktu Absensi kosong, otomatis aktif sejak dibuat hingga jam selesai kegiatan
+    const eventEnd = getEventEndDateTime(evt);
+    return Boolean(eventEnd && currentTime.getTime() > eventEnd.getTime());
+  };
 
-    if (!isAdmin && deadlineEnd && (countdown === '00.00.00' || currentTime.getTime() > deadlineEnd.getTime())) {
+  const handleOpenAbsensi = (evt: ActivityEvent) => {
+    if (isAbsensiClosedForGuru(evt)) {
       setExpiredEventAlert({
         title: "Absensi Ditutup",
         message: "Batas waktu pengisian absensi untuk kegiatan ini telah berakhir.",
@@ -1503,7 +1509,8 @@ export const JadwalView: React.FC<JadwalViewProps> = ({
     }
 
     setSelectedEvent(evt);
-    setAttendanceStatus(isAdmin ? 'Hadir' : 'Izin');
+    setAttendanceStatus('');
+    setNotes('');
     setShowAbsensiModal(true);
   };
 
@@ -1540,9 +1547,16 @@ export const JadwalView: React.FC<JadwalViewProps> = ({
     setShowScannerModal(true);
   };
 
+  const isAbsensiFormValid = Boolean(
+    availableAbsensiTeachers.length > 0 &&
+    selectedTeacherId &&
+    attendanceStatus &&
+    (attendanceStatus === 'Hadir' || notes.trim() !== '')
+  );
+
   const handleAbsensiSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedEvent) return;
+    if (!selectedEvent || !isAbsensiFormValid) return;
 
     let teacherName = '';
     let nip = '';
@@ -1595,11 +1609,12 @@ export const JadwalView: React.FC<JadwalViewProps> = ({
       teacherName: teacherName || foundTeacher?.name || currentUser.name,
       nip: foundTeacher?.nip || nip || '-',
       school: foundTeacher?.school || schoolName || currentUser.school,
-      status: attendanceStatus,
+      status: attendanceStatus as 'Hadir' | 'Sakit' | 'Izin' | 'Tugas Luar',
       notes
     });
 
     setShowAbsensiModal(false);
+    setAttendanceStatus('');
     setNotes('');
 
     setToastMessage(`Presensi ${teacherName} untuk ${selectedEvent.title} berhasil dicatat!`);
@@ -2859,7 +2874,13 @@ export const JadwalView: React.FC<JadwalViewProps> = ({
                     <div className="grid grid-cols-2 gap-2">
                       <button
                         onClick={() => handleOpenAbsensi(evt)}
-                        className="w-full px-3 py-2.5 rounded-xl bg-red-800 hover:bg-red-700 text-white font-bold text-xs shadow-sm active:scale-95 flex items-center justify-center gap-1.5 transition-all duration-200 cursor-pointer"
+                        className={`w-full px-3 py-2.5 rounded-xl font-bold text-xs shadow-sm active:scale-95 flex items-center justify-center gap-1.5 transition-all duration-200 cursor-pointer ${
+                          isAbsensiClosedForGuru(evt)
+                            ? (isDark
+                                ? 'bg-stone-800 hover:bg-stone-700/90 text-stone-400 border border-stone-700'
+                                : 'bg-stone-300 hover:bg-stone-300/80 text-stone-600 border border-stone-300')
+                            : 'bg-red-800 hover:bg-red-700 text-white'
+                        }`}
                       >
                         <UserCheck className="w-3.5 h-3.5" />
                         <span>Isi Absensi</span>
@@ -3738,12 +3759,14 @@ export const JadwalView: React.FC<JadwalViewProps> = ({
               </div>
 
               <div>
-                <label className={`block text-xs font-bold ${isDark ? 'text-stone-300' : 'text-stone-700'} mb-1`}>Catatan / Alasan</label>
+                <label className={`block text-xs font-bold ${isDark ? 'text-stone-300' : 'text-stone-700'} mb-1`}>
+                  Catatan / Alasan {attendanceStatus !== 'Hadir' && <span className="text-red-500">*</span>}
+                </label>
                 <textarea
                   rows={2}
                   value={notes}
                   onChange={(e) => setNotes(e.target.value)}
-                  placeholder={`Masukkan keterangan tambahan (${attendanceStatus})...`}
+                  placeholder={attendanceStatus ? `Masukkan keterangan tambahan (${attendanceStatus})...` : 'Masukkan alasan / keterangan ketidakhadiran...'}
                   className={`w-full px-3.5 py-2.5 rounded-xl ${isDark ? 'bg-stone-800 border-stone-700 text-stone-100 placeholder:text-stone-500' : 'bg-[#faf8f5] border-stone-200 text-stone-800 placeholder:text-stone-400'} border text-xs font-medium focus:outline-none focus:ring-2 focus:ring-red-800/20 focus:border-red-700`}
                 />
               </div>
@@ -3785,9 +3808,9 @@ export const JadwalView: React.FC<JadwalViewProps> = ({
                   </button>
                   <button
                     type="submit"
-                    disabled={availableAbsensiTeachers.length === 0}
+                    disabled={!isAbsensiFormValid}
                     className={`px-6 py-2.5 rounded-xl bg-red-800 hover:bg-red-700 text-white font-bold text-xs shadow-sm transition-all ${
-                      availableAbsensiTeachers.length === 0 ? 'opacity-50 cursor-not-allowed shadow-none' : 'active:scale-95 cursor-pointer'
+                      !isAbsensiFormValid ? 'opacity-40 cursor-not-allowed shadow-none' : 'active:scale-95 cursor-pointer'
                     }`}
                   >
                     Kirim Presensi

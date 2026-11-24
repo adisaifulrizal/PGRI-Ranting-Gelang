@@ -13,6 +13,8 @@ import {
   Unlock,
   Check,
   ChevronDown,
+  ChevronLeft,
+  ChevronRight,
   UserCheck,
   User,
   AlertCircle,
@@ -102,6 +104,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const [lockedMenuName, setLockedMenuName] = useState('');
   const [pendingLockItem, setPendingLockItem] = useState<{ id: string; label: string; willLock: boolean } | null>(null);
   const [isPengaturanOpen, setIsPengaturanOpen] = useState(false);
+  const [isCollapsedDesktop, setIsCollapsedDesktop] = useState(false);
   const [logoPgri, setLogoPgri] = useState<string | null>(() =>
     typeof window !== 'undefined' ? localStorage.getItem('logo-pgri') : null
   );
@@ -156,7 +159,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
   const isAdminActive = currentRole === 'admin';
   const isGuruActive = !isAdminActive;
-  const canSeePengaturan =
+  const canAccessPengaturan =
     isAdminActive &&
     Boolean(authEmail) &&
     isPengurusRole(pengurusRole) &&
@@ -167,14 +170,14 @@ export const Sidebar: React.FC<SidebarProps> = ({
     (pengurusRole === 'ketua' || pengurusRole === 'sekretaris');
 
   useEffect(() => {
-    if (!canSeePengaturan) {
+    if (!canAccessPengaturan) {
       setIsPengaturanOpen(false);
     } else if (activeTab === 'pengaturan') {
       setIsPengaturanOpen(true);
     } else {
       setIsPengaturanOpen(false);
     }
-  }, [canSeePengaturan, activeTab]);
+  }, [canAccessPengaturan, activeTab]);
 
   // Helper tarik data anggota terbaru dari Cloud saat login Admin tanpa menimpa balik data yang sudah dihapus
   const performSmartSync = async () => {
@@ -228,6 +231,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
       setShowUserMenu(false);
       setError('');
       setIsLoggingIn(false);
+      window.location.reload();
     } catch (err: any) {
       setError(formatGoogleAuthError(err));
       setIsShaking(true);
@@ -259,6 +263,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
       onChangeRole('guru');
     }
     setShowConfirmGuruModal(false);
+    window.location.reload();
   };
 
 
@@ -535,12 +540,29 @@ export const Sidebar: React.FC<SidebarProps> = ({
         />
       )}
 
+      {/* Tombol Tampilkan Kembali Sidebar di Desktop saat Tersembunyi */}
+      {isCollapsedDesktop && (
+        <button
+          type="button"
+          onClick={() => setIsCollapsedDesktop(false)}
+          aria-label="Tampilkan Sidebar"
+          title="Tampilkan Sidebar"
+          className="hidden lg:flex fixed top-3.5 left-4 z-50 w-8 h-8 rounded-full border border-stone-700/80 bg-[#1a1112]/95 text-stone-200 hover:text-amber-300 hover:bg-red-900/90 hover:border-amber-400/50 shadow-lg backdrop-blur-md items-center justify-center cursor-pointer transition-all duration-200 hover:scale-105 active:scale-95"
+        >
+          <ChevronRight size={16} />
+        </button>
+      )}
+
       {/* Sidebar Container — Two-Tone Executive Crimson Charcoal */}
       <aside className={`sidebar-container
         fixed lg:sticky lg:top-0 inset-y-0 left-0 z-50
-        w-64 min-w-[16rem] max-w-[16rem] shrink-0
-        ${isOpenMobile ? 'translate-x-0 transition-transform duration-300 ease-out' : '-translate-x-full lg:translate-x-0'}
-        bg-[#1a1112] border-r border-stone-800/80 text-stone-200
+        shrink-0 transition-all duration-300 ease-out
+        ${isCollapsedDesktop
+          ? 'w-64 min-w-[16rem] max-w-[16rem] lg:w-0 lg:min-w-0 lg:max-w-0 lg:border-r-0 lg:opacity-0 lg:pointer-events-none'
+          : 'w-64 min-w-[16rem] max-w-[16rem] border-r border-stone-800/80 lg:opacity-100'
+        }
+        ${isOpenMobile ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}
+        bg-[#1a1112] text-stone-200
         rounded-r-3xl overflow-hidden
         flex flex-col h-[100dvh] lg:h-screen select-none shadow-2xl lg:shadow-none
       `}>
@@ -558,10 +580,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
         <div className="relative z-10 h-[2px] w-full pgri-top-accent shrink-0" />
 
         {/* Sidebar Header */}
-        <div className="relative z-10 px-4 border-b border-stone-800/80 flex items-center justify-between shrink-0 h-16 box-border backdrop-blur-md bg-gradient-to-r from-[#241214]/90 to-[#1a1112]/85">
+        <div className="relative z-10 px-4 border-b border-stone-800/80 flex items-center justify-between gap-2 shrink-0 h-16 box-border backdrop-blur-md bg-gradient-to-r from-[#241214]/90 to-[#1a1112]/85">
           <div
             onClick={() => handleTabClick('profil', 'Kepengurusan PGRI')}
-            className="flex items-center gap-2.5 group cursor-pointer transition-opacity duration-150 active:scale-95"
+            className="flex items-center gap-2.5 min-w-0 flex-1 group cursor-pointer transition-opacity duration-150 active:scale-95"
             title="Buka Kepengurusan PGRI Ranting Gelang"
           >
             {/* Logo PGRI */}
@@ -579,18 +601,28 @@ export const Sidebar: React.FC<SidebarProps> = ({
             </div>
 
             {/* Title & Subtitle */}
-            <div className="flex flex-col justify-center">
-              <h2 className="font-display font-extrabold text-sm tracking-wide leading-none text-stone-100 group-hover:text-amber-300 transition-colors">
+            <div className="flex flex-col justify-center min-w-0">
+              <h2 className="font-display font-extrabold text-sm tracking-wide leading-none text-stone-100 group-hover:text-amber-300 transition-colors truncate">
                 RANTING GELANG
               </h2>
-              <div className="flex items-center gap-1.5 mt-1">
+              <div className="flex items-center gap-1.5 mt-1 min-w-0">
                 <span className="w-1 h-1 rounded-full bg-amber-400/80 shrink-0" />
-                <span className="text-[10px] font-bold tracking-[0.14em] uppercase leading-none text-amber-400/90">
+                <span className="text-[10px] font-bold tracking-[0.14em] uppercase leading-none text-amber-400/90 truncate">
                   KEC. SUMBERBARU
                 </span>
               </div>
             </div>
           </div>
+
+          <button
+            type="button"
+            onClick={() => setIsCollapsedDesktop(true)}
+            className="hidden lg:flex w-7 h-7 rounded-full border border-stone-700/80 bg-white/[0.04] hover:bg-white/[0.12] hover:border-amber-400/50 text-stone-300 hover:text-amber-200 items-center justify-center shrink-0 transition-all duration-200 cursor-pointer active:scale-95"
+            aria-label="Sembunyikan Sidebar"
+            title="Sembunyikan Sidebar"
+          >
+            <ChevronLeft size={15} />
+          </button>
 
           <div role="button" tabIndex={0}
             onClick={onCloseMobile}
@@ -703,40 +735,49 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 );
               })}
 
-              {/* Pembungkus Menu Pengaturan (Hanya Terlihat untuk Admin Terdaftar di Hak Akses) */}
-              {section.title === 'Lainnya' && canSeePengaturan && (
+              {/* Pembungkus Menu Pengaturan (Terlihat untuk semua, terkunci & hanya bisa diklik Admin/Pengurus yang login) */}
+              {section.title === 'Lainnya' && (
                 <div className="pt-0.5">
-                  <div
-                    role="button"
-                    tabIndex={0}
-                    onClick={() => setIsPengaturanOpen((prev) => !prev)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter' || e.key === ' ') {
-                        e.preventDefault();
-                        setIsPengaturanOpen((prev) => !prev);
+                  <button
+                    type="button"
+                    title={
+                      canAccessPengaturan
+                        ? 'Pengaturan Aplikasi'
+                        : 'Menu Terkunci — Login sebagai Admin atau Pengurus untuk mengakses Pengaturan'
+                    }
+                    onClick={() => {
+                      if (!canAccessPengaturan) {
+                        setLockedMenuName('Pengaturan');
+                        setShowLockedModal(true);
+                        return;
                       }
+                      setIsPengaturanOpen((prev) => !prev);
                     }}
                     className={`
                       group/item w-full h-10 flex cursor-pointer items-center justify-between px-3 rounded-xl text-sm font-medium relative box-border transition-all duration-200 ease-out active:scale-[0.99]
-                      ${activeTab === 'pengaturan'
-                        ? 'bg-gradient-to-r from-red-900/55 via-red-950/35 to-transparent text-amber-100 font-semibold border border-red-500/20 shadow-sm'
-                        : 'text-stone-300 hover:bg-white/[0.06] hover:text-white border border-transparent'
+                      ${!canAccessPengaturan
+                        ? 'text-stone-400/65 hover:bg-white/[0.04] hover:text-stone-200 border border-transparent'
+                        : activeTab === 'pengaturan'
+                          ? 'bg-gradient-to-r from-red-900/55 via-red-950/35 to-transparent text-amber-100 font-semibold border border-red-500/20 shadow-sm'
+                          : 'text-stone-300 hover:bg-white/[0.06] hover:text-white border border-transparent'
                       }
                     `}
                   >
                     <div className="flex items-center gap-3 min-w-0 flex-1">
                       <span
                         className={`w-1 rounded-full shrink-0 transition-all duration-200 ${
-                          activeTab === 'pengaturan'
+                          canAccessPengaturan && activeTab === 'pengaturan'
                             ? 'h-5 bg-gradient-to-b from-amber-300 to-amber-500 shadow-[0_0_8px_rgba(251,191,36,0.45)] opacity-100'
                             : 'h-1.5 bg-transparent opacity-0 group-hover/item:opacity-50 group-hover/item:bg-stone-500'
                         }`}
                       />
                       <div
                         className={`w-5 h-5 flex items-center justify-center shrink-0 transition-all duration-200 group-hover/item:scale-110 ${
-                          activeTab === 'pengaturan'
-                            ? 'text-amber-300 opacity-100'
-                            : 'text-stone-400 group-hover/item:text-amber-300/90'
+                          !canAccessPengaturan
+                            ? 'text-stone-500/75 group-hover/item:text-amber-300/75'
+                            : activeTab === 'pengaturan'
+                              ? 'text-amber-300 opacity-100'
+                              : 'text-stone-400 group-hover/item:text-amber-300/90'
                         }`}
                       >
                         <Settings size={18} />
@@ -746,67 +787,75 @@ export const Sidebar: React.FC<SidebarProps> = ({
                       </span>
                     </div>
 
-                    <ChevronDown
-                      size={16}
-                      className={`shrink-0 opacity-70 transition-transform duration-200 ${
-                        isPengaturanOpen ? 'rotate-180' : 'rotate-0'
-                      }`}
-                    />
-                  </div>
+                    {canAccessPengaturan ? (
+                      <ChevronDown
+                        size={16}
+                        className={`shrink-0 opacity-70 transition-transform duration-200 ${
+                          isPengaturanOpen ? 'rotate-180' : 'rotate-0'
+                        }`}
+                      />
+                    ) : (
+                      <span className="ml-2 p-1 rounded-md text-rose-400/90 opacity-85 shrink-0" aria-label="Terkunci">
+                        <Lock size={14} />
+                      </span>
+                    )}
+                  </button>
 
-                  <div
-                    className={`grid transition-all duration-200 ease-out ${
-                      isPengaturanOpen ? 'grid-rows-[1fr] opacity-100 mt-1.5' : 'grid-rows-[0fr] opacity-0 mt-0 pointer-events-none'
-                    }`}
-                  >
-                    <div className="overflow-hidden">
-                      <div className="ml-4 pl-2.5 border-l border-stone-800 space-y-1">
-                        {pengaturanSubItems.map((sub) => {
-                          const isSubActive = activeTab === 'pengaturan' && pengaturanSubTab === sub.id;
-                          return (
-                            <div
-                              role="button"
-                              tabIndex={isPengaturanOpen ? 0 : -1}
-                              key={sub.id}
-                              onClick={() => {
-                                if (onPengaturanSubTabChange) {
-                                  onPengaturanSubTabChange(sub.id);
-                                }
-                                onTabChange('pengaturan');
-                                onCloseMobile();
-                              }}
-                              onKeyDown={(e) => {
-                                if (e.key === 'Enter' || e.key === ' ') {
-                                  e.preventDefault();
+                  {canAccessPengaturan && (
+                    <div
+                      className={`grid transition-all duration-200 ease-out ${
+                        isPengaturanOpen ? 'grid-rows-[1fr] opacity-100 mt-1.5' : 'grid-rows-[0fr] opacity-0 mt-0 pointer-events-none'
+                      }`}
+                    >
+                      <div className="overflow-hidden">
+                        <div className="ml-4 pl-2.5 border-l border-stone-800 space-y-1">
+                          {pengaturanSubItems.map((sub) => {
+                            const isSubActive = activeTab === 'pengaturan' && pengaturanSubTab === sub.id;
+                            return (
+                              <div
+                                role="button"
+                                tabIndex={isPengaturanOpen ? 0 : -1}
+                                key={sub.id}
+                                onClick={() => {
                                   if (onPengaturanSubTabChange) {
                                     onPengaturanSubTabChange(sub.id);
                                   }
                                   onTabChange('pengaturan');
                                   onCloseMobile();
-                                }
-                              }}
-                              className={`
-                                group/sub w-full h-9 flex cursor-pointer items-center gap-2.5 px-2.5 rounded-lg text-xs font-medium relative box-border transition-all duration-200 ease-out
-                                ${isSubActive
-                                  ? 'bg-gradient-to-r from-red-900/50 to-red-950/30 text-amber-200 font-semibold border border-red-500/20'
-                                  : 'text-stone-400 hover:bg-white/[0.06] hover:text-stone-100 border border-transparent'
-                                }
-                              `}
-                            >
-                              <div
-                                className={`w-4 h-4 flex items-center justify-center shrink-0 transition-transform duration-200 group-hover/sub:scale-110 ${
-                                  isSubActive ? `${sub.iconColor} opacity-100` : `${sub.iconColor} opacity-75 group-hover/sub:opacity-100`
-                                }`}
+                                }}
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter' || e.key === ' ') {
+                                    e.preventDefault();
+                                    if (onPengaturanSubTabChange) {
+                                      onPengaturanSubTabChange(sub.id);
+                                    }
+                                    onTabChange('pengaturan');
+                                    onCloseMobile();
+                                  }
+                                }}
+                                className={`
+                                  group/sub w-full h-9 flex cursor-pointer items-center gap-2.5 px-2.5 rounded-lg text-xs font-medium relative box-border transition-all duration-200 ease-out
+                                  ${isSubActive
+                                    ? 'bg-gradient-to-r from-red-900/50 to-red-950/30 text-amber-200 font-semibold border border-red-500/20'
+                                    : 'text-stone-400 hover:bg-white/[0.06] hover:text-stone-100 border border-transparent'
+                                  }
+                                `}
                               >
-                                {sub.icon}
+                                <div
+                                  className={`w-4 h-4 flex items-center justify-center shrink-0 transition-transform duration-200 group-hover/sub:scale-110 ${
+                                    isSubActive ? `${sub.iconColor} opacity-100` : `${sub.iconColor} opacity-75 group-hover/sub:opacity-100`
+                                  }`}
+                                >
+                                  {sub.icon}
+                                </div>
+                                <span className="truncate text-left select-none">{sub.label}</span>
                               </div>
-                              <span className="truncate text-left select-none">{sub.label}</span>
-                            </div>
-                          );
-                        })}
+                            );
+                          })}
+                        </div>
                       </div>
                     </div>
-                  </div>
+                  )}
                 </div>
               )}
             </div>
