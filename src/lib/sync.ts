@@ -705,6 +705,8 @@ export async function restoreAllFirebaseData(backupData: Record<string, any>): P
                   description: String(item.description || '-').slice(0, 400)
                 };
                 if (typeof item.category === 'string') payload.category = item.category.slice(0, 80);
+                if (typeof item.volume === 'string') payload.volume = item.volume.slice(0, 40);
+                if (typeof item.satuan === 'string') payload.satuan = item.satuan.slice(0, 40);
                 if (typeof item.receiptImage === 'string' && item.receiptImage.length <= 350000) {
                   payload.receiptImage = item.receiptImage;
                 }
@@ -1244,6 +1246,154 @@ export async function flushOfflineQueue(): Promise<number> {
   }
 
   return flushedCount;
+}
+
+// ============================================================================
+// MERGE ANTREAN PENGIRIMAN GURU TANPA LOGIN (KHUSUS ADMIN / PENGURUS)
+// ============================================================================
+
+export async function mergePendingMemberRegistrations<T extends { id: string }>(
+  fallbackItems: T[] = []
+): Promise<T[] | null> {
+  if (typeof navigator !== 'undefined' && !navigator.onLine) return null;
+  if (!auth.currentUser || !auth.currentUser.emailVerified) return null;
+
+  const pending = await fetchPerDocCollection<T & { createdAt?: string }>('member_registrations');
+  if (!Array.isArray(pending) || pending.length === 0) return null;
+
+  const normalized = pending
+    .filter((item) => item && item.id)
+    .map((item) => {
+      const { createdAt: _createdAt, ...rest } = item as any;
+      return {
+        ...rest,
+        isActive: false,
+        activeStatus: 'Tidak Aktif',
+      } as T;
+    });
+
+  if (normalized.length === 0) return null;
+
+  const res = await mutateCloudCollection<T>(
+    'teachers',
+    ['kombel-teachers'],
+    (latest) => {
+      const existingIds = new Set(latest.map((t) => t.id));
+      const newItems = normalized.filter((item) => !existingIds.has(item.id));
+      if (newItems.length === 0) return latest;
+      return [...newItems, ...latest];
+    },
+    fallbackItems,
+    'Pendaftaran Anggota Baru'
+  );
+
+  if (res.success) {
+    await Promise.allSettled(
+      pending
+        .filter((item) => item && VALID_DOC_ID_RE.test(String(item.id || '')))
+        .map((item) => deleteDoc(doc(db, 'member_registrations', String(item.id))))
+    );
+    return res.items;
+  }
+
+  return null;
+}
+
+export async function mergePendingAttendanceSubmissions<
+  T extends { id: string; eventId?: string; teacherId?: string; teacherName?: string }
+>(fallbackItems: T[] = []): Promise<T[] | null> {
+  if (typeof navigator !== 'undefined' && !navigator.onLine) return null;
+  if (!auth.currentUser || !auth.currentUser.emailVerified) return null;
+
+  const pending = await fetchPerDocCollection<T>('attendance_submissions');
+  if (!Array.isArray(pending) || pending.length === 0) return null;
+
+  const validPending = pending.filter((item) => item && item.id);
+  if (validPending.length === 0) return null;
+
+  const isAlreadyRecorded = (existingList: T[], candidate: T) => {
+    const candidateEvent = String(candidate.eventId || '').trim();
+    const candidateTid = candidate.teacherId ? String(candidate.teacherId).trim() : '';
+    const candidateName = (candidate.teacherName || '').trim().toLowerCase();
+    return existingList.some((a) => {
+      if (a.id === candidate.id) return true;
+      if (String(a.eventId || '').trim() !== candidateEvent) return false;
+      const aTid = a.teacherId ? String(a.teacherId).trim() : '';
+      if (candidateTid && aTid && candidateTid === aTid) return true;
+      const aName = (a.teacherName || '').trim().toLowerCase();
+      return Boolean(candidateName && aName && candidateName === aName);
+    });
+  };
+
+  const res = await mutateCloudCollection<T>(
+    'attendanceList',
+    ['kombel-attendance', 'kombel-attendance-list'],
+    (latest) => {
+      const additions: T[] = [];
+      for (const item of validPending) {
+        if (!isAlreadyRecorded(latest, item) && !isAlreadyRecorded(additions, item)) {
+          additions.push(item);
+        }
+      }
+      if (additions.length === 0) return latest;
+      return [...additions, ...latest];
+    },
+    fallbackItems,
+    'Presensi Kehadiran'
+  );
+
+  if (res.success) {
+    await Promise.allSettled(
+      validPending
+        .filter((item) => VALID_DOC_ID_RE.test(String(item.id || '')))
+        .map((item) => deleteDoc(doc(db, 'attendance_submissions', String(item.id))))
+    );
+    return res.items;
+  }
+
+  return null;
+}
+
+export async function mergePendingKontakSubmissions<T extends { id: string }>(
+  fallbackItems: T[] = []
+): Promise<T[] | null> {
+  if (typeof navigator !== 'undefined' && !navigator.onLine) return null;
+  if (!auth.currentUser || !auth.currentUser.emailVerified) return null;
+
+  const pending = await fetchPerDocCollection<T>('kontak_submissions');
+  if (!Array.isArray(pending) || pending.length === 0) return null;
+
+  const validPending = pending.filter((item) => item && item.id);
+  if (validPending.length === 0) return null;
+
+  const res = await mutateCloudCollection<T>(
+    'kontakFeedback',
+    ['pgri-kontak-feedback'],
+    (latest) => {
+      const existingIds = new Set(latest.map((item) => item.id));
+      const newItems = validPending.filter((item) => !existingIds.has(item.id));
+      if (newItems.length === 0) return latest;
+      return [...newItems, ...latest];
+    },
+    fallbackItems,
+    'Pesan & Masukan'
+  );
+
+  if (res.success) {
+    await Promise.allSettled(
+      validPending
+        .filter((item) => VALID_DOC_ID_RE.test(String(item.id || '')))
+        .map((item) => deleteDoc(doc(db, 'kontak_submissions', String(item.id))))
+    );
+    try {
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new Event('pgri-kontak-synced'));
+      }
+    } catch {}
+    return res.items;
+  }
+
+  return null;
 }
 
 // ============================================================================

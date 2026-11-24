@@ -913,15 +913,7 @@ export const KeuanganView: React.FC<KeuanganViewProps> = ({
     ctx.fillStyle = '#fde68a';
     ctx.font = 'bold 15px sans-serif';
     ctx.fillText(`${orgConfig.kopRanting || 'RANTING GELANG'} • ${orgConfig.kopWilayah || 'KECAMATAN SUMBERBARU - KABUPATEN JEMBER'}`, headerTextX, 94);
-
-    // Badge LUNAS di kanan header
-    ctx.fillStyle = '#10b981';
-    ctx.fillRect(width - 142, 55, 100, 30);
-    ctx.fillStyle = '#ffffff';
-    ctx.textAlign = 'center';
-    ctx.font = 'bold 14px sans-serif';
-    ctx.fillText('LUNAS', width - 92, 75);
-
+    
     // Tabel Metadata Kuitansi
     const rows: [string, string][] = [
       ['Nomor Kuitansi', receiptNo],
@@ -978,6 +970,43 @@ export const KeuanganView: React.FC<KeuanganViewProps> = ({
     if (ttdImg) {
       ctx.drawImage(ttdImg, signCenterX - 52, 415, 104, 50);
     }
+
+    // Stempel LUNAS hijau miring dengan efek tekstur stempel tepat di atas area tanda tangan
+    ctx.save();
+    ctx.translate(signCenterX, 442);
+    ctx.rotate((-13 * Math.PI) / 180);
+    ctx.globalAlpha = 0.85;
+
+    const stampW = 146;
+    const stampH = 44;
+    const stampColor = '#15803d';
+
+    // Bingkai luar stempel
+    ctx.strokeStyle = stampColor;
+    ctx.lineWidth = 3.5;
+    ctx.strokeRect(-stampW / 2, -stampH / 2, stampW, stampH);
+
+    // Teks LUNAS tebal
+    ctx.fillStyle = stampColor;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.font = '900 26px sans-serif';
+    ctx.fillText('LUNAS', 0, 1);
+
+    // Efek tekstur distress / grunge khas stempel tinta
+    ctx.fillStyle = '#ffffff';
+    const distressDots = [
+      [-62, -16, 3, 2], [-45, -19, 4, 2], [-18, -17, 2, 2], [22, -18, 4, 2], [54, -15, 3, 2],
+      [-58, 16, 4, 2], [-25, 18, 3, 2], [12, 17, 5, 2], [48, 16, 3, 2], [65, 10, 2, 3],
+      [-38, -4, 3, 2], [-14, 5, 2, 3], [8, -6, 3, 2], [32, 4, 3, 2], [44, -5, 2, 2],
+      [-50, 3, 2, 2], [-4, -3, 2, 2], [20, 6, 2, 2], [-28, 7, 2, 2], [55, 2, 2, 2]
+    ];
+    distressDots.forEach(([dx, dy, dw, dh]) => {
+      ctx.fillRect(dx, dy, dw, dh);
+    });
+
+    ctx.restore();
+    ctx.textBaseline = 'alphabetic';
 
     ctx.fillStyle = '#1c1917';
     ctx.font = 'bold 14px sans-serif';
@@ -1491,6 +1520,7 @@ export const KeuanganView: React.FC<KeuanganViewProps> = ({
       volume: trimmedVol,
       satuan: trimmedSat,
       category: savedItem.category || 'Lainnya',
+      ...(savedItem.receiptImage && savedItem.receiptImage.length <= 350000 ? { receiptImage: savedItem.receiptImage } : {}),
       updatedAt: new Date().toISOString()
     });
     logAuditEvent(

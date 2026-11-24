@@ -998,6 +998,29 @@ export const JadwalView: React.FC<JadwalViewProps> = ({
     return () => { isMounted = false; };
   }, []);
 
+  // Saat Admin/Pengurus membuka menu Jadwal, gabungkan otomatis presensi baru dari Mode Guru
+  useEffect(() => {
+    if (!isAdmin) return;
+    let isMounted = true;
+    const mergeGuruAttendance = async () => {
+      try {
+        const [{ auth }, { mergePendingAttendanceSubmissions }] = await Promise.all([
+          import('../../lib/firebase'),
+          import('../../lib/sync')
+        ]);
+        if (!auth.currentUser || !auth.currentUser.emailVerified) return;
+        const merged = await mergePendingAttendanceSubmissions<AttendanceRecord>(attendanceList);
+        if (isMounted && Array.isArray(merged) && onAttendanceListChange) {
+          onAttendanceListChange(merged);
+        }
+      } catch {}
+    };
+    void mergeGuruAttendance();
+    return () => {
+      isMounted = false;
+    };
+  }, [isAdmin]);
+
   useEffect(() => {
     try {
       localStorage.setItem('kombel-event-deadlines', JSON.stringify(eventDeadlines));

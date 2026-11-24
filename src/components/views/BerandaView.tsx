@@ -661,11 +661,6 @@ export const BerandaView: React.FC<BerandaViewProps> = ({
           </div>
 
           <div className="flex flex-col justify-center">
-            <p className={`text-[11px] font-bold tracking-[0.16em] mb-1 ${
-              isLight ? 'text-red-800' : 'text-amber-400'
-            }`}>
-              Digitalisasi Organisasi Profesi Guru
-            </p>
             <div className="flex items-center gap-2">
               <h1 className={`font-display font-extrabold text-2xl sm:text-3xl md:text-4xl tracking-tight ${
                 isLight ? 'text-stone-900' : 'text-white'

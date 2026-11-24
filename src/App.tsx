@@ -13,6 +13,9 @@ import {
   markLocalVersionSynced,
   getLocalVersions,
   removeFromOfflineQueue,
+  mergePendingMemberRegistrations,
+  mergePendingAttendanceSubmissions,
+  mergePendingKontakSubmissions,
   SyncVersionKey
 } from './lib/sync';
 import { collection, doc, deleteDoc, getDoc, getDocFromServer, getDocs, query, where } from 'firebase/firestore';
@@ -167,9 +170,9 @@ export default function App() {
 
         const masterGain = ctx.createGain();
         masterGain.gain.setValueAtTime(0.0001, now);
-        masterGain.gain.exponentialRampToValueAtTime(0.36, now + 1.8);
-        masterGain.gain.setValueAtTime(0.38, now + 8.6);
-        masterGain.gain.exponentialRampToValueAtTime(0.0001, now + 10.6);
+        masterGain.gain.exponentialRampToValueAtTime(0.36, now + 0.9);
+        masterGain.gain.setValueAtTime(0.38, now + 4.3);
+        masterGain.gain.exponentialRampToValueAtTime(0.0001, now + 5.6);
         masterGain.connect(compressor);
         welcomeMasterGainRef.current = masterGain;
 
@@ -178,17 +181,17 @@ export default function App() {
         const boomGain = ctx.createGain();
         boomOsc.type = 'sine';
         boomOsc.frequency.setValueAtTime(115, now);
-        boomOsc.frequency.exponentialRampToValueAtTime(42, now + 0.85);
-        boomOsc.frequency.exponentialRampToValueAtTime(32.7, now + 9.5);
+        boomOsc.frequency.exponentialRampToValueAtTime(42, now + 0.5);
+        boomOsc.frequency.exponentialRampToValueAtTime(32.7, now + 4.8);
         boomGain.gain.setValueAtTime(0.0001, now);
-        boomGain.gain.exponentialRampToValueAtTime(0.42, now + 0.12);
-        boomGain.gain.exponentialRampToValueAtTime(0.24, now + 2.5);
-        boomGain.gain.setValueAtTime(0.22, now + 8.5);
-        boomGain.gain.exponentialRampToValueAtTime(0.0001, now + 10.5);
+        boomGain.gain.exponentialRampToValueAtTime(0.42, now + 0.1);
+        boomGain.gain.exponentialRampToValueAtTime(0.24, now + 1.4);
+        boomGain.gain.setValueAtTime(0.22, now + 4.2);
+        boomGain.gain.exponentialRampToValueAtTime(0.0001, now + 5.5);
         boomOsc.connect(boomGain);
         boomGain.connect(masterGain);
         boomOsc.start(now);
-        boomOsc.stop(now + 10.7);
+        boomOsc.stop(now + 5.7);
 
         // Lapisan Sub-Bass kedua (C1 = 32.7Hz & C2 = 65.41Hz) untuk getaran bass yang dalam
         [32.7, 65.41].forEach((bassFreq, i) => {
@@ -197,13 +200,13 @@ export default function App() {
           bOsc.type = i === 0 ? 'sine' : 'triangle';
           bOsc.frequency.setValueAtTime(bassFreq, now);
           bGain.gain.setValueAtTime(0.0001, now);
-          bGain.gain.exponentialRampToValueAtTime(i === 0 ? 0.3 : 0.2, now + 1.5);
-          bGain.gain.setValueAtTime(i === 0 ? 0.3 : 0.2, now + 8.6);
-          bGain.gain.exponentialRampToValueAtTime(0.0001, now + 10.6);
+          bGain.gain.exponentialRampToValueAtTime(i === 0 ? 0.3 : 0.2, now + 0.8);
+          bGain.gain.setValueAtTime(i === 0 ? 0.3 : 0.2, now + 4.3);
+          bGain.gain.exponentialRampToValueAtTime(0.0001, now + 5.6);
           bOsc.connect(bGain);
           bGain.connect(masterGain);
           bOsc.start(now);
-          bOsc.stop(now + 10.8);
+          bOsc.stop(now + 5.8);
         });
 
         // 2. Filter Dinamis yang Membuka Lebar (Cinematic Brass & String Swell)
@@ -211,8 +214,8 @@ export default function App() {
         filter.type = 'lowpass';
         filter.Q.setValueAtTime(2.2, now);
         filter.frequency.setValueAtTime(280, now);
-        filter.frequency.exponentialRampToValueAtTime(2400, now + 6.5);
-        filter.frequency.exponentialRampToValueAtTime(520, now + 10.5);
+        filter.frequency.exponentialRampToValueAtTime(2400, now + 3.4);
+        filter.frequency.exponentialRampToValueAtTime(520, now + 5.5);
         filter.connect(masterGain);
 
         // Harmoni akor megah Cmaj9 (C2, G2, C3, G3, B3, D4, E4, G4) dengan karakter sawtooth/triangle
@@ -237,16 +240,16 @@ export default function App() {
           osc.connect(oscGain);
           oscGain.connect(filter);
           osc.start(now);
-          osc.stop(now + 10.8);
+          osc.stop(now + 5.8);
         });
 
         // 3. Dentingan Emas Megah (Golden Chime) bertahap saat logo membesar ke tengah
         const chimeNotes = [
-          { freq: 523.25, delay: 0.1, peak: 0.2 },
-          { freq: 659.25, delay: 0.7, peak: 0.19 },
-          { freq: 783.99, delay: 1.4, peak: 0.19 },
-          { freq: 987.77, delay: 2.2, peak: 0.17 },
-          { freq: 1046.5, delay: 3.1, peak: 0.18 }
+          { freq: 523.25, delay: 0.05, peak: 0.2 },
+          { freq: 659.25, delay: 0.4, peak: 0.19 },
+          { freq: 783.99, delay: 0.8, peak: 0.19 },
+          { freq: 987.77, delay: 1.25, peak: 0.17 },
+          { freq: 1046.5, delay: 1.75, peak: 0.18 }
         ];
 
         chimeNotes.forEach(({ freq, delay, peak }) => {
@@ -255,12 +258,12 @@ export default function App() {
           osc.type = 'triangle';
           osc.frequency.setValueAtTime(freq, now + delay);
           chimeGain.gain.setValueAtTime(0.0001, now + delay);
-          chimeGain.gain.exponentialRampToValueAtTime(peak, now + delay + 0.06);
-          chimeGain.gain.exponentialRampToValueAtTime(0.0001, now + delay + 3.6);
+          chimeGain.gain.exponentialRampToValueAtTime(peak, now + delay + 0.05);
+          chimeGain.gain.exponentialRampToValueAtTime(0.0001, now + delay + 2.4);
           osc.connect(chimeGain);
           chimeGain.connect(masterGain);
           osc.start(now + delay);
-          osc.stop(now + delay + 3.7);
+          osc.stop(now + delay + 2.5);
         });
       } catch {}
     }
@@ -314,9 +317,9 @@ export default function App() {
     window.addEventListener('kombel-settings-updated', syncLogoFromLocal);
 
     if (showWelcomePopup) {
-      const duration = 10000;
+      const duration = 5000;
       const readyPause = 350;
-      const showcaseDuration = 10000;
+      const showcaseDuration = 5000;
       const blackoutDuration = 950;
       const exitDuration = 700;
       const intervalTime = 50;
@@ -460,7 +463,8 @@ export default function App() {
           'financialTransactions',
           'cashPayments',
           'attendanceList',
-          'announcements'
+          'announcements',
+          'taskSubmissions'
         ];
 
         const keysToFetch = startupKeys.filter((k) => shouldFetchByVersion(k, cloudVersions));
@@ -572,6 +576,10 @@ export default function App() {
       return [];
     }
   });
+  const taskSubmissionsRef = useRef<TaskSubmission[]>(taskSubmissions);
+  useEffect(() => {
+    taskSubmissionsRef.current = taskSubmissions;
+  }, [taskSubmissions]);
 
   const [webinars, setWebinars] = useState<Webinar[]>(() => {
     try {
@@ -653,6 +661,23 @@ export default function App() {
           localStorage.setItem('activeRole', nextActive);
           localStorage.setItem('pgri-pengurus-role', resolved.role);
         } catch {}
+
+        // Jika login sebagai Pengurus terverifikasi, gabungkan otomatis antrean kiriman Mode Guru ke daftar utama
+        if (user.emailVerified && isPengurusRole(resolved.role)) {
+          if (canAccessAdminForTab(resolved.role, 'anggota')) {
+            void mergePendingMemberRegistrations<Teacher>().then((merged) => {
+              if (Array.isArray(merged)) setTeachers(merged);
+            });
+          }
+          if (canAccessAdminForTab(resolved.role, 'jadwal')) {
+            void mergePendingAttendanceSubmissions<AttendanceRecord>().then((merged) => {
+              if (Array.isArray(merged)) setAttendanceList(merged);
+            });
+          }
+          if (canAccessAdminForTab(resolved.role, 'kontak')) {
+            void mergePendingKontakSubmissions();
+          }
+        }
       } else {
         setAuthEmail(null);
         setAuthDisplayName(null);
@@ -957,13 +982,22 @@ export default function App() {
           } catch (e) {}
           markLocalVersionSynced('teachers', cloudVersions);
         }
+        if (auth.currentUser?.emailVerified && canAccessAdminForTab(pengurusRole, 'anggota')) {
+          const mergedTeachers = await mergePendingMemberRegistrations<Teacher>(
+            Array.isArray(parsedCloudTeachers) ? parsedCloudTeachers : teachers
+          );
+          if (Array.isArray(mergedTeachers)) {
+            setTeachers(mergedTeachers);
+          }
+        }
       }
 
       // 2. Modul Jadwal Kegiatan & Absensi
       if (isAll || selectedModuleIds.includes('jadwal')) {
-        const [fEvents, fAttendance] = await Promise.all([
+        const [fEvents, fAttendance, fTasks] = await Promise.all([
           syncFromFirebase('events'),
-          syncFromFirebase('attendanceList')
+          syncFromFirebase('attendanceList'),
+          syncFromFirebase('taskSubmissions')
         ]);
         const parsedCloudEvents = ensureArray<ActivityEvent>(fEvents);
         if (parsedCloudEvents && Array.isArray(parsedCloudEvents)) {
@@ -996,6 +1030,23 @@ export default function App() {
             localStorage.setItem('kombel-attendance-list', JSON.stringify(parsedCloudAttendance));
           } catch (e) {}
           markLocalVersionSynced('attendanceList', cloudVersions);
+        }
+        if (auth.currentUser?.emailVerified && canAccessAdminForTab(pengurusRole, 'jadwal')) {
+          const mergedAtt = await mergePendingAttendanceSubmissions<AttendanceRecord>(
+            Array.isArray(parsedCloudAttendance) ? parsedCloudAttendance : attendanceList
+          );
+          if (Array.isArray(mergedAtt)) {
+            setAttendanceList(mergedAtt);
+          }
+        }
+
+        const parsedCloudTasks = ensureArray<TaskSubmission>(fTasks);
+        if (parsedCloudTasks && Array.isArray(parsedCloudTasks)) {
+          setTaskSubmissions(parsedCloudTasks);
+          try {
+            localStorage.setItem('kombel-task-submissions', JSON.stringify(parsedCloudTasks));
+          } catch (e) {}
+          markLocalVersionSynced('taskSubmissions', cloudVersions);
         }
       }
 
@@ -1328,7 +1379,7 @@ export default function App() {
   const handleAddAttendance = (rec: Omit<AttendanceRecord, 'id' | 'timestamp'>) => {
     const created: AttendanceRecord = {
       ...rec,
-      id: `att-${Date.now()}`,
+      id: `att-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
       timestamp: `${getFormattedShortDate()} ${new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })} WIB`
     };
     setAttendanceList(prev => {
@@ -1339,6 +1390,43 @@ export default function App() {
       } catch (e) {}
       return updated;
     });
+
+    const isVerifiedSignedIn = Boolean(auth.currentUser && auth.currentUser.emailVerified);
+    if (!isVerifiedSignedIn) {
+      const attPayload: Record<string, any> = {
+        id: created.id,
+        eventId: String(created.eventId || 'evt').slice(0, 128),
+        eventTitle: String(created.eventTitle || '').slice(0, 240),
+        teacherName: String(created.teacherName || '-').trim().slice(0, 160) || '-',
+        school: String(created.school || '-').slice(0, 160),
+        status: created.status,
+        timestamp: String(created.timestamp || new Date().toISOString()).slice(0, 64)
+      };
+      if (created.teacherId) attPayload.teacherId = String(created.teacherId).slice(0, 128);
+      if (created.nip) attPayload.nip = String(created.nip).slice(0, 40);
+      if (created.notes) attPayload.notes = String(created.notes).slice(0, 500);
+      if (typeof (created as any).signature === 'string' && (created as any).signature.length <= 200000) {
+        attPayload.signature = (created as any).signature;
+      }
+
+      void savePerDocItem('attendance_submissions', created.id, attPayload, 'Presensi Kehadiran').then((res) => {
+        if (res.success) {
+          emitSyncStatus({
+            type: 'success',
+            collectionName: 'attendanceList',
+            message: 'Presensi kehadiran berhasil dikirim ke Cloud.'
+          });
+        } else if (res.error && !res.error.includes('Offline')) {
+          emitSyncStatus({
+            type: res.quotaExceeded ? 'warning' : 'error',
+            collectionName: 'attendanceList',
+            message: res.error
+          });
+        }
+      });
+      return;
+    }
+
     savePerDocItem('attendance_docs', created.id, created, 'Presensi Kehadiran');
     mutateCloudCollection<AttendanceRecord>(
       'attendanceList',
@@ -1728,6 +1816,22 @@ export default function App() {
     );
     setWebinars(res.items);
     return res.success;
+  };
+
+  const handleUpdateTaskSubmissions: React.Dispatch<React.SetStateAction<TaskSubmission[]>> = (updater) => {
+    const next = typeof updater === 'function' ? updater(taskSubmissionsRef.current) : updater;
+    taskSubmissionsRef.current = next;
+    setTaskSubmissions(next);
+    try {
+      localStorage.setItem('kombel-task-submissions', JSON.stringify(next));
+    } catch (e) {}
+    void mutateCloudCollection<TaskSubmission>(
+      'taskSubmissions',
+      ['kombel-task-submissions'],
+      () => next,
+      next,
+      'Unggahan Tugas'
+    ).then((res) => setTaskSubmissions(res.items));
   };
 
   return (
@@ -2195,7 +2299,7 @@ export default function App() {
           }
         }
         .welcome-batik-kenburns {
-          animation: welcomeBatikKenBurns 21s ease-out forwards;
+          animation: welcomeBatikKenBurns 11s ease-out forwards;
           will-change: transform;
         }
         .welcome-card-dissolve {
@@ -2203,7 +2307,7 @@ export default function App() {
           will-change: transform, opacity, filter;
         }
         .welcome-logo-center-showcase {
-          animation: welcomeLogoCenterShowcase 10s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+          animation: welcomeLogoCenterShowcase 5s cubic-bezier(0.22, 1, 0.36, 1) forwards;
           will-change: transform;
         }
         .welcome-logo-rim-pulse {
@@ -2281,7 +2385,7 @@ export default function App() {
           will-change: transform, opacity;
         }
         .welcome-motto-tracking {
-          animation: welcomeMottoTracking 9.8s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+          animation: welcomeMottoTracking 4.8s cubic-bezier(0.22, 1, 0.36, 1) forwards;
           will-change: letter-spacing, opacity, transform;
         }
         .welcome-logo-glow {
@@ -2558,7 +2662,7 @@ export default function App() {
               selectedEventForAbsensi={selectedEventForAbsensi}
               activeRole={roleForTab('jadwal')}
               taskSubmissions={taskSubmissions}
-              onUpdateTaskSubmissions={setTaskSubmissions}
+              onUpdateTaskSubmissions={handleUpdateTaskSubmissions}
             />
           )}
 

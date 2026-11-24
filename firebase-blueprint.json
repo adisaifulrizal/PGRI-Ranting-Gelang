@@ -112,7 +112,10 @@
         "amount": { "type": "number" },
         "category": { "type": "string", "maxLength": 80 },
         "description": { "type": "string", "minLength": 1, "maxLength": 400 },
-        "receiptImage": { "type": "string", "maxLength": 350000 }
+        "volume": { "type": "string", "maxLength": 40 },
+        "satuan": { "type": "string", "maxLength": 40 },
+        "receiptImage": { "type": "string", "maxLength": 350000 },
+        "updatedAt": { "type": "string", "maxLength": 64 }
       },
       "required": ["id", "date", "type", "amount", "description"]
     },
@@ -188,6 +191,46 @@
         "catatan": { "type": "string", "maxLength": 500 }
       },
       "required": ["id", "direction", "nomorSurat", "tanggalSurat", "asalTujuan", "perihal"]
+    },
+    "MemberRegistration": {
+      "title": "MemberRegistration",
+      "description": "Create-only member self-registration queue submitted in Guru mode for automatic Admin merge into teachers",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "name": { "type": "string", "minLength": 1, "maxLength": 160 },
+        "nickname": { "type": "string", "maxLength": 80 },
+        "gender": { "type": "string", "enum": ["L", "P"] },
+        "school": { "type": "string", "minLength": 1, "maxLength": 160 },
+        "nip": { "type": "string", "maxLength": 40 },
+        "npa": { "type": "string", "pattern": "^\\d{11}$" },
+        "role": { "type": "string", "maxLength": 80 },
+        "avatar": { "type": "string", "maxLength": 500 },
+        "phone": { "type": "string", "maxLength": 40 },
+        "email": { "type": "string", "maxLength": 160 },
+        "employmentStatus": { "type": "string", "maxLength": 40 },
+        "certificationStatus": { "type": "string", "maxLength": 60 },
+        "ktaStatus": { "type": "string", "maxLength": 40 },
+        "retirementYear": { "type": "string", "maxLength": 8 },
+        "isActive": { "type": "boolean" },
+        "activeStatus": { "type": "string", "enum": ["Tidak Aktif"] },
+        "createdAt": { "type": "string", "maxLength": 64 }
+      },
+      "required": ["id", "name", "school", "npa", "isActive", "activeStatus", "createdAt"]
+    },
+    "KontakSubmission": {
+      "title": "KontakSubmission",
+      "description": "Create-only contact message and feedback queue submitted in Guru mode for automatic Admin merge into kontakFeedback",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "name": { "type": "string", "minLength": 1, "maxLength": 160 },
+        "school": { "type": "string", "maxLength": 160 },
+        "phone": { "type": "string", "maxLength": 40 },
+        "message": { "type": "string", "minLength": 1, "maxLength": 2000 },
+        "createdAt": { "type": "string", "maxLength": 64 }
+      },
+      "required": ["id", "name", "school", "phone", "message", "createdAt"]
     }
   },
   "firestore": {
@@ -210,6 +253,18 @@
     "/attendance_docs/{recordId}": {
       "schema": { "$ref": "#/entities/AttendanceDoc" },
       "description": "Per-document attendance records for scalable concurrent check-in"
+    },
+    "/attendance_submissions/{recordId}": {
+      "schema": { "$ref": "#/entities/AttendanceDoc" },
+      "description": "Create-only attendance check-in queue submitted in Guru mode for automatic Admin merge into attendanceList"
+    },
+    "/member_registrations/{regId}": {
+      "schema": { "$ref": "#/entities/MemberRegistration" },
+      "description": "Create-only member self-registration queue submitted in Guru mode for automatic Admin merge into teachers"
+    },
+    "/kontak_submissions/{msgId}": {
+      "schema": { "$ref": "#/entities/KontakSubmission" },
+      "description": "Create-only contact message queue submitted in Guru mode for automatic Admin merge into kontakFeedback"
     },
     "/transaction_docs/{txId}": {
       "schema": { "$ref": "#/entities/TransactionDoc" },

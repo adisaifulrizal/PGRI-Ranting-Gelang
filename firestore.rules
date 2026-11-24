@@ -169,14 +169,17 @@ service cloud.firestore {
 
     function isValidTransactionDoc(data) {
       return data.keys().hasAll(['id', 'date', 'type', 'amount', 'description']) &&
-        data.keys().hasOnly(['id', 'date', 'type', 'amount', 'category', 'description', 'receiptImage']) &&
+        data.keys().hasOnly(['id', 'date', 'type', 'amount', 'category', 'description', 'volume', 'satuan', 'receiptImage', 'updatedAt']) &&
         isValidId(data.id) &&
         data.date is string && data.date.size() <= 32 &&
         data.type in ['Pemasukan', 'Pengeluaran'] &&
         data.amount is number && data.amount >= 0 &&
         (!('category' in data) || (data.category is string && data.category.size() <= 80)) &&
         data.description is string && data.description.size() >= 1 && data.description.size() <= 400 &&
-        (!('receiptImage' in data) || (data.receiptImage is string && data.receiptImage.size() <= 350000));
+        (!('volume' in data) || (data.volume is string && data.volume.size() <= 40)) &&
+        (!('satuan' in data) || (data.satuan is string && data.satuan.size() <= 40)) &&
+        (!('receiptImage' in data) || (data.receiptImage is string && data.receiptImage.size() <= 350000)) &&
+        (!('updatedAt' in data) || (data.updatedAt is string && data.updatedAt.size() <= 64));
     }
 
     function isValidProkerItem(data) {
@@ -267,6 +270,44 @@ service cloud.firestore {
         (!('catatan' in data) || (data.catatan is string && data.catatan.size() <= 500));
     }
 
+    function isValidMemberRegistration(data) {
+      return data.keys().hasAll(['id', 'name', 'school', 'npa', 'isActive', 'activeStatus', 'createdAt']) &&
+        data.keys().hasOnly([
+          'id', 'name', 'nickname', 'gender', 'school', 'nip', 'npa', 'role',
+          'avatar', 'phone', 'email', 'employmentStatus', 'certificationStatus',
+          'ktaStatus', 'retirementYear', 'isActive', 'activeStatus', 'createdAt'
+        ]) &&
+        isValidId(data.id) &&
+        data.name is string && data.name.size() >= 1 && data.name.size() <= 160 &&
+        (!('nickname' in data) || (data.nickname is string && data.nickname.size() <= 80)) &&
+        (!('gender' in data) || data.gender in ['L', 'P']) &&
+        data.school is string && data.school.size() >= 1 && data.school.size() <= 160 &&
+        (!('nip' in data) || (data.nip is string && data.nip.size() <= 40)) &&
+        data.npa is string && data.npa.matches('^\\d{11}$') &&
+        (!('role' in data) || (data.role is string && data.role.size() <= 80)) &&
+        (!('avatar' in data) || (data.avatar is string && data.avatar.size() <= 500)) &&
+        (!('phone' in data) || (data.phone is string && data.phone.size() <= 40)) &&
+        (!('email' in data) || (data.email is string && data.email.size() <= 160)) &&
+        (!('employmentStatus' in data) || (data.employmentStatus is string && data.employmentStatus.size() <= 40)) &&
+        (!('certificationStatus' in data) || (data.certificationStatus is string && data.certificationStatus.size() <= 60)) &&
+        (!('ktaStatus' in data) || (data.ktaStatus is string && data.ktaStatus.size() <= 40)) &&
+        (!('retirementYear' in data) || (data.retirementYear is string && data.retirementYear.size() <= 8)) &&
+        data.isActive == false &&
+        data.activeStatus == 'Tidak Aktif' &&
+        data.createdAt is string && data.createdAt.size() <= 64;
+    }
+
+    function isValidKontakSubmission(data) {
+      return data.keys().hasAll(['id', 'name', 'school', 'phone', 'message', 'createdAt']) &&
+        data.keys().hasOnly(['id', 'name', 'school', 'phone', 'message', 'createdAt']) &&
+        isValidId(data.id) &&
+        data.name is string && data.name.size() >= 1 && data.name.size() <= 160 &&
+        data.school is string && data.school.size() <= 160 &&
+        data.phone is string && data.phone.size() <= 40 &&
+        data.message is string && data.message.size() >= 1 && data.message.size() <= 2000 &&
+        data.createdAt is string && data.createdAt.size() <= 64;
+    }
+
     // =========================================================================
     // COLLECTION RULES
     // =========================================================================
@@ -274,7 +315,7 @@ service cloud.firestore {
     // Existing synchronized collections (hardened: pengurus-only writes, verified member access)
     match /kombel_data/{collectionId} {
       allow get: if isValidId(collectionId) && (
-        collectionId in ['events', 'materials', 'announcements', 'forumPosts', 'webinars', 'proker', 'danaSosial', 'notulen', 'kontakFeedback'] ||
+        collectionId in ['teachers', 'events', 'attendanceList', 'financialTransactions', 'cashPayments', 'taskSubmissions', 'materials', 'announcements', 'forumPosts', 'webinars', 'proker', 'danaSosial', 'notulen', 'kontakFeedback'] ||
         isPengurus() ||
         isVerifiedUser()
       );
@@ -380,6 +421,30 @@ service cloud.firestore {
       allow get, list: if isPengurus();
       allow create, update: if isValidId(suratId) && (isKetua() || isSekretaris()) && isValidSuratAgenda(incoming());
       allow delete: if isValidId(suratId) && (isKetua() || isSekretaris());
+    }
+
+    // Antrean Pendaftaran Anggota Baru (Mode Guru tanpa login: create-only, diproses otomatis oleh Admin)
+    match /member_registrations/{regId} {
+      allow get, list: if isKetua() || isSekretaris();
+      allow create: if isValidId(regId) && isValidMemberRegistration(incoming()) && incoming().id == regId;
+      allow update: if false;
+      allow delete: if isValidId(regId) && (isKetua() || isSekretaris());
+    }
+
+    // Antrean Presensi Kehadiran (Mode Guru tanpa login: create-only, diproses otomatis oleh Admin)
+    match /attendance_submissions/{recordId} {
+      allow get, list: if isKetua() || isSekretaris() || isSeksi();
+      allow create: if isValidId(recordId) && isValidAttendanceDoc(incoming()) && incoming().id == recordId;
+      allow update: if false;
+      allow delete: if isValidId(recordId) && (isKetua() || isSekretaris() || isSeksi());
+    }
+
+    // Antrean Pesan & Masukan Kontak (Mode Guru tanpa login: create-only, diproses otomatis oleh Admin)
+    match /kontak_submissions/{msgId} {
+      allow get, list: if isKetua() || isSekretaris();
+      allow create: if isValidId(msgId) && isValidKontakSubmission(incoming()) && incoming().id == msgId;
+      allow update: if false;
+      allow delete: if isValidId(msgId) && (isKetua() || isSekretaris());
     }
   }
 }

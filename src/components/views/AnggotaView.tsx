@@ -1,5 +1,11 @@
 import { safeDownloadBlob } from '../../lib/download';
-import { mutateCloudCollection } from '../../lib/sync';
+import {
+  mutateCloudCollection,
+  savePerDocItem,
+  emitSyncStatus,
+  mergePendingMemberRegistrations
+} from '../../lib/sync';
+import { auth } from '../../lib/firebase';
 import React, { useState, useEffect, useRef } from 'react';
 import { 
   Users, 
@@ -124,6 +130,21 @@ export const AnggotaView: React.FC<AnggotaViewProps> = ({
       setTeachersList([...initialTeachers]);
     }
   }, [initialTeachers]);
+
+  // Saat Admin/Pengurus membuka menu Daftar Anggota, gabungkan otomatis pendaftar baru dari Mode Guru
+  useEffect(() => {
+    if (activeRole !== 'admin' || !auth.currentUser || !auth.currentUser.emailVerified) return;
+    let mounted = true;
+    void mergePendingMemberRegistrations<Teacher>(teachersList).then((merged) => {
+      if (mounted && Array.isArray(merged)) {
+        setTeachersList(merged);
+        if (onTeachersChange) onTeachersChange(merged);
+      }
+    });
+    return () => {
+      mounted = false;
+    };
+  }, [activeRole]);
 
   // Fallback State untuk data Jadwal & Kehadiran dari LocalStorage jika props kosong
   const [actualEvents, setActualEvents] = useState<ActivityEvent[]>(() => {
@@ -1088,13 +1109,14 @@ export const AnggotaView: React.FC<AnggotaViewProps> = ({
       updated = teachersList.map(t => t.id === editingTeacher.id ? editedObj! : t);
       logAuditEvent('Daftar Anggota', 'Edit Anggota', `Memperbarui profil anggota ${editedObj.name} (${editedObj.school}).`);
     } else {
-      const safeName = formData.name || '';
+      const safeName = (formData.name || '').trim();
+      const safeSchool = (formData.school || dynamicSchoolsList[0] || MASTER_SCHOOLS_LIST[0]).trim();
       newTeacher = {
-        id: `t_${Date.now()}`,
+        id: `t_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
         name: safeName,
         nickname: formData.nickname || safeName.split(' ')[0],
         gender: (formData.gender as 'L' | 'P') || 'L',
-        school: formData.school || dynamicSchoolsList[0] || MASTER_SCHOOLS_LIST[0],
+        school: safeSchool,
         nip: formData.nip,
         npa: cleanNpa,
         role: formData.role || 'Anggota Aktif',
@@ -1116,7 +1138,52 @@ export const AnggotaView: React.FC<AnggotaViewProps> = ({
 
     setTeachersList(updated);
     if (onTeachersChange) onTeachersChange(updated);
+    try {
+      localStorage.setItem('kombel-teachers', JSON.stringify(updated));
+    } catch {}
     handleCloseModal();
+
+    const isAuthorizedPengurus = activeRole === 'admin' && Boolean(auth.currentUser && auth.currentUser.emailVerified);
+
+    if (newTeacher && !isAuthorizedPengurus) {
+      const regPayload: Record<string, any> = {
+        id: newTeacher.id,
+        name: newTeacher.name.slice(0, 160),
+        school: newTeacher.school.slice(0, 160),
+        npa: cleanNpa,
+        isActive: false,
+        activeStatus: 'Tidak Aktif',
+        createdAt: new Date().toISOString()
+      };
+      if (newTeacher.nickname) regPayload.nickname = String(newTeacher.nickname).slice(0, 80);
+      if (newTeacher.gender === 'L' || newTeacher.gender === 'P') regPayload.gender = newTeacher.gender;
+      if (newTeacher.nip && String(newTeacher.nip).trim()) regPayload.nip = String(newTeacher.nip).trim().slice(0, 40);
+      if (newTeacher.role) regPayload.role = String(newTeacher.role).slice(0, 80);
+      if (newTeacher.avatar) regPayload.avatar = String(newTeacher.avatar).slice(0, 500);
+      if (newTeacher.phone) regPayload.phone = String(newTeacher.phone).slice(0, 40);
+      if (newTeacher.email) regPayload.email = String(newTeacher.email).slice(0, 160);
+      if (newTeacher.employmentStatus) regPayload.employmentStatus = String(newTeacher.employmentStatus).slice(0, 40);
+      if (newTeacher.certificationStatus) regPayload.certificationStatus = String(newTeacher.certificationStatus).slice(0, 60);
+      if (newTeacher.ktaStatus) regPayload.ktaStatus = String(newTeacher.ktaStatus).slice(0, 40);
+      if (newTeacher.retirementYear) regPayload.retirementYear = String(newTeacher.retirementYear).slice(0, 8);
+
+      void savePerDocItem('member_registrations', newTeacher.id, regPayload, 'Pendaftaran Anggota Baru').then((res) => {
+        if (res.success) {
+          emitSyncStatus({
+            type: 'success',
+            collectionName: 'teachers',
+            message: 'Pendaftaran anggota baru berhasil dikirim ke Cloud (menunggu aktivasi pengurus).'
+          });
+        } else if (res.error && !res.error.includes('Offline')) {
+          emitSyncStatus({
+            type: res.quotaExceeded ? 'warning' : 'error',
+            collectionName: 'teachers',
+            message: res.error
+          });
+        }
+      });
+      return;
+    }
 
     mutateCloudCollection<Teacher>(
       'teachers',

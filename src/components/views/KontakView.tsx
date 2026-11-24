@@ -23,8 +23,12 @@ import {
   mutateCloudCollection,
   fetchCloudVersions,
   shouldFetchByVersion,
-  markLocalVersionSynced
+  markLocalVersionSynced,
+  savePerDocItem,
+  emitSyncStatus,
+  mergePendingKontakSubmissions
 } from '../../lib/sync';
+import { auth } from '../../lib/firebase';
 
 const KONTAK_FEEDBACK_KEY = 'pgri-kontak-feedback';
 
@@ -215,6 +219,20 @@ export const KontakView: React.FC<KontakViewProps> = ({
     };
   }, []);
 
+  // Saat Admin/Pengurus membuka menu Kontak, gabungkan otomatis pesan baru dari Mode Guru
+  useEffect(() => {
+    if (activeRole !== 'admin' || !auth.currentUser || !auth.currentUser.emailVerified) return;
+    let mounted = true;
+    void mergePendingKontakSubmissions<FeedbackMessage>(feedbackList).then((merged) => {
+      if (mounted && Array.isArray(merged)) {
+        setFeedbackList(merged);
+      }
+    });
+    return () => {
+      mounted = false;
+    };
+  }, [activeRole]);
+
   // Modal State untuk Edit & Hapus Pesan
   const [editingFeedback, setEditingFeedback] = useState<FeedbackMessage | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<FeedbackMessage | null>(null);
@@ -248,11 +266,11 @@ export const KontakView: React.FC<KontakViewProps> = ({
     if (!name || !message.trim()) return;
 
     const newFeedback: FeedbackMessage = {
-      id: `fb_${Date.now()}`,
-      name,
-      school,
-      phone,
-      message: message.trim(),
+      id: `fb_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+      name: name.trim().slice(0, 160),
+      school: String(school || '').trim().slice(0, 160),
+      phone: String(phone || '-').trim().slice(0, 40),
+      message: message.trim().slice(0, 2000),
       createdAt: new Date().toLocaleDateString('id-ID', {
         day: '2-digit',
         month: 'short',
@@ -265,15 +283,35 @@ export const KontakView: React.FC<KontakViewProps> = ({
     try {
       localStorage.setItem(KONTAK_FEEDBACK_KEY, JSON.stringify(nextList));
     } catch {}
-    void mutateCloudCollection<FeedbackMessage>(
-      'kontakFeedback',
-      [KONTAK_FEEDBACK_KEY],
-      (latest) => [newFeedback, ...latest.filter((item) => item.id !== newFeedback.id)],
-      nextList,
-      'Pesan & Masukan'
-    ).then((res) => {
-      if (Array.isArray(res.items)) setFeedbackList(res.items);
-    });
+
+    const isVerifiedSignedIn = Boolean(auth.currentUser && auth.currentUser.emailVerified);
+    if (isVerifiedSignedIn) {
+      void mutateCloudCollection<FeedbackMessage>(
+        'kontakFeedback',
+        [KONTAK_FEEDBACK_KEY],
+        (latest) => [newFeedback, ...latest.filter((item) => item.id !== newFeedback.id)],
+        nextList,
+        'Pesan & Masukan'
+      ).then((res) => {
+        if (Array.isArray(res.items)) setFeedbackList(res.items);
+      });
+    } else {
+      void savePerDocItem('kontak_submissions', newFeedback.id, newFeedback, 'Pesan & Masukan').then((res) => {
+        if (res.success) {
+          emitSyncStatus({
+            type: 'success',
+            collectionName: 'kontakFeedback',
+            message: 'Pesan & masukan berhasil dikirim ke Cloud.'
+          });
+        } else if (res.error && !res.error.includes('Offline')) {
+          emitSyncStatus({
+            type: res.quotaExceeded ? 'warning' : 'error',
+            collectionName: 'kontakFeedback',
+            message: res.error
+          });
+        }
+      });
+    }
 
     setSubmitted(true);
     setTimeout(() => setSubmitted(false), 4000);
