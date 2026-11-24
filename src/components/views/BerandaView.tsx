@@ -341,11 +341,12 @@ export const BerandaView: React.FC<BerandaViewProps> = ({
         text: `${pad(hours)}:${pad(minutes)}:${pad(seconds)}`, 
         isFinished: false, 
         isOngoing: false, 
-        isCountdown: true
+        isCountdown: true,
+        isUrgent: totalSeconds <= 3600
       };
     }
 
-    return { text: 'Sudah Selesai', isFinished: true, isOngoing: false, isCountdown: false };
+    return { text: 'Sudah Selesai', isFinished: true, isOngoing: false, isCountdown: false, isUrgent: false };
   };
 
   // Handler klik Absen dengan validasi batas waktu
@@ -405,8 +406,9 @@ export const BerandaView: React.FC<BerandaViewProps> = ({
     });
   }, [events]);
 
-  // State untuk filter jadwal pada kotak Kehadiran
+  // State untuk filter jadwal pada kotak Kehadiran & Tab Status Kontribusi
   const [selectedAttendanceEventId, setSelectedAttendanceEventId] = useState<string>('');
+  const [cashFilterTab, setCashFilterTab] = useState<'unpaid' | 'paid'>('unpaid');
 
   useEffect(() => {
     if (sortedEvents.length > 0) {
@@ -446,6 +448,20 @@ export const BerandaView: React.FC<BerandaViewProps> = ({
   const unpaidFemaleTeachers = useMemo(() => {
     return unpaidTeachers.filter(t => getTeacherGender(t) === 'P');
   }, [unpaidTeachers]);
+
+  const paidTeachers = useMemo(() => {
+    return [...activeTeachersList]
+      .filter(t => getTeacherUnpaidCount(t.id) === 0)
+      .sort((a, b) => (a.name || '').localeCompare(b.name || '', 'id', { sensitivity: 'base' }));
+  }, [activeTeachersList, effectiveCashPayments, events]);
+
+  const paidMaleTeachers = useMemo(() => {
+    return paidTeachers.filter(t => getTeacherGender(t) === 'L');
+  }, [paidTeachers]);
+
+  const paidFemaleTeachers = useMemo(() => {
+    return paidTeachers.filter(t => getTeacherGender(t) === 'P');
+  }, [paidTeachers]);
 
   const paidTeachersCount = activeTeachersCount - unpaidTeachers.length;
   const cashPaidPercentage = activeTeachersCount > 0 ? Math.round((paidTeachersCount / activeTeachersCount) * 100) : 0;
@@ -563,6 +579,13 @@ export const BerandaView: React.FC<BerandaViewProps> = ({
         @keyframes colonPulse {
           0%, 100% { opacity: 1; }
           50% { opacity: 0.25; }
+        }
+        @keyframes progressShimmer {
+          0% { transform: translateX(-100%); }
+          100% { transform: translateX(250%); }
+        }
+        .animate-progress-shimmer {
+          animation: progressShimmer 2.4s ease-in-out infinite;
         }
         .beranda-entry-waiting .animate-banner-entry,
         .beranda-entry-waiting .stagger-1,
@@ -721,47 +744,61 @@ export const BerandaView: React.FC<BerandaViewProps> = ({
         {/* Card 1: Anggota Aktif */}
         <div 
           onClick={() => onNavigate('anggota')}
-          className={`${cardBgClass} rounded-2xl p-5 border flex items-center gap-4 hover:-translate-y-0.5 hover:shadow-md ${isLight ? 'hover:border-red-300' : 'hover:border-amber-500/40'} transition-all duration-200 cursor-pointer group`}
+          className={`${cardBgClass} relative overflow-hidden rounded-2xl p-5 border flex items-center gap-4 hover:-translate-y-0.5 hover:shadow-md ${isLight ? 'hover:border-red-300' : 'hover:border-amber-500/40'} transition-all duration-200 cursor-pointer group`}
         >
-          <div className="w-14 h-14 rounded-xl bg-gradient-to-tr from-red-900 to-red-700 text-amber-100 flex items-center justify-center shadow-sm group-hover:scale-105 transition-transform duration-200">
+          <div className="absolute top-0 inset-x-0 h-[3px] bg-gradient-to-r from-red-800 to-red-600" />
+          <div className={`pointer-events-none absolute inset-0 -translate-x-full group-hover:translate-x-full transition-transform duration-700 ease-out bg-gradient-to-r from-transparent ${isLight ? 'via-red-500/[0.06]' : 'via-white/[0.05]'} to-transparent`} />
+          <Users className={`absolute -right-3 -bottom-3 w-20 h-20 pointer-events-none transition-transform duration-300 group-hover:scale-110 ${isLight ? 'text-red-900/[0.04]' : 'text-red-400/[0.06]'}`} />
+          <div className="w-14 h-14 rounded-xl bg-gradient-to-tr from-red-900 to-red-700 text-amber-100 flex items-center justify-center shadow-sm group-hover:scale-105 transition-transform duration-200 shrink-0 relative z-10">
             <Users className="w-7 h-7" />
           </div>
-          <div>
+          <div className="relative z-10">
             <p className={`text-xs font-semibold ${isLight ? 'text-stone-500' : 'text-stone-400'}`}>Anggota Aktif</p>
             <p className={`font-display font-mono tabular-nums text-2xl sm:text-3xl font-extrabold tracking-tight flex items-baseline gap-1 ${isLight ? 'text-stone-900' : 'text-stone-100'}`}>
               {animatedActiveTeachers} <span className="text-[11px] text-stone-400 font-medium font-sans">Orang</span>
             </p>
+            <p className="text-[10px] font-medium text-stone-400 mt-0.5">Terdaftar Aktif</p>
           </div>
         </div>
 
         {/* Card 2: Jumlah Kegiatan */}
         <div 
           onClick={() => onNavigate('jadwal')}
-          className={`${cardBgClass} rounded-2xl p-5 border flex items-center gap-4 hover:-translate-y-0.5 hover:shadow-md ${isLight ? 'hover:border-red-300' : 'hover:border-amber-500/40'} transition-all duration-200 cursor-pointer group`}
+          className={`${cardBgClass} relative overflow-hidden rounded-2xl p-5 border flex items-center gap-4 hover:-translate-y-0.5 hover:shadow-md ${isLight ? 'hover:border-red-300' : 'hover:border-amber-500/40'} transition-all duration-200 cursor-pointer group`}
         >
-          <div className="w-14 h-14 rounded-xl bg-gradient-to-tr from-emerald-700 to-emerald-600 text-white flex items-center justify-center shadow-sm group-hover:scale-105 transition-transform duration-200">
+          <div className="absolute top-0 inset-x-0 h-[3px] bg-gradient-to-r from-emerald-700 to-emerald-500" />
+          <div className={`pointer-events-none absolute inset-0 -translate-x-full group-hover:translate-x-full transition-transform duration-700 ease-out bg-gradient-to-r from-transparent ${isLight ? 'via-emerald-500/[0.06]' : 'via-white/[0.05]'} to-transparent`} />
+          <Calendar className={`absolute -right-3 -bottom-3 w-20 h-20 pointer-events-none transition-transform duration-300 group-hover:scale-110 ${isLight ? 'text-emerald-900/[0.04]' : 'text-emerald-400/[0.06]'}`} />
+          <div className="w-14 h-14 rounded-xl bg-gradient-to-tr from-emerald-700 to-emerald-600 text-white flex items-center justify-center shadow-sm group-hover:scale-105 transition-transform duration-200 shrink-0 relative z-10">
             <Calendar className="w-7 h-7" />
           </div>
-          <div>
+          <div className="relative z-10">
             <p className={`text-xs font-semibold ${isLight ? 'text-stone-500' : 'text-stone-400'}`}>Jumlah</p>
             <p className={`font-display font-mono tabular-nums text-2xl sm:text-3xl font-extrabold tracking-tight flex items-baseline gap-1 ${isLight ? 'text-stone-900' : 'text-stone-100'}`}>
               {animatedTotalEvents} <span className="text-[11px] text-stone-400 font-medium font-sans">Kegiatan</span>
             </p>
+            <p className="text-[10px] font-medium text-stone-400 mt-0.5">Agenda Terjadwal</p>
           </div>
         </div>
 
         {/* Card 3: Laki - laki */}
         <div 
           onClick={() => onNavigate('anggota')}
-          className={`${cardBgClass} rounded-2xl p-5 border flex items-center gap-4 hover:-translate-y-0.5 hover:shadow-md ${isLight ? 'hover:border-red-300' : 'hover:border-amber-500/40'} transition-all duration-200 cursor-pointer group`}
+          className={`${cardBgClass} relative overflow-hidden rounded-2xl p-5 border flex items-center gap-4 hover:-translate-y-0.5 hover:shadow-md ${isLight ? 'hover:border-red-300' : 'hover:border-amber-500/40'} transition-all duration-200 cursor-pointer group`}
         >
-          <div className="w-14 h-14 rounded-xl bg-gradient-to-tr from-stone-700 to-stone-600 text-amber-100 flex items-center justify-center shadow-sm group-hover:scale-105 transition-transform duration-200">
+          <div className="absolute top-0 inset-x-0 h-[3px] bg-gradient-to-r from-stone-700 to-stone-500" />
+          <div className={`pointer-events-none absolute inset-0 -translate-x-full group-hover:translate-x-full transition-transform duration-700 ease-out bg-gradient-to-r from-transparent ${isLight ? 'via-stone-500/[0.06]' : 'via-white/[0.05]'} to-transparent`} />
+          <User className={`absolute -right-3 -bottom-3 w-20 h-20 pointer-events-none transition-transform duration-300 group-hover:scale-110 ${isLight ? 'text-stone-900/[0.04]' : 'text-stone-300/[0.06]'}`} />
+          <div className="w-14 h-14 rounded-xl bg-gradient-to-tr from-stone-700 to-stone-600 text-amber-100 flex items-center justify-center shadow-sm group-hover:scale-105 transition-transform duration-200 shrink-0 relative z-10">
             <User className="w-7 h-7" />
           </div>
-          <div>
+          <div className="relative z-10">
             <p className={`text-xs font-semibold ${isLight ? 'text-stone-500' : 'text-stone-400'}`}>Laki - laki</p>
             <p className={`font-display font-mono tabular-nums text-2xl sm:text-3xl font-extrabold tracking-tight flex items-baseline gap-1 ${isLight ? 'text-stone-900' : 'text-stone-100'}`}>
               {animatedMaleCount} <span className="text-[11px] text-stone-400 font-medium font-sans">Orang</span>
+            </p>
+            <p className="text-[10px] font-medium text-stone-400 tabular-nums mt-0.5">
+              {activeTeachersCount > 0 ? Math.round((maleCount / activeTeachersCount) * 100) : 0}% dari anggota
             </p>
           </div>
         </div>
@@ -769,15 +806,21 @@ export const BerandaView: React.FC<BerandaViewProps> = ({
         {/* Card 4: Perempuan */}
         <div 
           onClick={() => onNavigate('anggota')}
-          className={`${cardBgClass} rounded-2xl p-5 border flex items-center gap-4 hover:-translate-y-0.5 hover:shadow-md ${isLight ? 'hover:border-red-300' : 'hover:border-amber-500/40'} transition-all duration-200 cursor-pointer group`}
+          className={`${cardBgClass} relative overflow-hidden rounded-2xl p-5 border flex items-center gap-4 hover:-translate-y-0.5 hover:shadow-md ${isLight ? 'hover:border-red-300' : 'hover:border-amber-500/40'} transition-all duration-200 cursor-pointer group`}
         >
-          <div className="w-14 h-14 rounded-xl bg-gradient-to-tr from-amber-700 to-amber-600 text-white flex items-center justify-center shadow-sm group-hover:scale-105 transition-transform duration-200">
+          <div className="absolute top-0 inset-x-0 h-[3px] bg-gradient-to-r from-amber-700 to-amber-500" />
+          <div className={`pointer-events-none absolute inset-0 -translate-x-full group-hover:translate-x-full transition-transform duration-700 ease-out bg-gradient-to-r from-transparent ${isLight ? 'via-amber-500/[0.06]' : 'via-white/[0.05]'} to-transparent`} />
+          <User className={`absolute -right-3 -bottom-3 w-20 h-20 pointer-events-none transition-transform duration-300 group-hover:scale-110 ${isLight ? 'text-amber-900/[0.04]' : 'text-amber-400/[0.06]'}`} />
+          <div className="w-14 h-14 rounded-xl bg-gradient-to-tr from-amber-700 to-amber-600 text-white flex items-center justify-center shadow-sm group-hover:scale-105 transition-transform duration-200 shrink-0 relative z-10">
             <User className="w-7 h-7" />
           </div>
-          <div>
+          <div className="relative z-10">
             <p className={`text-xs font-semibold ${isLight ? 'text-stone-500' : 'text-stone-400'}`}>Perempuan</p>
             <p className={`font-display font-mono tabular-nums text-2xl sm:text-3xl font-extrabold tracking-tight flex items-baseline gap-1 ${isLight ? 'text-stone-900' : 'text-stone-100'}`}>
               {animatedFemaleCount} <span className="text-[11px] text-stone-400 font-medium font-sans">Orang</span>
+            </p>
+            <p className="text-[10px] font-medium text-stone-400 tabular-nums mt-0.5">
+              {activeTeachersCount > 0 ? Math.round((femaleCount / activeTeachersCount) * 100) : 0}% dari anggota
             </p>
           </div>
         </div>
@@ -787,9 +830,10 @@ export const BerandaView: React.FC<BerandaViewProps> = ({
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4 stagger-2">
         <div
           onClick={() => onNavigate('keuangan')}
-          className={`${cardBgClass} rounded-2xl p-4 sm:p-5 border flex items-center justify-between gap-3 hover:-translate-y-0.5 ${isLight ? 'hover:border-red-300' : 'hover:border-amber-500/40'} transition-all duration-200 cursor-pointer group`}
+          className={`${cardBgClass} relative overflow-hidden rounded-2xl p-4 sm:p-5 border flex items-center justify-between gap-3 hover:-translate-y-0.5 ${isLight ? 'hover:border-red-300' : 'hover:border-amber-500/40'} transition-all duration-200 cursor-pointer group`}
         >
-          <div className="flex items-center gap-3 min-w-0">
+          <Wallet className={`absolute -right-3 -bottom-3 w-20 h-20 pointer-events-none transition-transform duration-300 group-hover:scale-110 ${isLight ? 'text-emerald-900/[0.04]' : 'text-emerald-400/[0.06]'}`} />
+          <div className="flex items-center gap-3 min-w-0 relative z-10">
             <div className={`w-11 h-11 rounded-xl flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform duration-200 ${isLight ? 'bg-emerald-50 text-emerald-700 border border-emerald-200/80' : 'bg-emerald-950/60 text-emerald-400 border border-emerald-800/50'}`}>
               <Wallet className="w-5 h-5" />
             </div>
@@ -798,14 +842,15 @@ export const BerandaView: React.FC<BerandaViewProps> = ({
               <p className={`font-display tabular-nums text-xl font-black ${isLight ? 'text-stone-900' : 'text-white'}`}>{animatedCashPercentage}% <span className="text-xs font-medium text-stone-400">({paidTeachersCount}/{activeTeachersCount})</span></p>
             </div>
           </div>
-          <TrendingUp className="w-5 h-5 text-emerald-500 shrink-0" />
+          <TrendingUp className="w-5 h-5 text-emerald-500 shrink-0 relative z-10" />
         </div>
 
         <div
           onClick={() => onNavigate('anggota')}
-          className={`${cardBgClass} rounded-2xl p-4 sm:p-5 border flex items-center justify-between gap-3 hover:-translate-y-0.5 ${isLight ? 'hover:border-red-300' : 'hover:border-amber-500/40'} transition-all duration-200 cursor-pointer group`}
+          className={`${cardBgClass} relative overflow-hidden rounded-2xl p-4 sm:p-5 border flex items-center justify-between gap-3 hover:-translate-y-0.5 ${isLight ? 'hover:border-red-300' : 'hover:border-amber-500/40'} transition-all duration-200 cursor-pointer group`}
         >
-          <div className="flex items-center gap-3 min-w-0">
+          <Award className={`absolute -right-3 -bottom-3 w-20 h-20 pointer-events-none transition-transform duration-300 group-hover:scale-110 ${isLight ? 'text-amber-900/[0.04]' : 'text-amber-400/[0.06]'}`} />
+          <div className="flex items-center gap-3 min-w-0 relative z-10">
             <div className={`w-11 h-11 rounded-xl flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform duration-200 ${isLight ? 'bg-amber-50 text-amber-700 border border-amber-200/80' : 'bg-amber-950/60 text-amber-400 border border-amber-800/50'}`}>
               <Award className="w-5 h-5" />
             </div>
@@ -865,29 +910,67 @@ export const BerandaView: React.FC<BerandaViewProps> = ({
             </div>
           </div>
 
-          <div className="flex-1 flex flex-col items-center justify-center relative py-6">
-            {renderDonut(attendancePercentage, tidakHadirPercentage, 'stroke-emerald-500', 'stroke-red-700')}
-            <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
-              <span className={`font-display tabular-nums text-2xl sm:text-3xl font-black ${isLight ? 'text-stone-900' : 'text-white'} leading-none`}>{animatedAttendancePct}%</span>
-              <span className={`text-[10px] sm:text-xs font-extrabold uppercase tracking-widest mt-1 ${isLight ? 'text-emerald-700' : 'text-emerald-400'}`}>Hadir</span>
-              <span className="text-[10px] font-medium text-stone-400 mt-0.5">dari {activeTeachersCount} Anggota</span>
+          <div className="flex-1 grid grid-cols-1 sm:grid-cols-2 gap-4 items-center py-4">
+            {/* Kiri: Diagram Donat */}
+            <div className="flex flex-col items-center justify-center relative">
+              {renderDonut(attendancePercentage, tidakHadirPercentage, 'stroke-emerald-500', 'stroke-red-700')}
+              <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
+                <span className={`font-display tabular-nums text-2xl sm:text-3xl font-black ${isLight ? 'text-stone-900' : 'text-white'} leading-none`}>{animatedAttendancePct}%</span>
+                <span className={`text-[10px] sm:text-xs font-extrabold uppercase tracking-widest mt-1 ${isLight ? 'text-emerald-700' : 'text-emerald-400'}`}>Hadir</span>
+                <span className="text-[10px] font-medium text-stone-400 mt-0.5">dari {activeTeachersCount} Anggota</span>
+              </div>
+            </div>
+
+            {/* Kanan: 4 Kartu Mini Rincian Status */}
+            <div className="grid grid-cols-2 gap-2.5">
+              <div className={`p-3 rounded-xl border ${isLight ? 'bg-emerald-50/70 border-emerald-200/80' : 'bg-emerald-950/40 border-emerald-800/50'}`}>
+                <div className="flex items-center gap-1.5 mb-1">
+                  <span className="w-2 h-2 rounded-full bg-emerald-500" />
+                  <span className={`text-[10px] font-extrabold uppercase tracking-wider ${isLight ? 'text-emerald-800' : 'text-emerald-300'}`}>Hadir</span>
+                </div>
+                <p className={`font-display tabular-nums text-xl font-black ${isLight ? 'text-emerald-900' : 'text-white'}`}>{hadirCount}</p>
+                <p className="text-[10px] text-stone-400 font-medium">Anggota</p>
+              </div>
+
+              <div className={`p-3 rounded-xl border ${isLight ? 'bg-amber-50/70 border-amber-200/80' : 'bg-amber-950/40 border-amber-800/50'}`}>
+                <div className="flex items-center gap-1.5 mb-1">
+                  <span className="w-2 h-2 rounded-full bg-amber-500" />
+                  <span className={`text-[10px] font-extrabold uppercase tracking-wider ${isLight ? 'text-amber-800' : 'text-amber-300'}`}>Sakit</span>
+                </div>
+                <p className={`font-display tabular-nums text-xl font-black ${isLight ? 'text-amber-900' : 'text-white'}`}>{sakitCount}</p>
+                <p className="text-[10px] text-stone-400 font-medium">Anggota</p>
+              </div>
+
+              <div className={`p-3 rounded-xl border ${isLight ? 'bg-blue-50/70 border-blue-200/80' : 'bg-blue-950/40 border-blue-800/50'}`}>
+                <div className="flex items-center gap-1.5 mb-1">
+                  <span className="w-2 h-2 rounded-full bg-blue-500" />
+                  <span className={`text-[10px] font-extrabold uppercase tracking-wider ${isLight ? 'text-blue-800' : 'text-blue-300'}`}>Izin</span>
+                </div>
+                <p className={`font-display tabular-nums text-xl font-black ${isLight ? 'text-blue-900' : 'text-white'}`}>{izinCount}</p>
+                <p className="text-[10px] text-stone-400 font-medium">Anggota</p>
+              </div>
+
+              <div className={`p-3 rounded-xl border ${isLight ? 'bg-red-50/70 border-red-200/80' : 'bg-red-950/40 border-red-800/50'}`}>
+                <div className="flex items-center gap-1.5 mb-1">
+                  <span className="w-2 h-2 rounded-full bg-red-700" />
+                  <span className={`text-[10px] font-extrabold uppercase tracking-wider ${isLight ? 'text-red-800' : 'text-red-300'}`}>Alpha</span>
+                </div>
+                <p className={`font-display tabular-nums text-xl font-black ${isLight ? 'text-red-900' : 'text-white'}`}>{alphaCount}</p>
+                <p className="text-[10px] text-stone-400 font-medium">Belum Hadir</p>
+              </div>
             </div>
           </div>
-          <div className={`pt-4 border-t ${isLight ? 'border-stone-200/80' : 'border-stone-800'} flex flex-col items-center justify-center gap-2 mt-2`}>
-            <p className={`text-xs font-bold tabular-nums ${isLight ? 'text-stone-700' : 'text-stone-300'}`}>
-              <span className="text-emerald-500 font-extrabold">{hadirCount} Hadir</span> • {sakitCount} Sakit • {izinCount} Izin • {alphaCount} Alpha
-            </p>
-            <div className="flex items-center justify-center gap-6">
-              <div className="flex items-center gap-2">
-                <div className="w-3 h-3 rounded-full bg-emerald-500 shadow-sm relative flex items-center justify-center">
-                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-40"></span>
-                </div>
-                <span className={`text-xs font-bold tabular-nums ${isLight ? 'text-stone-600' : 'text-stone-300'}`}>Hadir ({attendancePercentage}%)</span>
+
+          <div className={`pt-3.5 border-t ${isLight ? 'border-stone-200/80' : 'border-stone-800'} flex items-center justify-center gap-6 mt-1`}>
+            <div className="flex items-center gap-2">
+              <div className="w-2.5 h-2.5 rounded-full bg-emerald-500 shadow-sm relative flex items-center justify-center">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-40"></span>
               </div>
-              <div className="flex items-center gap-2">
-                <div className="w-3 h-3 rounded-full bg-red-700 shadow-sm"></div>
-                <span className={`text-xs font-bold tabular-nums ${isLight ? 'text-stone-600' : 'text-stone-300'}`}>Belum/Tidak ({tidakHadirPercentage}%)</span>
-              </div>
+              <span className={`text-xs font-bold tabular-nums ${isLight ? 'text-stone-600' : 'text-stone-300'}`}>Hadir ({attendancePercentage}%)</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <div className="w-2.5 h-2.5 rounded-full bg-red-700 shadow-sm"></div>
+              <span className={`text-xs font-bold tabular-nums ${isLight ? 'text-stone-600' : 'text-stone-300'}`}>Belum/Tidak ({tidakHadirPercentage}%)</span>
             </div>
           </div>
         </div>
@@ -971,6 +1054,7 @@ export const BerandaView: React.FC<BerandaViewProps> = ({
                       )}
                       {statusInfo.isCountdown ? (
                         <span className={`text-[11px] font-bold font-mono tabular-nums tracking-wide ${isLight ? 'text-amber-900' : 'text-amber-300'} flex items-center`}>
+                          <span className="font-sans text-[9px] font-extrabold uppercase tracking-wider opacity-70 mr-1.5">Mulai Dalam</span>
                           <span>{statusInfo.h}</span>
                           <span className="animate-colon mx-0.5">:</span>
                           <span>{statusInfo.m}</span>
@@ -991,7 +1075,11 @@ export const BerandaView: React.FC<BerandaViewProps> = ({
                     {!statusInfo.isFinished && (
                       <button
                         onClick={() => handleAttendanceClick(event)}
-                        className="text-xs font-bold px-3 py-1.5 rounded-xl transition-all active:scale-95 shrink-0 bg-red-800 text-white hover:bg-red-700 cursor-pointer shadow-sm"
+                        className={`text-xs font-bold px-3 py-1.5 rounded-xl transition-all active:scale-95 shrink-0 bg-red-800 text-white hover:bg-red-700 cursor-pointer shadow-sm ${
+                          (statusInfo.isOngoing || statusInfo.isUrgent)
+                            ? 'ring-2 ring-red-500/40 shadow-[0_0_12px_rgba(185,28,28,0.35)]'
+                            : ''
+                        }`}
                       >
                         Absen
                       </button>
@@ -1011,28 +1099,51 @@ export const BerandaView: React.FC<BerandaViewProps> = ({
         {/* Kotak Status Kas Anggota */}
         <div className="grid grid-cols-1 gap-6">
 
-          {/* Kotak 1: Belum Bayar Kas */}
+          {/* Kotak 1: Status Kontribusi Anggota */}
           <div className={`${cardBgClass} rounded-2xl p-6 border flex flex-col justify-between hover:-translate-y-0.5 transition-all duration-200`}>
             <div>
-              <div className={`flex items-center justify-between pb-4 mb-4 border-b ${isLight ? 'border-stone-200/80' : 'border-stone-800'}`}>
+              <div className={`flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 mb-4 border-b ${isLight ? 'border-stone-200/80' : 'border-stone-800'}`}>
                 <div className="flex items-center gap-2.5">
-                  <div className={`p-2 rounded-xl border ${isLight ? 'bg-red-50 text-red-800 border-red-200/80' : 'bg-red-950/60 text-red-400 border-red-800/50'}`}>
-                    <UserX className="w-5 h-5" />
+                  <div className={`p-2 rounded-xl border ${
+                    cashFilterTab === 'unpaid'
+                      ? (isLight ? 'bg-red-50 text-red-800 border-red-200/80' : 'bg-red-950/60 text-red-400 border-red-800/50')
+                      : (isLight ? 'bg-emerald-50 text-emerald-700 border-emerald-200/80' : 'bg-emerald-950/60 text-emerald-400 border-emerald-800/50')
+                  }`}>
+                    {cashFilterTab === 'unpaid' ? <UserX className="w-5 h-5" /> : <CheckCircle2 className="w-5 h-5" />}
                   </div>
                   <div>
                     <h3 className={`text-base font-extrabold ${isLight ? 'text-stone-900' : 'text-stone-100'}`}>
-                      Belum Membayar Kontribusi
+                      {cashFilterTab === 'unpaid' ? 'Belum Membayar Kontribusi' : 'Telah Melunasi Kontribusi'}
                     </h3>
-                    <p className="text-[11px] text-stone-400 font-medium">Status pembayaran kontribusi anggota</p>
+                    <p className="text-[11px] text-stone-400 font-medium">Status pembayaran kontribusi anggota aktif</p>
                   </div>
                 </div>
-                <span className={`text-xs font-black tabular-nums px-3 py-1 rounded-lg ${
-                  unpaidTeachers.length > 0 
-                    ? (isLight ? 'bg-red-100 text-red-800' : 'bg-red-950/80 text-red-300 border border-red-800/50')
-                    : (isLight ? 'bg-emerald-100 text-emerald-700' : 'bg-emerald-950/80 text-emerald-300 border border-emerald-800/50')
-                }`}>
-                  {unpaidTeachers.length} Guru
-                </span>
+
+                {/* Tab Switcher: Belum Lunas vs Sudah Lunas */}
+                <div className={`inline-flex p-1 rounded-xl border self-start sm:self-auto ${isLight ? 'bg-stone-100 border-stone-200/80' : 'bg-stone-800/90 border-stone-700'}`}>
+                  <button
+                    type="button"
+                    onClick={() => setCashFilterTab('unpaid')}
+                    className={`px-3 py-1.5 rounded-lg text-[11px] font-extrabold tabular-nums transition-all cursor-pointer ${
+                      cashFilterTab === 'unpaid'
+                        ? (isLight ? 'bg-white text-red-800 shadow-sm' : 'bg-red-950 text-amber-300 shadow-sm')
+                        : (isLight ? 'text-stone-500 hover:text-stone-800' : 'text-stone-400 hover:text-stone-200')
+                    }`}
+                  >
+                    Belum ({unpaidTeachers.length})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setCashFilterTab('paid')}
+                    className={`px-3 py-1.5 rounded-lg text-[11px] font-extrabold tabular-nums transition-all cursor-pointer ${
+                      cashFilterTab === 'paid'
+                        ? (isLight ? 'bg-white text-emerald-700 shadow-sm' : 'bg-emerald-950 text-emerald-300 shadow-sm')
+                        : (isLight ? 'text-stone-500 hover:text-stone-800' : 'text-stone-400 hover:text-stone-200')
+                    }`}
+                  >
+                    Lunas ({paidTeachers.length})
+                  </button>
+                </div>
               </div>
 
               {/* Progress Bar */}
@@ -1043,106 +1154,196 @@ export const BerandaView: React.FC<BerandaViewProps> = ({
                 </div>
                 <div className={`w-full h-2 rounded-full overflow-hidden ${isLight ? 'bg-stone-100' : 'bg-stone-800'}`}>
                   <div 
-                    className="h-full bg-gradient-to-r from-emerald-500 to-teal-500 transition-all duration-700 rounded-full" 
-                    style={{ width: `${cashPaidPercentage}%` }}
-                  />
+                    className="h-full bg-gradient-to-r from-emerald-500 to-teal-500 transition-all duration-700 ease-out rounded-full relative overflow-hidden" 
+                    style={{ width: `${isEntryReady ? cashPaidPercentage : 0}%` }}
+                  >
+                    {cashPaidPercentage > 0 && (
+                      <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/35 to-transparent animate-progress-shimmer" />
+                    )}
+                  </div>
                 </div>
               </div>
 
-              {/* List Guru Belum Membayar Kontribusi (Kiri: Laki-laki, Kanan: Perempuan) */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 max-h-[290px] overflow-y-auto pr-2 custom-scrollbar items-start">
-                {unpaidTeachers.length === 0 ? (
-                  <div className={`md:col-span-2 py-10 px-4 rounded-2xl border border-dashed flex flex-col items-center justify-center text-center animate-in fade-in duration-300 ${
-                    isLight ? 'bg-emerald-50/40 border-emerald-200 text-stone-600' : 'bg-emerald-950/20 border-emerald-900/40 text-stone-300'
-                  }`}>
-                    <CheckCircle2 className="w-10 h-10 mb-2 text-emerald-500" />
-                    <p className="text-xs font-black text-emerald-600">Semua Anggota Telah Lunas</p>
-                    <p className="text-[11px] text-stone-400 mt-0.5">Tidak ada tanggungan kontribusi yang belum diselesaikan.</p>
-                  </div>
-                ) : (
-                  <>
-                    {/* Kolom Kiri: Laki-laki */}
-                    <div className="space-y-2.5">
-                      {unpaidMaleTeachers.map((teacher, index) => (
-                        <div
-                          key={teacher.id}
-                          className={`p-3 rounded-2xl border transition-all duration-200 hover:-translate-y-0.5 flex items-center justify-between gap-3 ${itemBgClass}`}
-                        >
-                          <div className="flex items-center gap-3 min-w-0">
-                            <div className={`w-8 h-8 rounded-xl flex items-center justify-center font-black text-xs shrink-0 border ${
-                              isLight ? 'bg-stone-100 text-stone-700 border-stone-200' : 'bg-stone-800 text-stone-200 border-stone-700'
-                            }`}>
-                              L
-                            </div>
+              {/* List Guru Berdasarkan Tab Terpilih */}
+              {cashFilterTab === 'unpaid' ? (
+                <div key="tab-unpaid" className="grid grid-cols-1 md:grid-cols-2 gap-4 max-h-[290px] overflow-y-auto pr-2 custom-scrollbar items-start animate-in fade-in duration-200">
+                  {unpaidTeachers.length === 0 ? (
+                    <div className={`md:col-span-2 py-10 px-4 rounded-2xl border border-dashed flex flex-col items-center justify-center text-center animate-in fade-in duration-300 ${
+                      isLight ? 'bg-emerald-50/40 border-emerald-200 text-stone-600' : 'bg-emerald-950/20 border-emerald-900/40 text-stone-300'
+                    }`}>
+                      <CheckCircle2 className="w-10 h-10 mb-2 text-emerald-500" />
+                      <p className="text-xs font-black text-emerald-600">Semua Anggota Telah Lunas</p>
+                      <p className="text-[11px] text-stone-400 mt-0.5">Tidak ada tanggungan kontribusi yang belum diselesaikan.</p>
+                    </div>
+                  ) : (
+                    <>
+                      {/* Kolom Kiri: Laki-laki */}
+                      <div className="space-y-2.5">
+                        {unpaidMaleTeachers.map((teacher, index) => (
+                          <div
+                            key={teacher.id}
+                            className={`p-3 rounded-2xl border transition-all duration-200 hover:-translate-y-0.5 flex items-center justify-between gap-3 ${itemBgClass}`}
+                          >
+                            <div className="flex items-center gap-3 min-w-0">
+                              <div className={`w-8 h-8 rounded-xl flex items-center justify-center font-black text-xs shrink-0 border ${
+                                isLight ? 'bg-stone-100 text-stone-700 border-stone-200' : 'bg-stone-800 text-stone-200 border-stone-700'
+                              }`}>
+                                L
+                              </div>
 
-                            <div className="min-w-0">
-                              <h4 className={`font-bold text-xs sm:text-sm truncate ${isLight ? 'text-stone-900' : 'text-stone-100'}`}>
-                                {index + 1}. {teacher.name || 'Tanpa Nama'}
-                              </h4>
-                              <div className="flex items-center gap-2 text-[10px] text-stone-400 font-medium mt-0.5">
-                                <span>NIP: {teacher.nip || '-'}</span>
-                                <span>•</span>
-                                <span className="truncate">{teacher.school || '-'}</span>
+                              <div className="min-w-0">
+                                <h4 className={`font-bold text-xs sm:text-sm truncate ${isLight ? 'text-stone-900' : 'text-stone-100'}`}>
+                                  {index + 1}. {teacher.name || 'Tanpa Nama'}
+                                </h4>
+                                <div className="flex items-center gap-2 text-[10px] text-stone-400 font-medium mt-0.5">
+                                  <span>NIP: {teacher.nip || '-'}</span>
+                                  <span>•</span>
+                                  <span className="truncate">{teacher.school || '-'}</span>
+                                </div>
                               </div>
                             </div>
+
+                            <span 
+                              title={`${getTeacherUnpaidCount(teacher.id)} kegiatan belum dibayar`}
+                              className={`text-[10px] font-extrabold tabular-nums px-2.5 py-1 rounded-lg border shrink-0 ${
+                                isLight 
+                                  ? 'bg-red-50 text-red-800 border-red-200/80' 
+                                  : 'bg-red-950/80 text-red-300 border-red-800/70'
+                              }`}
+                            >
+                              Tunggakan : {getTeacherUnpaidCount(teacher.id)}
+                            </span>
                           </div>
+                        ))}
+                      </div>
 
-                          <span 
-                            title={`${getTeacherUnpaidCount(teacher.id)} kegiatan belum dibayar`}
-                            className={`text-[10px] font-extrabold tabular-nums px-2.5 py-1 rounded-lg border shrink-0 ${
-                              isLight 
-                                ? 'bg-red-50 text-red-800 border-red-200/80' 
-                                : 'bg-red-950/80 text-red-300 border-red-800/70'
-                            }`}
+                      {/* Kolom Kanan: Perempuan */}
+                      <div className="space-y-2.5">
+                        {unpaidFemaleTeachers.map((teacher, index) => (
+                          <div
+                            key={teacher.id}
+                            className={`p-3 rounded-2xl border transition-all duration-200 hover:-translate-y-0.5 flex items-center justify-between gap-3 ${itemBgClass}`}
                           >
-                            Tunggakan : {getTeacherUnpaidCount(teacher.id)}
-                          </span>
-                        </div>
-                      ))}
-                    </div>
+                            <div className="flex items-center gap-3 min-w-0">
+                              <div className={`w-8 h-8 rounded-xl flex items-center justify-center font-black text-xs shrink-0 border ${
+                                isLight ? 'bg-amber-50 text-amber-800 border-amber-200' : 'bg-amber-950/70 text-amber-300 border-amber-800/60'
+                              }`}>
+                                P
+                              </div>
 
-                    {/* Kolom Kanan: Perempuan */}
-                    <div className="space-y-2.5">
-                      {unpaidFemaleTeachers.map((teacher, index) => (
-                        <div
-                          key={teacher.id}
-                          className={`p-3 rounded-2xl border transition-all duration-200 hover:-translate-y-0.5 flex items-center justify-between gap-3 ${itemBgClass}`}
-                        >
-                          <div className="flex items-center gap-3 min-w-0">
-                            <div className={`w-8 h-8 rounded-xl flex items-center justify-center font-black text-xs shrink-0 border ${
-                              isLight ? 'bg-amber-50 text-amber-800 border-amber-200' : 'bg-amber-950/70 text-amber-300 border-amber-800/60'
-                            }`}>
-                              P
-                            </div>
-
-                            <div className="min-w-0">
-                              <h4 className={`font-bold text-xs sm:text-sm truncate ${isLight ? 'text-stone-900' : 'text-stone-100'}`}>
-                                {index + 1}. {teacher.name || 'Tanpa Nama'}
-                              </h4>
-                              <div className="flex items-center gap-2 text-[10px] text-stone-400 font-medium mt-0.5">
-                                <span>NIP: {teacher.nip || '-'}</span>
-                                <span>•</span>
-                                <span className="truncate">{teacher.school || '-'}</span>
+                              <div className="min-w-0">
+                                <h4 className={`font-bold text-xs sm:text-sm truncate ${isLight ? 'text-stone-900' : 'text-stone-100'}`}>
+                                  {index + 1}. {teacher.name || 'Tanpa Nama'}
+                                </h4>
+                                <div className="flex items-center gap-2 text-[10px] text-stone-400 font-medium mt-0.5">
+                                  <span>NIP: {teacher.nip || '-'}</span>
+                                  <span>•</span>
+                                  <span className="truncate">{teacher.school || '-'}</span>
+                                </div>
                               </div>
                             </div>
-                          </div>
 
-                          <span 
-                            title={`${getTeacherUnpaidCount(teacher.id)} kegiatan belum dibayar`}
-                            className={`text-[10px] font-extrabold tabular-nums px-2.5 py-1 rounded-lg border shrink-0 ${
-                              isLight 
-                                ? 'bg-red-50 text-red-800 border-red-200/80' 
-                                : 'bg-red-950/80 text-red-300 border-red-800/70'
-                            }`}
-                          >
-                            Tunggakan : {getTeacherUnpaidCount(teacher.id)}
-                          </span>
-                        </div>
-                      ))}
+                            <span 
+                              title={`${getTeacherUnpaidCount(teacher.id)} kegiatan belum dibayar`}
+                              className={`text-[10px] font-extrabold tabular-nums px-2.5 py-1 rounded-lg border shrink-0 ${
+                                isLight 
+                                  ? 'bg-red-50 text-red-800 border-red-200/80' 
+                                  : 'bg-red-950/80 text-red-300 border-red-800/70'
+                              }`}
+                            >
+                              Tunggakan : {getTeacherUnpaidCount(teacher.id)}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    </>
+                  )}
+                </div>
+              ) : (
+                <div key="tab-paid" className="grid grid-cols-1 md:grid-cols-2 gap-4 max-h-[290px] overflow-y-auto pr-2 custom-scrollbar items-start animate-in fade-in duration-200">
+                  {paidTeachers.length === 0 ? (
+                    <div className={`md:col-span-2 py-10 px-4 rounded-2xl border border-dashed flex flex-col items-center justify-center text-center ${
+                      isLight ? 'bg-stone-50 border-stone-200 text-stone-500' : 'bg-stone-800/40 border-stone-700 text-stone-400'
+                    }`}>
+                      <Wallet className="w-9 h-9 mb-2 text-stone-400" />
+                      <p className="text-xs font-bold">Belum Ada Anggota yang Lunas Penuh</p>
+                      <p className="text-[11px] text-stone-400 mt-0.5">Data akan muncul otomatis setelah pembayaran dicatat di menu Keuangan.</p>
                     </div>
-                  </>
-                )}
-              </div>
+                  ) : (
+                    <>
+                      {/* Kolom Kiri: Laki-laki */}
+                      <div className="space-y-2.5">
+                        {paidMaleTeachers.map((teacher, index) => (
+                          <div
+                            key={teacher.id}
+                            className={`p-3 rounded-2xl border transition-all duration-200 hover:-translate-y-0.5 flex items-center justify-between gap-3 ${itemBgClass}`}
+                          >
+                            <div className="flex items-center gap-3 min-w-0">
+                              <div className={`w-8 h-8 rounded-xl flex items-center justify-center font-black text-xs shrink-0 border ${
+                                isLight ? 'bg-stone-100 text-stone-700 border-stone-200' : 'bg-stone-800 text-stone-200 border-stone-700'
+                              }`}>
+                                L
+                              </div>
+                              <div className="min-w-0">
+                                <h4 className={`font-bold text-xs sm:text-sm truncate ${isLight ? 'text-stone-900' : 'text-stone-100'}`}>
+                                  {index + 1}. {teacher.name || 'Tanpa Nama'}
+                                </h4>
+                                <div className="flex items-center gap-2 text-[10px] text-stone-400 font-medium mt-0.5">
+                                  <span>NIP: {teacher.nip || '-'}</span>
+                                  <span>•</span>
+                                  <span className="truncate">{teacher.school || '-'}</span>
+                                </div>
+                              </div>
+                            </div>
+                            <span className={`text-[10px] font-extrabold px-2.5 py-1 rounded-lg border shrink-0 ${
+                              isLight
+                                ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                                : 'bg-emerald-950/70 text-emerald-300 border-emerald-800/60'
+                            }`}>
+                              Lunas
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+
+                      {/* Kolom Kanan: Perempuan */}
+                      <div className="space-y-2.5">
+                        {paidFemaleTeachers.map((teacher, index) => (
+                          <div
+                            key={teacher.id}
+                            className={`p-3 rounded-2xl border transition-all duration-200 hover:-translate-y-0.5 flex items-center justify-between gap-3 ${itemBgClass}`}
+                          >
+                            <div className="flex items-center gap-3 min-w-0">
+                              <div className={`w-8 h-8 rounded-xl flex items-center justify-center font-black text-xs shrink-0 border ${
+                                isLight ? 'bg-amber-50 text-amber-800 border-amber-200' : 'bg-amber-950/70 text-amber-300 border-amber-800/60'
+                              }`}>
+                                P
+                              </div>
+                              <div className="min-w-0">
+                                <h4 className={`font-bold text-xs sm:text-sm truncate ${isLight ? 'text-stone-900' : 'text-stone-100'}`}>
+                                  {index + 1}. {teacher.name || 'Tanpa Nama'}
+                                </h4>
+                                <div className="flex items-center gap-2 text-[10px] text-stone-400 font-medium mt-0.5">
+                                  <span>NIP: {teacher.nip || '-'}</span>
+                                  <span>•</span>
+                                  <span className="truncate">{teacher.school || '-'}</span>
+                                </div>
+                              </div>
+                            </div>
+                            <span className={`text-[10px] font-extrabold px-2.5 py-1 rounded-lg border shrink-0 ${
+                              isLight
+                                ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                                : 'bg-emerald-950/70 text-emerald-300 border-emerald-800/60'
+                            }`}>
+                              Lunas
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    </>
+                  )}
+                </div>
+              )}
             </div>
 
             <button

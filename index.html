@@ -32,11 +32,108 @@
           document.documentElement.classList.remove('dark');
           document.documentElement.style.colorScheme = 'light';
         }
+        window.__pgriBootErrors = [];
+        window.__pgriResetting = false;
+        window.addEventListener('error', function (ev) {
+          if (ev && ev.message) {
+            window.__pgriBootErrors.push(ev.message);
+          } else if (ev && ev.target && ev.target.tagName === 'SCRIPT') {
+            window.__pgriBootErrors.push('Gagal memuat skrip modul aplikasi');
+          }
+        }, true);
+        window.addEventListener('unhandledrejection', function (ev) {
+          if (ev && ev.reason) {
+            window.__pgriBootErrors.push(String(ev.reason && ev.reason.message ? ev.reason.message : ev.reason));
+          }
+        });
+        window.resetPgriAppCache = function (btnEl) {
+          if (window.__pgriResetting) return;
+          window.__pgriResetting = true;
+          var btn = btnEl || document.getElementById('pgri-preboot-btn');
+          if (btn) {
+            btn.disabled = true;
+            btn.style.opacity = '0.75';
+            btn.style.cursor = 'wait';
+            btn.textContent = 'Menyegarkan aplikasi...';
+          }
+          var reloaded = false;
+          var doReload = function () {
+            if (reloaded) return;
+            reloaded = true;
+            try {
+              window.location.reload();
+            } catch (e) {
+              window.location.href = window.location.href;
+            }
+          };
+          var safetyTimer = setTimeout(doReload, 800);
+          var cleanup = [];
+          try {
+            if ('serviceWorker' in navigator && navigator.serviceWorker && navigator.serviceWorker.getRegistrations) {
+              cleanup.push(
+                navigator.serviceWorker.getRegistrations().then(function (regs) {
+                  return Promise.all(regs.map(function (r) { return r.unregister().catch(function () {}); }));
+                }).catch(function () {})
+              );
+            }
+            if ('caches' in window && window.caches && window.caches.keys) {
+              cleanup.push(
+                caches.keys().then(function (keys) {
+                  return Promise.all(keys.map(function (k) { return caches.delete(k).catch(function () {}); }));
+                }).catch(function () {})
+              );
+            }
+          } catch (e) {}
+          Promise.all(cleanup).then(function () {
+            clearTimeout(safetyTimer);
+            setTimeout(doReload, 250);
+          }, function () {
+            clearTimeout(safetyTimer);
+            setTimeout(doReload, 250);
+          });
+        };
       })();
     </script>
   </head>
-  <body>
-    <div id="root"></div>
+  <body style="margin:0;background:#2b1012;color:#fef3c7;font-family:system-ui,-apple-system,sans-serif;">
+    <div id="root">
+      <div id="pgri-preboot" style="min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:24px;text-align:center;">
+        <p style="font-size:12px;letter-spacing:0.18em;text-transform:uppercase;font-weight:700;color:#fbbf24;margin:0 0 8px;">PGRI Ranting Gelang</p>
+        <p style="font-size:15px;font-weight:600;color:#fffbeb;margin:0;">Menyiapkan aplikasi...</p>
+        <div id="pgri-preboot-recovery" style="display:none;position:relative;z-index:20;margin-top:20px;max-width:390px;background:rgba(255,255,255,0.08);border:1px solid rgba(251,191,36,0.35);border-radius:14px;padding:16px;">
+          <p id="pgri-preboot-msg" style="font-size:13px;line-height:1.5;color:#fde68a;margin:0 0 12px;">
+            Aplikasi membutuhkan penyegaran cache browser agar dapat dimuat dengan normal. Tunggu beberapa detik lalu klik tombol di bawah.
+          </p>
+          <button id="pgri-preboot-btn" type="button" onclick="window.resetPgriAppCache(this)" style="position:relative;z-index:21;pointer-events:auto;touch-action:manipulation;background:#b91c1c;color:#fff;border:none;border-radius:10px;padding:10px 18px;font-size:13px;font-weight:700;cursor:pointer;">
+            Muat Ulang &amp; Bersihkan Cache
+          </button>
+        </div>
+      </div>
+    </div>
+    <script>
+      (function () {
+        var btn = document.getElementById('pgri-preboot-btn');
+        if (btn) {
+          btn.addEventListener('click', function () {
+            window.resetPgriAppCache(btn);
+          });
+        }
+        function showRecoveryIfStuck(onlyIfError) {
+          var root = document.getElementById('root');
+          var box = document.getElementById('pgri-preboot-recovery');
+          var msg = document.getElementById('pgri-preboot-msg');
+          if (!root || root.getAttribute('data-mounted') === '1' || !box) return;
+          var hasErr = window.__pgriBootErrors && window.__pgriBootErrors.length > 0;
+          if (onlyIfError && !hasErr) return;
+          box.style.display = 'block';
+          if (msg && hasErr) {
+            msg.textContent = 'Gagal memuat modul aplikasi (' + window.__pgriBootErrors[0] + '). Tunggu beberapa detik lalu klik tombol di bawah untuk menyegarkan.';
+          }
+        }
+        setTimeout(function () { showRecoveryIfStuck(true); }, 4000);
+        setTimeout(function () { showRecoveryIfStuck(false); }, 12000);
+      })();
+    </script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

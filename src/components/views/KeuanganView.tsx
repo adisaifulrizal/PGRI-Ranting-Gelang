@@ -45,6 +45,24 @@ const POS_ANGGARAN_OPTIONS: NonNullable<FinancialTransaction['category']>[] = [
   'Lainnya'
 ];
 
+const getCategoryBadgeStyle = (category?: string) => {
+  switch (category) {
+    case 'Iuran Anggota':
+    case 'Kontribusi Anggota':
+      return 'bg-emerald-50 text-emerald-800 dark:bg-emerald-950/70 dark:text-emerald-300 border-emerald-200/80 dark:border-emerald-800/50';
+    case 'Setoran PGRI Cabang':
+      return 'bg-sky-50 text-sky-800 dark:bg-sky-950/70 dark:text-sky-300 border-sky-200/80 dark:border-sky-800/50';
+    case 'Dana Sosial / Tali Asih':
+      return 'bg-rose-50 text-rose-800 dark:bg-rose-950/70 dark:text-rose-300 border-rose-200/80 dark:border-rose-800/50';
+    case 'Kegiatan HGN / PORSENI':
+      return 'bg-amber-50 text-amber-800 dark:bg-amber-950/70 dark:text-amber-300 border-amber-200/80 dark:border-amber-800/50';
+    case 'Operasional Sekretariat':
+      return 'bg-indigo-50 text-indigo-800 dark:bg-indigo-950/70 dark:text-indigo-300 border-indigo-200/80 dark:border-indigo-800/50';
+    default:
+      return 'bg-purple-50 text-purple-800 dark:bg-purple-950/70 dark:text-purple-300 border-purple-200/80 dark:border-purple-800/50';
+  }
+};
+
 const escapeHtmlSafe = (val: string) =>
   String(val || '')
     .replace(/&/g, '&amp;')
@@ -1425,8 +1443,17 @@ export const KeuanganView: React.FC<KeuanganViewProps> = ({
   const transactionsWithRunningBalance = useMemo(() => {
     let currentBalance = 0;
     
-    // Simpan index awal untuk memastikan data yang lama di-entry berada di atas data baru
-    const itemsWithIndex = transactions.map((tx, idx) => ({ ...tx, _originalIndex: idx }));
+    // Simpan index awal & pastikan transaksi Dana Masuk selalu menggunakan tanggal 02 pada bulannya
+    const itemsWithIndex = transactions.map((tx, idx) => {
+      const isDanaMasuk =
+        tx.id.startsWith('tx-kas-event-') ||
+        /^dana masuk pada bulan/i.test((tx.description || '').trim());
+      let normalizedDate = tx.date;
+      if (isDanaMasuk && typeof tx.date === 'string' && /^\d{4}-\d{2}-\d{2}/.test(tx.date)) {
+        normalizedDate = `${tx.date.slice(0, 7)}-02`;
+      }
+      return { ...tx, date: normalizedDate, _originalIndex: idx };
+    });
 
     const sorted = itemsWithIndex.sort((a, b) => {
       const timeA = new Date(a.date).getTime();
@@ -2143,10 +2170,11 @@ export const KeuanganView: React.FC<KeuanganViewProps> = ({
     const yearMonthCode = `${targetYearStr}-${targetMonthId}`;
     const targetEventKey = `month-${yearMonthCode}`;
 
-    // Tanggal transaksi menyesuaikan tahun & bulan yang diverifikasi
+    // Tanggal transaksi dana masuk selalu tanggal 02 pada tahun & bulan yang diverifikasi
     const now = new Date();
     const currentDay = String(now.getDate()).padStart(2, '0');
     const isoDate = `${targetYearStr}-${targetMonthId}-${currentDay}`;
+    const danaMasukDate = `${targetYearStr}-${targetMonthId}-02`;
     const autoTxId = `tx-kas-event-${targetEventKey}`;
 
     // Cari referensi guru
@@ -2228,12 +2256,12 @@ export const KeuanganView: React.FC<KeuanganViewProps> = ({
         const isTxExist = sourceTransactions.some(t => t.id === autoTxId);
         if (isTxExist) {
           return sourceTransactions.map(t =>
-            t.id === autoTxId ? { ...t, amount: totalAmount, date: isoDate, description: `Dana Masuk Pada Bulan ${monthName} ${targetYearStr}`, category: 'Kontribusi Anggota' } : t
+            t.id === autoTxId ? { ...t, amount: totalAmount, date: danaMasukDate, description: `Dana Masuk Pada Bulan ${monthName} ${targetYearStr}`, category: 'Kontribusi Anggota' } : t
           );
         }
         const newTx: FinancialTransaction = {
           id: autoTxId,
-          date: isoDate,
+          date: danaMasukDate,
           type: 'Pemasukan',
           amount: totalAmount,
           description: `Dana Masuk Pada Bulan ${monthName} ${targetYearStr}`,
@@ -2308,6 +2336,7 @@ export const KeuanganView: React.FC<KeuanganViewProps> = ({
       const now = new Date();
       const currentDay = String(now.getDate()).padStart(2, '0');
       const isoDate = `${targetYearStr}-${targetMonthId}-${currentDay}`;
+      const danaMasukDate = `${targetYearStr}-${targetMonthId}-02`;
       const autoTxId = `tx-kas-event-${targetEventKey}`;
 
       const applyBulkMutation = (sourcePayments: CashPayment[]): CashPayment[] => {
@@ -2382,12 +2411,12 @@ export const KeuanganView: React.FC<KeuanganViewProps> = ({
           const isTxExist = sourceTransactions.some(t => t.id === autoTxId);
           if (isTxExist) {
             return sourceTransactions.map(t =>
-              t.id === autoTxId ? { ...t, amount: totalAmount, date: isoDate, description: `Dana Masuk Pada Bulan ${monthName} ${targetYearStr}`, category: 'Kontribusi Anggota' } : t
+              t.id === autoTxId ? { ...t, amount: totalAmount, date: danaMasukDate, description: `Dana Masuk Pada Bulan ${monthName} ${targetYearStr}`, category: 'Kontribusi Anggota' } : t
             );
           }
           const newTx: FinancialTransaction = {
             id: autoTxId,
-            date: isoDate,
+            date: danaMasukDate,
             type: 'Pemasukan',
             amount: totalAmount,
             description: `Dana Masuk Pada Bulan ${monthName} ${targetYearStr}`,
@@ -4296,11 +4325,12 @@ export const KeuanganView: React.FC<KeuanganViewProps> = ({
                   <thead>
                     <tr className="border-b border-stone-200/80 [.dark_&]:border-stone-800 dark:border-stone-800 text-sm font-medium text-stone-500 [.dark_&]:text-stone-400 dark:text-stone-400">
                       <th className="pb-3 px-2 font-semibold text-center w-[5%]">No</th>
-                      <th className="pb-3 px-3 font-semibold text-center w-[12%]">Tanggal</th>
-                      <th className="pb-3 px-4 font-semibold text-left w-[35%]">Keterangan</th>
-                      <th className="pb-3 px-4 font-semibold text-right w-[14%]">Pemasukan</th>
-                      <th className="pb-3 px-4 font-semibold text-right w-[14%]">Pengeluaran</th>
-                      <th className="pb-3 px-4 font-semibold text-right w-[12%]">Total</th>
+                      <th className="pb-3 px-3 font-semibold text-center w-[11%]">Tanggal</th>
+                      <th className="pb-3 px-4 font-semibold text-left w-[24%]">Uraian</th>
+                      <th className="pb-3 px-4 font-semibold text-center w-[17%]">Keterangan</th>
+                      <th className="pb-3 px-4 font-semibold text-right w-[12%]">Pemasukan</th>
+                      <th className="pb-3 px-4 font-semibold text-right w-[12%]">Pengeluaran</th>
+                      <th className="pb-3 px-4 font-semibold text-right w-[11%]">Total</th>
                       {isAdmin && (
                         <th className="pb-3 px-2 font-semibold text-center w-[8%]">Aksi</th>
                       )}
@@ -4317,19 +4347,26 @@ export const KeuanganView: React.FC<KeuanganViewProps> = ({
                             {(() => {
                               const d = new Date(tx.date);
                               if (isNaN(d.getTime())) return '-';
-                              const day = String(d.getDate()).padStart(2, '0');
+                              const isDanaMasuk =
+                                tx.id.startsWith('tx-kas-event-') ||
+                                /^dana masuk pada bulan/i.test((tx.description || '').trim());
+                              const day = isDanaMasuk ? '02' : String(d.getDate()).padStart(2, '0');
                               const month = String(d.getMonth() + 1).padStart(2, '0');
                               const year = d.getFullYear();
                               return `${day}/${month}/${year}`;
                             })()}
                           </td>
                           <td className="py-3.5 px-4 text-stone-800 [.dark_&]:text-stone-200 dark:text-stone-200 font-medium">
-                            <div className="flex items-center gap-2">
-                              <span className="capitalize truncate max-w-[260px]">{tx.description}</span>
-                              {tx.category && (
-                                <span className="px-2 py-0.5 rounded-lg text-[10px] font-bold bg-red-50 text-red-800 dark:bg-red-950/70 dark:text-amber-300 border border-red-200/70 dark:border-red-800/50 shrink-0">
-                                  {tx.category === 'Iuran Anggota' ? 'Kontribusi Anggota' : tx.category}
+                            <span className="capitalize block truncate max-w-[260px]">{tx.description}</span>
+                          </td>
+                          <td className="py-3.5 px-4 text-center">
+                            <div className="flex items-center justify-center gap-2">
+                              {tx.category ? (
+                                <span className={`px-2 py-0.5 rounded-lg text-[10px] font-bold border shrink-0 ${getCategoryBadgeStyle(tx.category)}`}>
+                                  {tx.category === 'Iuran Anggota' || tx.category === 'Kontribusi Anggota' ? 'Kontribusi' : tx.category}
                                 </span>
+                              ) : (
+                                !tx.receiptImage && <span className="text-xs text-stone-400">-</span>
                               )}
                               {tx.receiptImage && (
                                 <button
@@ -4384,7 +4421,7 @@ export const KeuanganView: React.FC<KeuanganViewProps> = ({
                       ))
                     ) : (
                       <tr>
-                        <td colSpan={isAdmin ? 7 : 6} className="py-12 text-center">
+                        <td colSpan={isAdmin ? 8 : 7} className="py-12 text-center">
                           <div className="flex flex-col items-center justify-center gap-2">
                             <div className="w-12 h-12 rounded-xl bg-stone-100 [.dark_&]:bg-stone-800 dark:bg-stone-800 flex items-center justify-center text-stone-400">
                               <Wallet className="w-6 h-6" />

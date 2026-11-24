@@ -107,30 +107,185 @@ export default function App() {
   const [welcomeProgress, setWelcomeProgress] = useState(0);
   const [welcomePhase, setWelcomePhase] = useState<'loading' | 'ready' | 'showcase' | 'blackout' | 'exiting' | 'done'>('loading');
   const [isWelcomeAudioMuted, setIsWelcomeAudioMuted] = useState(false);
+  const [isWelcomeAudioUnlocked, setIsWelcomeAudioUnlocked] = useState(false);
   const welcomeAudioCtxRef = useRef<AudioContext | null>(null);
   const welcomeMasterGainRef = useRef<GainNode | null>(null);
   const welcomeBacksoundPlayedRef = useRef(false);
+  const welcomePhaseRef = useRef(welcomePhase);
+  const isWelcomeAudioMutedRef = useRef(isWelcomeAudioMuted);
+  welcomePhaseRef.current = welcomePhase;
+  isWelcomeAudioMutedRef.current = isWelcomeAudioMuted;
   const [kombelLogo, setKombelLogo] = useState<string | null>(() => {
-    return localStorage.getItem('logo-pgri');
+    try {
+      return localStorage.getItem('logo-pgri');
+    } catch {
+      return null;
+    }
   });
 
-  // Pembuka izin AudioContext browser saat pengguna berinteraksi di layar loading
-  const unlockWelcomeAudio = () => {
-    if (isWelcomeAudioMuted) return;
+  const ensureWelcomeAudioContext = (): AudioContext | null => {
     try {
       const AudioCtx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
-      if (!AudioCtx) return;
+      if (!AudioCtx) return null;
       if (!welcomeAudioCtxRef.current || welcomeAudioCtxRef.current.state === 'closed') {
-        welcomeAudioCtxRef.current = new AudioCtx();
+        const ctx = new AudioCtx();
+        ctx.addEventListener?.('statechange', () => {
+          setIsWelcomeAudioUnlocked(ctx.state === 'running');
+        });
+        welcomeAudioCtxRef.current = ctx;
       }
-      if (welcomeAudioCtxRef.current.state === 'suspended') {
-        welcomeAudioCtxRef.current.resume().catch(() => {});
-      }
+      setIsWelcomeAudioUnlocked(welcomeAudioCtxRef.current.state === 'running');
+      return welcomeAudioCtxRef.current;
+    } catch {
+      return null;
+    }
+  };
+
+  const playWelcomeBacksound = (ctx: AudioContext) => {
+    if (welcomeBacksoundPlayedRef.current || isWelcomeAudioMutedRef.current || ctx.state !== 'running') return;
+    welcomeBacksoundPlayedRef.current = true;
+    try {
+      const now = ctx.currentTime;
+
+      // Compressor agar suara penuh, padat, keras, namun tetap jernih tanpa pecah
+      const compressor = ctx.createDynamicsCompressor();
+      compressor.threshold.setValueAtTime(-14, now);
+      compressor.knee.setValueAtTime(12, now);
+      compressor.ratio.setValueAtTime(4, now);
+      compressor.attack.setValueAtTime(0.01, now);
+      compressor.release.setValueAtTime(0.25, now);
+      compressor.connect(ctx.destination);
+
+      const masterGain = ctx.createGain();
+      masterGain.gain.setValueAtTime(0.0001, now);
+      masterGain.gain.exponentialRampToValueAtTime(0.36, now + 0.9);
+      masterGain.gain.setValueAtTime(0.38, now + 4.3);
+      masterGain.gain.exponentialRampToValueAtTime(0.0001, now + 5.6);
+      masterGain.connect(compressor);
+      welcomeMasterGainRef.current = masterGain;
+
+      // 1. Cinematic Sub-Bass Boom & Rumble (Dentuman rendah menggelegar di awal)
+      const boomOsc = ctx.createOscillator();
+      const boomGain = ctx.createGain();
+      boomOsc.type = 'sine';
+      boomOsc.frequency.setValueAtTime(115, now);
+      boomOsc.frequency.exponentialRampToValueAtTime(42, now + 0.5);
+      boomOsc.frequency.exponentialRampToValueAtTime(32.7, now + 4.8);
+      boomGain.gain.setValueAtTime(0.0001, now);
+      boomGain.gain.exponentialRampToValueAtTime(0.42, now + 0.1);
+      boomGain.gain.exponentialRampToValueAtTime(0.24, now + 1.4);
+      boomGain.gain.setValueAtTime(0.22, now + 4.2);
+      boomGain.gain.exponentialRampToValueAtTime(0.0001, now + 5.5);
+      boomOsc.connect(boomGain);
+      boomGain.connect(masterGain);
+      boomOsc.start(now);
+      boomOsc.stop(now + 5.7);
+
+      // Lapisan Sub-Bass kedua (C1 = 32.7Hz & C2 = 65.41Hz) untuk getaran bass yang dalam
+      [32.7, 65.41].forEach((bassFreq, i) => {
+        const bOsc = ctx.createOscillator();
+        const bGain = ctx.createGain();
+        bOsc.type = i === 0 ? 'sine' : 'triangle';
+        bOsc.frequency.setValueAtTime(bassFreq, now);
+        bGain.gain.setValueAtTime(0.0001, now);
+        bGain.gain.exponentialRampToValueAtTime(i === 0 ? 0.3 : 0.2, now + 0.8);
+        bGain.gain.setValueAtTime(i === 0 ? 0.3 : 0.2, now + 4.3);
+        bGain.gain.exponentialRampToValueAtTime(0.0001, now + 5.6);
+        bOsc.connect(bGain);
+        bGain.connect(masterGain);
+        bOsc.start(now);
+        bOsc.stop(now + 5.8);
+      });
+
+      // 2. Filter Dinamis yang Membuka Lebar (Cinematic Brass & String Swell)
+      const filter = ctx.createBiquadFilter();
+      filter.type = 'lowpass';
+      filter.Q.setValueAtTime(2.2, now);
+      filter.frequency.setValueAtTime(280, now);
+      filter.frequency.exponentialRampToValueAtTime(2400, now + 3.4);
+      filter.frequency.exponentialRampToValueAtTime(520, now + 5.5);
+      filter.connect(masterGain);
+
+      // Harmoni akor megah Cmaj9 (C2, G2, C3, G3, B3, D4, E4, G4) dengan karakter sawtooth/triangle
+      const padNotes = [
+        { freq: 65.41, type: 'sawtooth' as OscillatorType, gain: 0.18, detune: -6 },
+        { freq: 98.0, type: 'sawtooth' as OscillatorType, gain: 0.16, detune: 5 },
+        { freq: 130.81, type: 'sawtooth' as OscillatorType, gain: 0.19, detune: -4 },
+        { freq: 196.0, type: 'triangle' as OscillatorType, gain: 0.17, detune: 4 },
+        { freq: 246.94, type: 'sawtooth' as OscillatorType, gain: 0.12, detune: -3 },
+        { freq: 293.66, type: 'triangle' as OscillatorType, gain: 0.13, detune: 3 },
+        { freq: 329.63, type: 'sawtooth' as OscillatorType, gain: 0.14, detune: -5 },
+        { freq: 392.0, type: 'triangle' as OscillatorType, gain: 0.13, detune: 6 }
+      ];
+
+      padNotes.forEach(({ freq, type, gain, detune }) => {
+        const osc = ctx.createOscillator();
+        const oscGain = ctx.createGain();
+        osc.type = type;
+        osc.frequency.setValueAtTime(freq, now);
+        osc.detune.setValueAtTime(detune, now);
+        oscGain.gain.setValueAtTime(gain, now);
+        osc.connect(oscGain);
+        oscGain.connect(filter);
+        osc.start(now);
+        osc.stop(now + 5.8);
+      });
+
+      // 3. Dentingan Emas Megah (Golden Chime) bertahap saat logo membesar ke tengah
+      const chimeNotes = [
+        { freq: 523.25, delay: 0.05, peak: 0.2 },
+        { freq: 659.25, delay: 0.4, peak: 0.19 },
+        { freq: 783.99, delay: 0.8, peak: 0.19 },
+        { freq: 987.77, delay: 1.25, peak: 0.17 },
+        { freq: 1046.5, delay: 1.75, peak: 0.18 }
+      ];
+
+      chimeNotes.forEach(({ freq, delay, peak }) => {
+        const osc = ctx.createOscillator();
+        const chimeGain = ctx.createGain();
+        osc.type = 'triangle';
+        osc.frequency.setValueAtTime(freq, now + delay);
+        chimeGain.gain.setValueAtTime(0.0001, now + delay);
+        chimeGain.gain.exponentialRampToValueAtTime(peak, now + delay + 0.05);
+        chimeGain.gain.exponentialRampToValueAtTime(0.0001, now + delay + 2.4);
+        osc.connect(chimeGain);
+        chimeGain.connect(masterGain);
+        osc.start(now + delay);
+        osc.stop(now + delay + 2.5);
+      });
     } catch {}
+  };
+
+  // Pembuka izin AudioContext browser saat pengguna berinteraksi di layar loading/showcase
+  const unlockWelcomeAudio = () => {
+    if (isWelcomeAudioMutedRef.current) return;
+    const ctx = ensureWelcomeAudioContext();
+    if (!ctx) return;
+    if (ctx.state === 'running') {
+      setIsWelcomeAudioUnlocked(true);
+      if (welcomePhaseRef.current === 'showcase' && !welcomeBacksoundPlayedRef.current) {
+        playWelcomeBacksound(ctx);
+      }
+      return;
+    }
+    if (ctx.state === 'suspended') {
+      ctx
+        .resume()
+        .then(() => {
+          const running = ctx.state === 'running';
+          setIsWelcomeAudioUnlocked(running);
+          if (running && welcomePhaseRef.current === 'showcase' && !welcomeBacksoundPlayedRef.current && !isWelcomeAudioMutedRef.current) {
+            playWelcomeBacksound(ctx);
+          }
+        })
+        .catch(() => {});
+    }
   };
 
   useEffect(() => {
     if (!showWelcomePopup) return;
+    // Cek status awal AudioContext (apakah browser sudah mengizinkan autoplay)
+    ensureWelcomeAudioContext();
     const handleFirstGesture = () => unlockWelcomeAudio();
     window.addEventListener('pointerdown', handleFirstGesture, { passive: true });
     window.addEventListener('keydown', handleFirstGesture, { passive: true });
@@ -145,127 +300,23 @@ export default function App() {
     if (!showWelcomePopup) return;
 
     if (welcomePhase === 'showcase' && !welcomeBacksoundPlayedRef.current && !isWelcomeAudioMuted) {
-      welcomeBacksoundPlayedRef.current = true;
-      try {
-        const AudioCtx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
-        if (!AudioCtx) return;
-        if (!welcomeAudioCtxRef.current || welcomeAudioCtxRef.current.state === 'closed') {
-          welcomeAudioCtxRef.current = new AudioCtx();
+      const ctx = ensureWelcomeAudioContext();
+      if (ctx) {
+        if (ctx.state === 'running') {
+          setIsWelcomeAudioUnlocked(true);
+          playWelcomeBacksound(ctx);
+        } else if (ctx.state === 'suspended') {
+          ctx
+            .resume()
+            .then(() => {
+              if (ctx.state === 'running' && welcomePhaseRef.current === 'showcase' && !welcomeBacksoundPlayedRef.current && !isWelcomeAudioMutedRef.current) {
+                setIsWelcomeAudioUnlocked(true);
+                playWelcomeBacksound(ctx);
+              }
+            })
+            .catch(() => {});
         }
-        const ctx = welcomeAudioCtxRef.current;
-        if (ctx.state === 'suspended') {
-          ctx.resume().catch(() => {});
-        }
-
-        const now = ctx.currentTime;
-
-        // Compressor agar suara penuh, padat, keras, namun tetap jernih tanpa pecah
-        const compressor = ctx.createDynamicsCompressor();
-        compressor.threshold.setValueAtTime(-14, now);
-        compressor.knee.setValueAtTime(12, now);
-        compressor.ratio.setValueAtTime(4, now);
-        compressor.attack.setValueAtTime(0.01, now);
-        compressor.release.setValueAtTime(0.25, now);
-        compressor.connect(ctx.destination);
-
-        const masterGain = ctx.createGain();
-        masterGain.gain.setValueAtTime(0.0001, now);
-        masterGain.gain.exponentialRampToValueAtTime(0.36, now + 0.9);
-        masterGain.gain.setValueAtTime(0.38, now + 4.3);
-        masterGain.gain.exponentialRampToValueAtTime(0.0001, now + 5.6);
-        masterGain.connect(compressor);
-        welcomeMasterGainRef.current = masterGain;
-
-        // 1. Cinematic Sub-Bass Boom & Rumble (Dentuman rendah menggelegar di awal)
-        const boomOsc = ctx.createOscillator();
-        const boomGain = ctx.createGain();
-        boomOsc.type = 'sine';
-        boomOsc.frequency.setValueAtTime(115, now);
-        boomOsc.frequency.exponentialRampToValueAtTime(42, now + 0.5);
-        boomOsc.frequency.exponentialRampToValueAtTime(32.7, now + 4.8);
-        boomGain.gain.setValueAtTime(0.0001, now);
-        boomGain.gain.exponentialRampToValueAtTime(0.42, now + 0.1);
-        boomGain.gain.exponentialRampToValueAtTime(0.24, now + 1.4);
-        boomGain.gain.setValueAtTime(0.22, now + 4.2);
-        boomGain.gain.exponentialRampToValueAtTime(0.0001, now + 5.5);
-        boomOsc.connect(boomGain);
-        boomGain.connect(masterGain);
-        boomOsc.start(now);
-        boomOsc.stop(now + 5.7);
-
-        // Lapisan Sub-Bass kedua (C1 = 32.7Hz & C2 = 65.41Hz) untuk getaran bass yang dalam
-        [32.7, 65.41].forEach((bassFreq, i) => {
-          const bOsc = ctx.createOscillator();
-          const bGain = ctx.createGain();
-          bOsc.type = i === 0 ? 'sine' : 'triangle';
-          bOsc.frequency.setValueAtTime(bassFreq, now);
-          bGain.gain.setValueAtTime(0.0001, now);
-          bGain.gain.exponentialRampToValueAtTime(i === 0 ? 0.3 : 0.2, now + 0.8);
-          bGain.gain.setValueAtTime(i === 0 ? 0.3 : 0.2, now + 4.3);
-          bGain.gain.exponentialRampToValueAtTime(0.0001, now + 5.6);
-          bOsc.connect(bGain);
-          bGain.connect(masterGain);
-          bOsc.start(now);
-          bOsc.stop(now + 5.8);
-        });
-
-        // 2. Filter Dinamis yang Membuka Lebar (Cinematic Brass & String Swell)
-        const filter = ctx.createBiquadFilter();
-        filter.type = 'lowpass';
-        filter.Q.setValueAtTime(2.2, now);
-        filter.frequency.setValueAtTime(280, now);
-        filter.frequency.exponentialRampToValueAtTime(2400, now + 3.4);
-        filter.frequency.exponentialRampToValueAtTime(520, now + 5.5);
-        filter.connect(masterGain);
-
-        // Harmoni akor megah Cmaj9 (C2, G2, C3, G3, B3, D4, E4, G4) dengan karakter sawtooth/triangle
-        const padNotes = [
-          { freq: 65.41, type: 'sawtooth' as OscillatorType, gain: 0.18, detune: -6 },
-          { freq: 98.0, type: 'sawtooth' as OscillatorType, gain: 0.16, detune: 5 },
-          { freq: 130.81, type: 'sawtooth' as OscillatorType, gain: 0.19, detune: -4 },
-          { freq: 196.0, type: 'triangle' as OscillatorType, gain: 0.17, detune: 4 },
-          { freq: 246.94, type: 'sawtooth' as OscillatorType, gain: 0.12, detune: -3 },
-          { freq: 293.66, type: 'triangle' as OscillatorType, gain: 0.13, detune: 3 },
-          { freq: 329.63, type: 'sawtooth' as OscillatorType, gain: 0.14, detune: -5 },
-          { freq: 392.0, type: 'triangle' as OscillatorType, gain: 0.13, detune: 6 }
-        ];
-
-        padNotes.forEach(({ freq, type, gain, detune }) => {
-          const osc = ctx.createOscillator();
-          const oscGain = ctx.createGain();
-          osc.type = type;
-          osc.frequency.setValueAtTime(freq, now);
-          osc.detune.setValueAtTime(detune, now);
-          oscGain.gain.setValueAtTime(gain, now);
-          osc.connect(oscGain);
-          oscGain.connect(filter);
-          osc.start(now);
-          osc.stop(now + 5.8);
-        });
-
-        // 3. Dentingan Emas Megah (Golden Chime) bertahap saat logo membesar ke tengah
-        const chimeNotes = [
-          { freq: 523.25, delay: 0.05, peak: 0.2 },
-          { freq: 659.25, delay: 0.4, peak: 0.19 },
-          { freq: 783.99, delay: 0.8, peak: 0.19 },
-          { freq: 987.77, delay: 1.25, peak: 0.17 },
-          { freq: 1046.5, delay: 1.75, peak: 0.18 }
-        ];
-
-        chimeNotes.forEach(({ freq, delay, peak }) => {
-          const osc = ctx.createOscillator();
-          const chimeGain = ctx.createGain();
-          osc.type = 'triangle';
-          osc.frequency.setValueAtTime(freq, now + delay);
-          chimeGain.gain.setValueAtTime(0.0001, now + delay);
-          chimeGain.gain.exponentialRampToValueAtTime(peak, now + delay + 0.05);
-          chimeGain.gain.exponentialRampToValueAtTime(0.0001, now + delay + 2.4);
-          osc.connect(chimeGain);
-          chimeGain.connect(masterGain);
-          osc.start(now + delay);
-          osc.stop(now + delay + 2.5);
-        });
-      } catch {}
+      }
     }
 
     if ((welcomePhase === 'blackout' || welcomePhase === 'exiting') && welcomeAudioCtxRef.current && welcomeMasterGainRef.current) {
@@ -284,7 +335,7 @@ export default function App() {
         welcomeAudioCtxRef.current = null;
       } catch {}
     }
-  }, [welcomePhase, showWelcomePopup, isWelcomeAudioMuted]);
+  }, [welcomePhase, showWelcomePopup, isWelcomeAudioMuted, isWelcomeAudioUnlocked]);
 
   const [isSyncing, setIsSyncing] = useState(false);
   const isSyncingRef = useRef(false);
@@ -318,10 +369,6 @@ export default function App() {
 
     if (showWelcomePopup) {
       const duration = 5000;
-      const readyPause = 350;
-      const showcaseDuration = 5000;
-      const blackoutDuration = 950;
-      const exitDuration = 700;
       const intervalTime = 50;
       const startTime = Date.now();
 
@@ -339,29 +386,8 @@ export default function App() {
         setWelcomePhase('ready');
       }, duration);
 
-      const showcaseTimer = setTimeout(() => {
-        setWelcomePhase('showcase');
-      }, duration + readyPause);
-
-      const blackoutTimer = setTimeout(() => {
-        setWelcomePhase('blackout');
-      }, duration + readyPause + showcaseDuration);
-
-      const exitTimer = setTimeout(() => {
-        setWelcomePhase('exiting');
-      }, duration + readyPause + showcaseDuration + blackoutDuration);
-
-      const doneTimer = setTimeout(() => {
-        setWelcomePhase('done');
-        setShowWelcomePopup(false);
-      }, duration + readyPause + showcaseDuration + blackoutDuration + exitDuration);
-
       return () => {
         clearTimeout(readyTimer);
-        clearTimeout(showcaseTimer);
-        clearTimeout(blackoutTimer);
-        clearTimeout(exitTimer);
-        clearTimeout(doneTimer);
         clearInterval(progressInterval);
         window.removeEventListener('storage', syncLogoFromLocal);
         window.removeEventListener('kombel-settings-updated', syncLogoFromLocal);
@@ -373,6 +399,41 @@ export default function App() {
       window.removeEventListener('kombel-settings-updated', syncLogoFromLocal);
     };
   }, [showWelcomePopup]);
+
+  // Transisi fase 'ready' -> 'showcase': otomatis bila AudioContext sudah aktif / dimatikan, atau menunggu ketukan tombol Buka Portal
+  useEffect(() => {
+    if (!showWelcomePopup || welcomePhase !== 'ready') return;
+    if (isWelcomeAudioMuted || isWelcomeAudioUnlocked) {
+      const showcaseTimer = setTimeout(() => {
+        setWelcomePhase('showcase');
+      }, 350);
+      return () => clearTimeout(showcaseTimer);
+    }
+  }, [showWelcomePopup, welcomePhase, isWelcomeAudioMuted, isWelcomeAudioUnlocked]);
+
+  // Penjadwalan fase lanjutan setelah masuk ke 'showcase' (5 detik pembesaran logo -> blackout -> exit -> selesai)
+  useEffect(() => {
+    if (!showWelcomePopup) return;
+    if (welcomePhase === 'showcase') {
+      const blackoutTimer = setTimeout(() => {
+        setWelcomePhase('blackout');
+      }, 5000);
+      return () => clearTimeout(blackoutTimer);
+    }
+    if (welcomePhase === 'blackout') {
+      const exitTimer = setTimeout(() => {
+        setWelcomePhase('exiting');
+      }, 950);
+      return () => clearTimeout(exitTimer);
+    }
+    if (welcomePhase === 'exiting') {
+      const doneTimer = setTimeout(() => {
+        setWelcomePhase('done');
+        setShowWelcomePopup(false);
+      }, 700);
+      return () => clearTimeout(doneTimer);
+    }
+  }, [showWelcomePopup, welcomePhase]);
 
   // Otomatis tarik data resmi dari Cloud saat aplikasi dibuka dengan pengecekan versi ringan (1 Read) + cooldown 60 detik
   useEffect(() => {
@@ -636,7 +697,9 @@ export default function App() {
   }, [menuEntryPhase, renderedTransitionKey]);
   
   useEffect(() => {
-    localStorage.setItem('activeTab', activeTab);
+    try {
+      localStorage.setItem('activeTab', activeTab);
+    } catch {}
   }, [activeTab]);
 
   const [isOpenMobileSidebar, setIsOpenMobileSidebar] = useState(false);
@@ -693,7 +756,9 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    localStorage.setItem('activeRole', activeRole);
+    try {
+      localStorage.setItem('activeRole', activeRole);
+    } catch {}
   }, [activeRole]);
 
   useEffect(() => {
@@ -757,7 +822,9 @@ export default function App() {
   });
 
   useEffect(() => {
-    localStorage.setItem('kombel-teachers', JSON.stringify(teachers));
+    try {
+      localStorage.setItem('kombel-teachers', JSON.stringify(teachers));
+    } catch {}
     if (isInitialMount.current.teachers) {
       isInitialMount.current.teachers = false;
     }
@@ -773,8 +840,10 @@ export default function App() {
   });
 
   useEffect(() => {
-    localStorage.setItem('kombel-materials', JSON.stringify(materials));
-    localStorage.setItem('kombel_materi_list', JSON.stringify(materials));
+    try {
+      localStorage.setItem('kombel-materials', JSON.stringify(materials));
+      localStorage.setItem('kombel_materi_list', JSON.stringify(materials));
+    } catch {}
     if (isInitialMount.current.materials) {
       isInitialMount.current.materials = false;
     }
@@ -863,7 +932,9 @@ export default function App() {
   });
 
   useEffect(() => {
-    localStorage.setItem('kombel-announcements', JSON.stringify(announcements));
+    try {
+      localStorage.setItem('kombel-announcements', JSON.stringify(announcements));
+    } catch {}
     if (isInitialMount.current.announcements) {
       isInitialMount.current.announcements = false;
     }
@@ -879,7 +950,9 @@ export default function App() {
   });
 
   useEffect(() => {
-    localStorage.setItem('kombel-forumPosts', JSON.stringify(forumPosts));
+    try {
+      localStorage.setItem('kombel-forumPosts', JSON.stringify(forumPosts));
+    } catch {}
     if (isInitialMount.current.forumPosts) {
       isInitialMount.current.forumPosts = false;
     }
@@ -1850,6 +1923,10 @@ export default function App() {
             type="button"
             onClick={(e) => {
               e.stopPropagation();
+              if (!isWelcomeAudioMuted && !isWelcomeAudioUnlocked) {
+                unlockWelcomeAudio();
+                return;
+              }
               const nextMuted = !isWelcomeAudioMuted;
               setIsWelcomeAudioMuted(nextMuted);
               if (nextMuted && welcomeAudioCtxRef.current && welcomeMasterGainRef.current) {
@@ -1861,17 +1938,33 @@ export default function App() {
                 unlockWelcomeAudio();
               }
             }}
-            title={isWelcomeAudioMuted ? 'Aktifkan Suara' : 'Senyapkan Suara'}
-            className={`fixed top-4 right-4 z-40 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11px] font-semibold backdrop-blur-md border transition-all duration-300 ${
-              welcomePhase === 'blackout' || welcomePhase === 'exiting' ? 'opacity-0 pointer-events-none' : 'opacity-85 hover:opacity-100'
+            title={
+              isWelcomeAudioMuted
+                ? 'Aktifkan Suara'
+                : !isWelcomeAudioUnlocked
+                ? 'Ketuk untuk Mengaktifkan Backsound Browser'
+                : 'Senyapkan Suara'
+            }
+            className={`fixed top-4 right-4 z-40 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11px] font-semibold backdrop-blur-md border transition-all duration-300 cursor-pointer ${
+              welcomePhase === 'blackout' || welcomePhase === 'exiting' ? 'opacity-0 pointer-events-none' : 'opacity-90 hover:opacity-100'
             } ${
-              theme === 'dark'
+              !isWelcomeAudioMuted && !isWelcomeAudioUnlocked
+                ? theme === 'dark'
+                  ? 'bg-amber-500/20 border-amber-400/70 text-amber-300 hover:bg-amber-500/30 animate-pulse'
+                  : 'bg-amber-50/95 border-amber-500/80 text-red-900 hover:bg-white shadow-sm animate-pulse'
+                : theme === 'dark'
                 ? 'bg-stone-900/70 border-stone-700/70 text-amber-300 hover:bg-stone-800/80'
                 : 'bg-white/75 border-stone-300/80 text-red-900 hover:bg-white/95'
             }`}
           >
             {isWelcomeAudioMuted ? <VolumeX className="w-3.5 h-3.5" /> : <Volume2 className="w-3.5 h-3.5" />}
-            <span>{isWelcomeAudioMuted ? 'Suara Mati' : 'Audio Aktif'}</span>
+            <span>
+              {isWelcomeAudioMuted
+                ? 'Suara Mati'
+                : !isWelcomeAudioUnlocked
+                ? 'Ketuk Layar untuk Suara'
+                : 'Audio Aktif'}
+            </span>
           </button>
           {/* Lapisan Gambar Batik Kusuma Bangsa Efek Blur & Ken Burns */}
           <img
@@ -2000,6 +2093,36 @@ export default function App() {
                     />
                   </div>
                 </div>
+
+                {welcomePhase === 'ready' && !isWelcomeAudioMuted && !isWelcomeAudioUnlocked && (
+                  <div className="mt-5 flex flex-col items-center gap-2 animate-in fade-in duration-300">
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        unlockWelcomeAudio();
+                        setWelcomePhase('showcase');
+                      }}
+                      className="inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl bg-gradient-to-r from-red-800 via-red-700 to-amber-600 hover:from-red-700 hover:to-amber-500 text-white text-xs sm:text-sm font-bold shadow-lg shadow-red-900/25 transition-all active:scale-[0.98] cursor-pointer"
+                    >
+                      <Volume2 className="w-4 h-4 shrink-0" />
+                      <span>Buka Portal &amp; Aktifkan Suara</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setIsWelcomeAudioMuted(true);
+                        setWelcomePhase('showcase');
+                      }}
+                      className={`text-[11px] font-semibold underline-offset-2 hover:underline cursor-pointer ${
+                        theme === 'dark' ? 'text-stone-400 hover:text-stone-200' : 'text-stone-500 hover:text-stone-800'
+                      }`}
+                    >
+                      Lanjutkan tanpa suara
+                    </button>
+                  </div>
+                )}
               </div>
             </div>
 
