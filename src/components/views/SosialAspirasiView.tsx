@@ -24,7 +24,7 @@ import {
   shouldFetchByVersion,
   markLocalVersionSynced
 } from '../../lib/sync';
-import { canManageConfidentialAspirasi, logAuditEvent, signInPengurusWithGoogle } from '../../lib/auth';
+import { canManageConfidentialAspirasi, formatGoogleAuthError, logAuditEvent, signInPengurusWithGoogle } from '../../lib/auth';
 import { openWhatsAppShare } from '../../lib/orgConfig';
 import { collection, getDocs, query, where } from 'firebase/firestore';
 import { db } from '../../lib/firebase';
@@ -293,8 +293,8 @@ export const SosialAspirasiView: React.FC<SosialAspirasiViewProps> = ({
       try {
         const res = await signInPengurusWithGoogle();
         user = res.user;
-      } catch {
-        setAspNotice('Silakan masuk dengan akun Google terlebih dahulu agar aspirasi tersimpan secara rahasia.');
+      } catch (err) {
+        setAspNotice(formatGoogleAuthError(err));
         return;
       }
     }
@@ -665,7 +665,13 @@ export const SosialAspirasiView: React.FC<SosialAspirasiViewProps> = ({
               {!auth.currentUser && (
                 <button
                   type="button"
-                  onClick={() => signInPengurusWithGoogle()}
+                  onClick={async () => {
+                    try {
+                      await signInPengurusWithGoogle();
+                    } catch (err) {
+                      setAspNotice(formatGoogleAuthError(err));
+                    }
+                  }}
                   className="px-3 py-2 rounded-xl bg-red-800 hover:bg-red-700 text-white text-xs font-bold flex items-center gap-1.5 cursor-pointer"
                 >
                   <LogIn className="w-3.5 h-3.5" />

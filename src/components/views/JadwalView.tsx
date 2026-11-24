@@ -396,35 +396,50 @@ export const JadwalView: React.FC<JadwalViewProps> = ({
   // Helper warna badge kategori kegiatan secara dinamis
   const getCategoryBadgeStyle = (category: string, isDarkMode: boolean) => {
     const cat = (category || '').toLowerCase();
-    if (cat.includes('diskusi')) {
+    if (cat.includes('diskusi') || cat.includes('berbagi')) {
       return isDarkMode 
         ? 'bg-emerald-950/80 text-emerald-300 border-emerald-800/60' 
         : 'bg-emerald-100 text-emerald-800 border-emerald-200';
     }
-    if (cat.includes('workshop') || cat.includes('pelatihan')) {
+    if (cat.includes('workshop') || cat.includes('diklat') || cat.includes('pelatihan')) {
       return isDarkMode 
         ? 'bg-amber-950/80 text-amber-300 border-amber-800/60' 
         : 'bg-amber-100 text-amber-800 border-amber-200';
+    }
+    if (cat.includes('seminar') || cat.includes('webinar') || cat.includes('sosialisasi')) {
+      return isDarkMode 
+        ? 'bg-cyan-950/80 text-cyan-300 border-cyan-800/60' 
+        : 'bg-cyan-100 text-cyan-800 border-cyan-200';
+    }
+    if (cat.includes('konferensi') || cat.includes('musyawarah')) {
+      return isDarkMode 
+        ? 'bg-purple-950/80 text-purple-300 border-purple-800/60' 
+        : 'bg-purple-100 text-purple-800 border-purple-200';
     }
     if (cat.includes('rapat')) {
       return isDarkMode 
         ? 'bg-rose-950/80 text-rose-300 border-rose-800/60' 
         : 'bg-rose-100 text-rose-800 border-rose-200';
     }
-    if (cat.includes('berbagi')) {
-      return isDarkMode 
-        ? 'bg-cyan-950/80 text-cyan-300 border-cyan-800/60' 
-        : 'bg-cyan-100 text-cyan-800 border-cyan-200';
-    }
-    if (cat.includes('apel')) {
-      return isDarkMode 
-        ? 'bg-sky-950/80 text-sky-300 border-sky-800/60' 
-        : 'bg-sky-100 text-sky-800 border-sky-200';
-    }
-    if (cat.includes('upacara')) {
+    if (cat.includes('upacara') || cat.includes('apel')) {
       return isDarkMode 
         ? 'bg-red-950/80 text-red-300 border-red-800/60' 
         : 'bg-red-100 text-red-800 border-red-200';
+    }
+    if (cat.includes('porseni') || cat.includes('lomba')) {
+      return isDarkMode 
+        ? 'bg-orange-950/80 text-orange-300 border-orange-800/60' 
+        : 'bg-orange-100 text-orange-800 border-orange-200';
+    }
+    if (cat.includes('bakti') || cat.includes('anjangsana')) {
+      return isDarkMode 
+        ? 'bg-teal-950/80 text-teal-300 border-teal-800/60' 
+        : 'bg-teal-100 text-teal-800 border-teal-200';
+    }
+    if (cat.includes('lainnya')) {
+      return isDarkMode 
+        ? 'bg-stone-800/90 text-stone-300 border-stone-700' 
+        : 'bg-stone-100 text-stone-700 border-stone-300';
     }
     return isDarkMode 
       ? 'bg-red-950/80 text-amber-300 border-red-800/60' 
@@ -1685,8 +1700,8 @@ export const JadwalView: React.FC<JadwalViewProps> = ({
       fullDate: eventFullDateFormatted,
       time: eventTimeFormatted,
       location: eventLocation,
-      category: (eventCategory as ActivityEvent['category']) || 'Pertemuan Rutin',
-      categoryColor: (eventCategory === 'Pertemuan Rutin' || eventCategory === 'Belajar Bersama') ? 'purple' : eventCategory === 'Diskusi' ? 'green' : 'blue',
+      category: ((eventCategory as any) || 'Pertemuan Rutin') as ActivityEvent['category'],
+      categoryColor: (eventCategory === 'Pertemuan Rutin' || eventCategory === 'Konferensi / Musyawarah') ? 'purple' : (eventCategory === 'Diskusi & Berbagi Praktik' || eventCategory === 'Bakti Sosial & Anjangsana') ? 'green' : 'blue',
       description: eventDesc,
       presenters: eventPresenter.trim() ? [eventPresenter.trim()] : []
     });
@@ -1793,8 +1808,8 @@ export const JadwalView: React.FC<JadwalViewProps> = ({
       fullDate: eventFullDateFormatted,
       time: eventTimeFormatted,
       location: eventLocation,
-      category: (eventCategory as ActivityEvent['category']) || selectedEventForEdit.category,
-      categoryColor: (eventCategory === 'Pertemuan Rutin' || eventCategory === 'Belajar Bersama') ? 'purple' : eventCategory === 'Diskusi' ? 'green' : 'blue',
+      category: ((eventCategory as any) || selectedEventForEdit.category) as ActivityEvent['category'],
+      categoryColor: (eventCategory === 'Pertemuan Rutin' || eventCategory === 'Konferensi / Musyawarah') ? 'purple' : (eventCategory === 'Diskusi & Berbagi Praktik' || eventCategory === 'Bakti Sosial & Anjangsana') ? 'green' : 'blue',
       description: eventDesc,
       presenters: eventPresenter.trim() ? [eventPresenter.trim()] : []
     });
@@ -1831,6 +1846,7 @@ export const JadwalView: React.FC<JadwalViewProps> = ({
   const handlePrintRekapKehadiran = async () => {
     const targetEvt = events.find(e => String(e.id) === String(selectedPrintAttendanceEventId));
     if (!targetEvt) return;
+    const printWindow = !isMobileDevice() ? window.open('', '_blank') : null;
 
     const logoPgri = localStorage.getItem('logo-pgri') || localStorage.getItem('logo-kombel') || '';
     const ttdKetua = localStorage.getItem('ttd-ketua') || '';
@@ -1941,8 +1957,8 @@ export const JadwalView: React.FC<JadwalViewProps> = ({
       `).join('');
     };
 
-    // JIKA DI PONSEL: Gunakan html2pdf untuk direct download PDF presisi
-    if (isMobileDevice()) {
+    // JIKA DI PONSEL ATAU POP-UP DIBLOKIR: Gunakan html2pdf untuk direct download PDF presisi
+    if (!printWindow) {
       let container: HTMLDivElement | null = null;
       try {
         const html2pdf = await getHtml2Pdf();
@@ -2132,7 +2148,6 @@ export const JadwalView: React.FC<JadwalViewProps> = ({
     }
 
     // JIKA DI PC / LAPTOP: Gunakan pratinjau cetak bawaan browser
-    const printWindow = window.open('', '_blank');
     if (!printWindow) return;
 
     const htmlContent = `
@@ -4314,13 +4329,16 @@ export const JadwalView: React.FC<JadwalViewProps> = ({
                       -- Pilih Kategori --
                     </option>
                     <option value="Pertemuan Rutin" className={isDark ? "bg-stone-800 text-stone-100" : "bg-white text-stone-800"}>Pertemuan Rutin</option>
-                    <option value="Rapat" className={isDark ? "bg-stone-800 text-stone-100" : "bg-white text-stone-800"}>Rapat</option>
+                    <option value="Rapat Pengurus" className={isDark ? "bg-stone-800 text-stone-100" : "bg-white text-stone-800"}>Rapat Pengurus</option>
+                    <option value="Konferensi / Musyawarah" className={isDark ? "bg-stone-800 text-stone-100" : "bg-white text-stone-800"}>Konferensi / Musyawarah</option>
                     <option value="Sosialisasi" className={isDark ? "bg-stone-800 text-stone-100" : "bg-white text-stone-800"}>Sosialisasi</option>
-                    <option value="Workshop" className={isDark ? "bg-stone-800 text-stone-100" : "bg-white text-stone-800"}>Workshop</option>
-                    <option value="Diskusi" className={isDark ? "bg-stone-800 text-stone-100" : "bg-white text-stone-800"}>Diskusi</option>
-                    <option value="Berbagi" className={isDark ? "bg-stone-800 text-stone-100" : "bg-white text-stone-800"}>Berbagi</option>
-                    <option value="Apel" className={isDark ? "bg-stone-800 text-stone-100" : "bg-white text-stone-800"}>Apel</option>
-                    <option value="Upacara" className={isDark ? "bg-stone-800 text-stone-100" : "bg-white text-stone-800"}>Upacara</option>
+                    <option value="Workshop / Diklat" className={isDark ? "bg-stone-800 text-stone-100" : "bg-white text-stone-800"}>Workshop / Diklat</option>
+                    <option value="Seminar / Webinar" className={isDark ? "bg-stone-800 text-stone-100" : "bg-white text-stone-800"}>Seminar / Webinar</option>
+                    <option value="Diskusi & Berbagi Praktik" className={isDark ? "bg-stone-800 text-stone-100" : "bg-white text-stone-800"}>Diskusi &amp; Berbagi Praktik</option>
+                    <option value="Upacara / Apel" className={isDark ? "bg-stone-800 text-stone-100" : "bg-white text-stone-800"}>Upacara / Apel</option>
+                    <option value="Porseni / Lomba" className={isDark ? "bg-stone-800 text-stone-100" : "bg-white text-stone-800"}>Porseni / Lomba</option>
+                    <option value="Bakti Sosial & Anjangsana" className={isDark ? "bg-stone-800 text-stone-100" : "bg-white text-stone-800"}>Bakti Sosial &amp; Anjangsana</option>
+                    <option value="Lainnya" className={isDark ? "bg-stone-800 text-stone-100" : "bg-white text-stone-800"}>Lainnya</option>
                   </select>
                 </div>
                 <div>
@@ -4469,17 +4487,32 @@ export const JadwalView: React.FC<JadwalViewProps> = ({
                     <option value="" disabled className={isDark ? "bg-stone-800 text-stone-400" : "bg-white text-stone-400"}>
                       -- Pilih Kategori --
                     </option>
-                    {eventCategory === 'Belajar Bersama' && (
-                      <option value="Belajar Bersama" className={isDark ? "bg-stone-800 text-stone-100" : "bg-white text-stone-800"}>Belajar Bersama</option>
+                    {eventCategory && ![
+                      'Pertemuan Rutin',
+                      'Rapat Pengurus',
+                      'Konferensi / Musyawarah',
+                      'Sosialisasi',
+                      'Workshop / Diklat',
+                      'Seminar / Webinar',
+                      'Diskusi & Berbagi Praktik',
+                      'Upacara / Apel',
+                      'Porseni / Lomba',
+                      'Bakti Sosial & Anjangsana',
+                      'Lainnya'
+                    ].includes(eventCategory) && (
+                      <option value={eventCategory} className={isDark ? "bg-stone-800 text-stone-100" : "bg-white text-stone-800"}>{eventCategory}</option>
                     )}
                     <option value="Pertemuan Rutin" className={isDark ? "bg-stone-800 text-stone-100" : "bg-white text-stone-800"}>Pertemuan Rutin</option>
-                    <option value="Rapat" className={isDark ? "bg-stone-800 text-stone-100" : "bg-white text-stone-800"}>Rapat</option>
+                    <option value="Rapat Pengurus" className={isDark ? "bg-stone-800 text-stone-100" : "bg-white text-stone-800"}>Rapat Pengurus</option>
+                    <option value="Konferensi / Musyawarah" className={isDark ? "bg-stone-800 text-stone-100" : "bg-white text-stone-800"}>Konferensi / Musyawarah</option>
                     <option value="Sosialisasi" className={isDark ? "bg-stone-800 text-stone-100" : "bg-white text-stone-800"}>Sosialisasi</option>
-                    <option value="Workshop" className={isDark ? "bg-stone-800 text-stone-100" : "bg-white text-stone-800"}>Workshop</option>
-                    <option value="Diskusi" className={isDark ? "bg-stone-800 text-stone-100" : "bg-white text-stone-800"}>Diskusi</option>
-                    <option value="Berbagi" className={isDark ? "bg-stone-800 text-stone-100" : "bg-white text-stone-800"}>Berbagi</option>
-                    <option value="Apel" className={isDark ? "bg-stone-800 text-stone-100" : "bg-white text-stone-800"}>Apel</option>
-                    <option value="Upacara" className={isDark ? "bg-stone-800 text-stone-100" : "bg-white text-stone-800"}>Upacara</option>
+                    <option value="Workshop / Diklat" className={isDark ? "bg-stone-800 text-stone-100" : "bg-white text-stone-800"}>Workshop / Diklat</option>
+                    <option value="Seminar / Webinar" className={isDark ? "bg-stone-800 text-stone-100" : "bg-white text-stone-800"}>Seminar / Webinar</option>
+                    <option value="Diskusi & Berbagi Praktik" className={isDark ? "bg-stone-800 text-stone-100" : "bg-white text-stone-800"}>Diskusi &amp; Berbagi Praktik</option>
+                    <option value="Upacara / Apel" className={isDark ? "bg-stone-800 text-stone-100" : "bg-white text-stone-800"}>Upacara / Apel</option>
+                    <option value="Porseni / Lomba" className={isDark ? "bg-stone-800 text-stone-100" : "bg-white text-stone-800"}>Porseni / Lomba</option>
+                    <option value="Bakti Sosial & Anjangsana" className={isDark ? "bg-stone-800 text-stone-100" : "bg-white text-stone-800"}>Bakti Sosial &amp; Anjangsana</option>
+                    <option value="Lainnya" className={isDark ? "bg-stone-800 text-stone-100" : "bg-white text-stone-800"}>Lainnya</option>
                   </select>
                 </div>
                 <div>

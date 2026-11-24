@@ -71,6 +71,36 @@ export async function signOutPengurus(): Promise<void> {
   await signOut(auth);
 }
 
+export function formatGoogleAuthError(err: unknown): string {
+  const code = String((err as any)?.code || '');
+  const message = String((err as any)?.message || '');
+  const currentHost = typeof window !== 'undefined' ? window.location.hostname : '';
+
+  if (code === 'auth/popup-closed-by-user' || message.includes('popup-closed-by-user')) {
+    return 'Jendela login Google ditutup sebelum proses masuk selesai.';
+  }
+  if (code === 'auth/cancelled-popup-request' || message.includes('cancelled-popup-request')) {
+    return 'Permintaan pop-up login sebelumnya dibatalkan. Silakan klik tombol masuk sekali lagi.';
+  }
+  if (code === 'auth/popup-blocked' || message.includes('popup-blocked')) {
+    return 'Pop-up login Google diblokir oleh browser. Izinkan pop-up untuk situs ini atau buka aplikasi langsung di Chrome/Edge/Safari.';
+  }
+  if (code === 'auth/unauthorized-domain' || message.includes('unauthorized-domain')) {
+    return `Domain "${currentHost || 'ini'}" belum terdaftar di Authorized Domains Firebase Authentication (project oceanic-starlight-3n50x). Hubungi Super Admin untuk menambahkannya di Firebase Console.`;
+  }
+  if (
+    code === 'auth/operation-not-supported-in-this-environment' ||
+    message.includes('operation-not-supported-in-this-environment')
+  ) {
+    return 'Browser bawaan/WebView ini tidak mendukung pop-up login Google. Salin tautan aplikasi lalu buka di browser utama (Chrome/Edge/Safari).';
+  }
+  if (code === 'auth/network-request-failed' || message.includes('network-request-failed')) {
+    return 'Koneksi internet terputus saat menghubungi layanan Google. Periksa jaringan Anda dan coba lagi.';
+  }
+  const suffix = code ? ` (Kode: ${code})` : '';
+  return `Gagal masuk dengan Google${suffix}. Pastikan pop-up browser diizinkan dan buka langsung di browser utama (bukan preview WhatsApp/Incognito).`;
+}
+
 export async function resolvePengurusRole(
   user: User | null
 ): Promise<{ role: PengurusRole; assignment: PengurusAssignment | null }> {

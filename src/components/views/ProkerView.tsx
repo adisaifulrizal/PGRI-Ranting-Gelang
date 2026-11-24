@@ -28,6 +28,7 @@ import {
 } from '../../lib/sync';
 import { logAuditEvent } from '../../lib/auth';
 import { openWhatsAppShare } from '../../lib/orgConfig';
+import { safeDownloadBlob } from '../../lib/download';
 
 interface ProkerViewProps {
   activeRole: 'guru' | 'admin';
@@ -392,9 +393,7 @@ export const ProkerView: React.FC<ProkerViewProps> = ({
     openWhatsAppShare(lines.join('\n'));
   };
 
-  const handlePrintProker = () => {
-    const printWin = window.open('', '_blank', 'width=960,height=720');
-    if (!printWin) return;
+  const handlePrintProker = async () => {
     const rows = filteredItems
       .map(
         (p, idx) => `
@@ -410,13 +409,34 @@ export const ProkerView: React.FC<ProkerViewProps> = ({
       )
       .join('');
 
-    printWin.document.write(`
+    const bodyHtml = `
+      <h2>MATRIKS PROGRAM KERJA & REALISASI</h2>
+      <h3>PGRI RANTING GELANG — KECAMATAN SUMBERBARU</h3>
+      <p class="sub">Dicetak pada ${new Date().toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' })} | Total Anggaran Rencana: Rp ${stats.totalBudget.toLocaleString('id-ID')}</p>
+      <table>
+        <thead>
+          <tr>
+            <th>No</th>
+            <th>Program Kerja</th>
+            <th>Seksi</th>
+            <th>Penanggung Jawab</th>
+            <th>Target</th>
+            <th>Anggaran</th>
+            <th>Realisasi</th>
+          </tr>
+        </thead>
+        <tbody>${rows}</tbody>
+      </table>
+    `;
+
+    const fullHtml = `
       <!doctype html>
       <html>
         <head>
+          <meta charset="utf-8" />
           <title>Rekap Program Kerja PGRI Ranting Gelang</title>
           <style>
-            body { font-family: Arial, sans-serif; padding: 28px; color: #0f172a; }
+            body { font-family: Arial, sans-serif; padding: 28px; color: #0f172a; background: #ffffff; }
             h2, h3 { margin: 0; text-align: center; }
             .sub { text-align: center; font-size: 12px; color: #475569; margin: 4px 0 18px; }
             table { width: 100%; border-collapse: collapse; font-size: 12px; }
@@ -425,28 +445,76 @@ export const ProkerView: React.FC<ProkerViewProps> = ({
           </style>
         </head>
         <body>
-          <h2>MATRIKS PROGRAM KERJA & REALISASI</h2>
-          <h3>PGRI RANTING GELANG — KECAMATAN SUMBERBARU</h3>
-          <p class="sub">Dicetak pada ${new Date().toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' })} | Total Anggaran Rencana: Rp ${stats.totalBudget.toLocaleString('id-ID')}</p>
-          <table>
-            <thead>
-              <tr>
-                <th>No</th>
-                <th>Program Kerja</th>
-                <th>Seksi</th>
-                <th>Penanggung Jawab</th>
-                <th>Target</th>
-                <th>Anggaran</th>
-                <th>Realisasi</th>
-              </tr>
-            </thead>
-            <tbody>${rows}</tbody>
-          </table>
+          ${bodyHtml}
           <script>window.onload = function() { window.print(); }</script>
         </body>
       </html>
-    `);
-    printWin.document.close();
+    `;
+
+    const isMobile = typeof window !== 'undefined' && /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+    const printWin = !isMobile ? window.open('', '_blank', 'width=960,height=720') : null;
+    if (printWin) {
+      printWin.document.write(fullHtml);
+      printWin.document.close();
+      return;
+    }
+
+    // Fallback otomatis ke unduhan langsung PDF / HTML jika di ponsel atau pop-up diblokir
+    let container: HTMLDivElement | null = null;
+    try {
+      const html2pdf = await new Promise<any>((resolve, reject) => {
+        if (typeof window !== 'undefined' && (window as any).html2pdf) {
+          return resolve((window as any).html2pdf);
+        }
+        const script = document.createElement('script');
+        script.src = 'https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js';
+        script.onload = () => resolve((window as any).html2pdf);
+        script.onerror = () => reject(new Error('Gagal memuat library html2pdf.'));
+        document.head.appendChild(script);
+      });
+
+      container = document.createElement('div');
+      container.style.position = 'fixed';
+      container.style.left = '-9999px';
+      container.style.top = '0';
+      container.style.width = '900px';
+      container.style.backgroundColor = '#ffffff';
+      container.style.color = '#0f172a';
+      container.style.fontFamily = 'Arial, sans-serif';
+      container.style.padding = '24px';
+      container.innerHTML = `
+        <style>
+          h2, h3 { margin: 0; text-align: center; }
+          .sub { text-align: center; font-size: 12px; color: #475569; margin: 4px 0 18px; }
+          table { width: 100%; border-collapse: collapse; font-size: 12px; }
+          th, td { border: 1px solid #cbd5e1; padding: 8px; vertical-align: top; }
+          th { background: #f1f5f9; }
+        </style>
+        ${bodyHtml}
+      `;
+      document.body.appendChild(container);
+      const filename = `Matriks_Program_Kerja_PGRI_${new Date().toISOString().split('T')[0]}.pdf`;
+      const pdfBlob = await html2pdf()
+        .set({
+          margin: [10, 12, 10, 12],
+          filename,
+          image: { type: 'jpeg', quality: 0.96 },
+          html2canvas: { scale: 2, useCORS: true, logging: false },
+          jsPDF: { unit: 'mm', format: 'a4', orientation: 'landscape' }
+        })
+        .from(container)
+        .outputPdf('blob');
+      await safeDownloadBlob(pdfBlob, filename);
+    } catch {
+      const htmlBlob = new Blob([fullHtml.replace('<script>window.onload = function() { window.print(); }</script>', '')], {
+        type: 'text/html;charset=utf-8'
+      });
+      await safeDownloadBlob(htmlBlob, `Matriks_Program_Kerja_PGRI_${new Date().toISOString().split('T')[0]}.html`);
+    } finally {
+      if (container && document.body.contains(container)) {
+        document.body.removeChild(container);
+      }
+    }
   };
 
   const cardClass = isDark

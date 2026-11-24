@@ -1274,12 +1274,34 @@ export async function mergePendingMemberRegistrations<T extends { id: string }>(
 
   if (normalized.length === 0) return null;
 
+  const isDuplicateMember = (existingList: T[], candidate: T) => {
+    const cAny = candidate as any;
+    const cNpa = String(cAny.npa || '').trim();
+    const cName = String(cAny.name || '').trim().toLowerCase();
+    const cSchool = String(cAny.school || '').trim().toLowerCase();
+    return existingList.some((item) => {
+      if (item.id === candidate.id) return true;
+      const iAny = item as any;
+      const iNpa = String(iAny.npa || '').trim();
+      if (cNpa && iNpa && cNpa === iNpa) return true;
+      const iName = String(iAny.name || '').trim().toLowerCase();
+      const iSchool = String(iAny.school || '').trim().toLowerCase();
+      return Boolean(cName && cSchool && iName === cName && iSchool === cSchool);
+    });
+  };
+
+  let mergedNewCount = 0;
   const res = await mutateCloudCollection<T>(
     'teachers',
     ['kombel-teachers'],
     (latest) => {
-      const existingIds = new Set(latest.map((t) => t.id));
-      const newItems = normalized.filter((item) => !existingIds.has(item.id));
+      const newItems: T[] = [];
+      for (const item of normalized) {
+        if (!isDuplicateMember(latest, item) && !isDuplicateMember(newItems, item)) {
+          newItems.push(item);
+        }
+      }
+      mergedNewCount = newItems.length;
       if (newItems.length === 0) return latest;
       return [...newItems, ...latest];
     },
@@ -1293,6 +1315,13 @@ export async function mergePendingMemberRegistrations<T extends { id: string }>(
         .filter((item) => item && VALID_DOC_ID_RE.test(String(item.id || '')))
         .map((item) => deleteDoc(doc(db, 'member_registrations', String(item.id))))
     );
+    if (mergedNewCount > 0) {
+      emitSyncStatus({
+        type: 'success',
+        collectionName: 'teachers',
+        message: `${mergedNewCount} pendaftaran anggota baru dari Mode Guru digabungkan (menunggu aktivasi pengurus).`,
+      });
+    }
     return res.items;
   }
 
@@ -1325,6 +1354,7 @@ export async function mergePendingAttendanceSubmissions<
     });
   };
 
+  let mergedAttCount = 0;
   const res = await mutateCloudCollection<T>(
     'attendanceList',
     ['kombel-attendance', 'kombel-attendance-list'],
@@ -1335,6 +1365,7 @@ export async function mergePendingAttendanceSubmissions<
           additions.push(item);
         }
       }
+      mergedAttCount = additions.length;
       if (additions.length === 0) return latest;
       return [...additions, ...latest];
     },
@@ -1348,6 +1379,13 @@ export async function mergePendingAttendanceSubmissions<
         .filter((item) => VALID_DOC_ID_RE.test(String(item.id || '')))
         .map((item) => deleteDoc(doc(db, 'attendance_submissions', String(item.id))))
     );
+    if (mergedAttCount > 0) {
+      emitSyncStatus({
+        type: 'success',
+        collectionName: 'attendanceList',
+        message: `${mergedAttCount} data presensi dari Mode Guru berhasil digabungkan.`,
+      });
+    }
     return res.items;
   }
 
@@ -1366,12 +1404,14 @@ export async function mergePendingKontakSubmissions<T extends { id: string }>(
   const validPending = pending.filter((item) => item && item.id);
   if (validPending.length === 0) return null;
 
+  let mergedKontakCount = 0;
   const res = await mutateCloudCollection<T>(
     'kontakFeedback',
     ['pgri-kontak-feedback'],
     (latest) => {
       const existingIds = new Set(latest.map((item) => item.id));
       const newItems = validPending.filter((item) => !existingIds.has(item.id));
+      mergedKontakCount = newItems.length;
       if (newItems.length === 0) return latest;
       return [...newItems, ...latest];
     },
@@ -1385,6 +1425,13 @@ export async function mergePendingKontakSubmissions<T extends { id: string }>(
         .filter((item) => VALID_DOC_ID_RE.test(String(item.id || '')))
         .map((item) => deleteDoc(doc(db, 'kontak_submissions', String(item.id))))
     );
+    if (mergedKontakCount > 0) {
+      emitSyncStatus({
+        type: 'success',
+        collectionName: 'kontakFeedback',
+        message: `${mergedKontakCount} pesan baru dari Mode Guru berhasil digabungkan.`,
+      });
+    }
     try {
       if (typeof window !== 'undefined') {
         window.dispatchEvent(new Event('pgri-kontak-synced'));

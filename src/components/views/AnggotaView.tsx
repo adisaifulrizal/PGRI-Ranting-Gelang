@@ -1084,6 +1084,24 @@ export const AnggotaView: React.FC<AnggotaViewProps> = ({
       return;
     }
 
+    if (!editingTeacher) {
+      const normalizedNewName = (formData.name || '').trim().toLowerCase();
+      const normalizedNewSchool = (formData.school || dynamicSchoolsList[0] || MASTER_SCHOOLS_LIST[0]).trim().toLowerCase();
+      const duplicateTeacher = teachersList.find((t) => {
+        const existingNpa = String((t as any).npa || '').trim();
+        if (existingNpa && existingNpa === cleanNpa) return true;
+        const existingName = String(t.name || '').trim().toLowerCase();
+        const existingSchool = String(t.school || '').trim().toLowerCase();
+        return Boolean(normalizedNewName && normalizedNewSchool && existingName === normalizedNewName && existingSchool === normalizedNewSchool);
+      });
+      if (duplicateTeacher) {
+        handleOpenWarning(
+          `Anggota dengan nama "${duplicateTeacher.name}" (${duplicateTeacher.school}) atau NPA ${cleanNpa} sudah terdaftar.`
+        );
+        return;
+      }
+    }
+
     let updated: Teacher[];
     let editedObj: Teacher | null = null;
     let newTeacher: Teacher | null = null;
@@ -1227,8 +1245,9 @@ export const AnggotaView: React.FC<AnggotaViewProps> = ({
     });
   };
 
-  // Handler untuk Unduh PDF (PC: Jendela Cetak | Ponsel: Auto Download PDF)
+  // Handler untuk Unduh PDF (PC: Jendela Cetak | Ponsel / Pop-up diblokir: Auto Download PDF)
   const handleDownloadPDF = async () => {
+    const printWindow = !isMobileDevice() ? window.open('', '_blank') : null;
     // 1. Pengambilan Data Pengaturan (Logo, TTD, & Stempel)
     let settingsData: Record<string, string> = {};
     try {
@@ -1301,8 +1320,8 @@ export const AnggotaView: React.FC<AnggotaViewProps> = ({
       </tr>
     `).join('');
 
-    // JIKA DI PONSEL: Gunakan html2pdf untuk direct download PDF presisi
-    if (isMobileDevice()) {
+    // JIKA DI PONSEL ATAU POP-UP DIBLOKIR: Gunakan html2pdf untuk direct download PDF presisi
+    if (!printWindow) {
       let container: HTMLDivElement | null = null;
       try {
         const html2pdf = await getHtml2Pdf();
@@ -1677,7 +1696,6 @@ export const AnggotaView: React.FC<AnggotaViewProps> = ({
     }
 
     // JIKA DI PC / LAPTOP: Gunakan pratinjau cetak bawaan browser
-    const printWindow = window.open('', '_blank');
     if (!printWindow) return;
 
     const htmlContent = `
@@ -2177,27 +2195,19 @@ export const AnggotaView: React.FC<AnggotaViewProps> = ({
       }`}>
         <div className="absolute top-0 inset-x-0 h-[3px] pgri-top-accent pointer-events-none" />
         <div className="relative z-10 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
-          <div className="flex items-start gap-4">
-            <div className={`w-12 h-12 rounded-xl border flex items-center justify-center shrink-0 ${
-              isDark
-                ? 'bg-red-950/70 border-red-800/60 text-amber-400'
-                : 'bg-red-50 border-red-200/90 text-red-800'
+          <div>
+            <p className={`inline-flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-[0.14em] mb-1.5 ${
+              activeRole === 'admin'
+                ? 'text-red-800 dark:text-amber-400'
+                : 'text-amber-700 dark:text-amber-400'
             }`}>
-              <Users className="w-6 h-6" />
-            </div>
-            <div>
-              <p className={`text-[11px] font-bold uppercase tracking-[0.14em] mb-1 ${
-                activeRole === 'admin'
-                  ? 'text-red-800 dark:text-amber-400'
-                  : 'text-amber-700 dark:text-amber-400'
-              }`}>
-                Direktori Anggota • {activeRole === 'admin' ? 'Mode Admin / Pengurus' : 'Mode Baca Guru'}
-              </p>
-              <h1 className="font-display text-2xl sm:text-3xl font-extrabold tracking-tight">Daftar Anggota</h1>
-              <p className={`text-xs sm:text-sm mt-1 ${isDark ? 'text-stone-400' : 'text-stone-600'}`}>
-                Kelola direktori anggota PGRI Ranting Gelang
-              </p>
-            </div>
+              <Users className="w-3.5 h-3.5" />
+              Direktori Anggota • {activeRole === 'admin' ? 'Mode Admin / Pengurus' : 'Mode Baca Guru'}
+            </p>
+            <h1 className="font-display text-2xl sm:text-3xl font-extrabold tracking-tight">Daftar Anggota</h1>
+            <p className={`text-xs sm:text-sm font-medium mt-1 ${isDark ? 'text-stone-400' : 'text-stone-600'}`}>
+              Kelola direktori anggota PGRI Ranting Gelang
+            </p>
           </div>
 
           <div className="flex flex-wrap items-center gap-2.5">

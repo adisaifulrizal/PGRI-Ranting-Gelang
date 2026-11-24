@@ -32,6 +32,7 @@ import { db } from '../lib/firebase';
 import { emitSyncStatus } from '../lib/sync';
 import {
   canAccessAdminForTab,
+  formatGoogleAuthError,
   isPengurusRole,
   logAuditEvent,
   PENGURUS_ROLE_LABELS,
@@ -226,9 +227,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
       setError('');
       setIsLoggingIn(false);
     } catch (err: any) {
-      setError(err?.message?.includes('popup-closed')
-        ? 'Jendela login Google ditutup sebelum selesai.'
-        : 'Gagal masuk dengan Google. Pastikan pop-up browser diizinkan dan coba lagi.');
+      setError(formatGoogleAuthError(err));
       setIsShaking(true);
       setTimeout(() => setIsShaking(false), 500);
       setIsLoggingIn(false);
@@ -1086,7 +1085,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 </button>
 
                 <p className="text-[11px] text-stone-400 text-center leading-relaxed">
-                  Keamanan ditingkatkan menggunakan Firebase Auth. Ketua dapat menambahkan email Sekretaris, Bendahara, dan Pengurus Seksi di menu <strong>Pengaturan</strong>.
+                  Keamanan ditingkatkan menggunakan Firebase Auth. Ketua dapat menambahkan email Sekretaris, Bendahara, dan Pengurus Seksi di menu <strong>Pengaturan</strong>. Jika gagal di preview atau browser WhatsApp, buka tautan di Chrome/Edge/Safari dan izinkan pop-up.
                 </p>
               </div>
             </div>

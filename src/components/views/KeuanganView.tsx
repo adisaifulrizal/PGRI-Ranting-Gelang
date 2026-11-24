@@ -21,7 +21,6 @@ import {
   UserX,
   FileText,
   Users,
-  Search,
   Calendar,
   Send,
   CreditCard,
@@ -159,24 +158,43 @@ export const KeuanganView: React.FC<KeuanganViewProps> = ({
   const currentYearStr = useMemo(() => String(new Date().getFullYear()), []);
   const currentMonthId = useMemo(() => String(new Date().getMonth() + 1).padStart(2, '0'), []);
 
-  // Daftar Pilihan Tahun (Dinamis mulai 2025 hingga tahun depan)
+  // Periode Mulai Pembayaran Iuran (Default: November 2026 -> "2026-11", tersimpan di localStorage & Cloud)
+  const [duesStartPeriod, setDuesStartPeriod] = useState<string>(() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('pgri-dues-start-period');
+      if (saved && /^\d{4}-\d{2}$/.test(saved)) return saved;
+    }
+    return '2026-11';
+  });
+  const duesStartYear = useMemo(() => duesStartPeriod.split('-')[0] || '2026', [duesStartPeriod]);
+  const duesStartMonth = useMemo(() => duesStartPeriod.split('-')[1] || '11', [duesStartPeriod]);
+
+  const isPeriodActive = (yearStr: string, monthId: string): boolean => {
+    if (!yearStr || !monthId) return true;
+    return `${yearStr}-${monthId}` >= duesStartPeriod;
+  };
+
+  // Daftar Pilihan Tahun (Dimulai dari tahun mulai pembayaran iuran hingga 2 tahun ke depan)
   const YEAR_OPTIONS = useMemo(() => {
     const curYear = new Date().getFullYear();
-    const startYear = 2025;
-    const endYear = curYear + 2;
+    const startYear = Math.min(Number(duesStartYear) || 2026, curYear);
+    const endYear = Math.max(curYear + 2, startYear + 1);
     const years: string[] = [];
     for (let y = startYear; y <= endYear; y++) {
       years.push(String(y));
     }
     return years;
-  }, []);
+  }, [duesStartYear]);
+
+  const initialActivePeriod = useMemo(() => {
+    const nowCode = `${currentYearStr}-${currentMonthId}`;
+    return nowCode < duesStartPeriod ? duesStartPeriod : nowCode;
+  }, [currentYearStr, currentMonthId, duesStartPeriod]);
 
   // Filter State Khusus Tab Daftar Pembayaran
-  const [searchName, setSearchName] = useState('');
-  const [filterGender, setFilterGender] = useState<'Semua' | 'L' | 'P'>('Semua');
   const [filterSchool, setFilterSchool] = useState<string>('Semua');
-  const [filterYear, setFilterYear] = useState<string>(currentYearStr);
-  const [filterMonth, setFilterMonth] = useState<string>(currentMonthId);
+  const [filterYear, setFilterYear] = useState<string>(() => initialActivePeriod.split('-')[0]);
+  const [filterMonth, setFilterMonth] = useState<string>(() => initialActivePeriod.split('-')[1]);
 
   // Modal State Konfirmasi Transfer ke WhatsApp
   const [isConfirmTransferModalOpen, setIsConfirmTransferModalOpen] = useState(false);
@@ -224,16 +242,50 @@ export const KeuanganView: React.FC<KeuanganViewProps> = ({
   const [verifikasiRoleFilter, setVerifikasiRoleFilter] = useState<'Semua' | 'Pengurus' | 'Anggota'>('Semua');
   const [isSelectingPengurus, setIsSelectingPengurus] = useState(false);
   const [isBulkUpdatingVerifikasi, setIsBulkUpdatingVerifikasi] = useState(false);
-  const [selectedVerifikasiYear, setSelectedVerifikasiYear] = useState<string>(currentYearStr);
-  const [selectedVerifikasiMonth, setSelectedVerifikasiMonth] = useState<string>(currentMonthId);
+  const [selectedVerifikasiYear, setSelectedVerifikasiYear] = useState<string>(() => initialActivePeriod.split('-')[0]);
+  const [selectedVerifikasiMonth, setSelectedVerifikasiMonth] = useState<string>(() => initialActivePeriod.split('-')[1]);
   const [verifikasiToast, setVerifikasiToast] = useState<string | null>(null);
 
   // Konfigurasi Dinamis Organisasi PGRI (Rekening, WA Bendahara, Nominal Kontribusi)
   const [orgConfig, setOrgConfig] = useState(() => getOrgConfig());
   const [previewReceiptUrl, setPreviewReceiptUrl] = useState<string | null>(null);
   const [isRekapSekolahOpen, setIsRekapSekolahOpen] = useState(false);
-  const [rekapMonth, setRekapMonth] = useState<string>(currentMonthId);
-  const [rekapYear, setRekapYear] = useState<string>(currentYearStr);
+  const [rekapMonth, setRekapMonth] = useState<string>(() => initialActivePeriod.split('-')[1]);
+  const [rekapYear, setRekapYear] = useState<string>(() => initialActivePeriod.split('-')[0]);
+
+  useEffect(() => {
+    const syncStartPeriod = () => {
+      if (typeof window !== 'undefined') {
+        const saved = localStorage.getItem('pgri-dues-start-period');
+        if (saved && /^\d{4}-\d{2}$/.test(saved)) {
+          setDuesStartPeriod(saved);
+          const [y, m] = saved.split('-');
+          setFilterYear((prevYear) => {
+            const nextY = prevYear < y ? y : prevYear;
+            setFilterMonth((prevMonth) => (prevMonth !== 'Semua' && `${nextY}-${prevMonth}` < saved ? m : prevMonth));
+            return nextY;
+          });
+          setSelectedVerifikasiYear((prevYear) => {
+            const nextY = prevYear < y ? y : prevYear;
+            setSelectedVerifikasiMonth((prevMonth) => (`${nextY}-${prevMonth}` < saved ? m : prevMonth));
+            return nextY;
+          });
+          setRekapYear((prevYear) => {
+            const nextY = prevYear < y ? y : prevYear;
+            setRekapMonth((prevMonth) => (`${nextY}-${prevMonth}` < saved ? m : prevMonth));
+            return nextY;
+          });
+        }
+      }
+    };
+    window.addEventListener('storage', syncStartPeriod);
+    window.addEventListener('kombel-settings-updated', syncStartPeriod);
+    return () => {
+      window.removeEventListener('storage', syncStartPeriod);
+      window.removeEventListener('kombel-settings-updated', syncStartPeriod);
+    };
+  }, []);
+
   const [receiptPreviewTarget, setReceiptPreviewTarget] = useState<{
     teacher: Teacher;
     month: { id: string; name: string };
@@ -263,45 +315,70 @@ export const KeuanganView: React.FC<KeuanganViewProps> = ({
     receiptImage: string;
   }>({
     date: new Date().toISOString().split('T')[0],
-    type: 'Pemasukan',
+    type: 'Pengeluaran',
     amount: '',
     description: '',
     volume: '',
     satuan: '',
-    category: 'Kontribusi Anggota',
+    category: 'Operasional Sekretariat',
     receiptImage: ''
   });
+  const [receiptError, setReceiptError] = useState<string>('');
 
   const handleReceiptFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
+    setReceiptError('');
     const reader = new FileReader();
     reader.onload = (ev) => {
       const raw = ev.target?.result as string;
       const img = new Image();
       img.onload = () => {
         try {
-          const maxDim = 560;
-          let w = img.width;
-          let h = img.height;
-          if (w > h && w > maxDim) {
-            h = Math.round(h * (maxDim / w));
-            w = maxDim;
-          } else if (h >= w && h > maxDim) {
-            w = Math.round(w * (maxDim / h));
-            h = maxDim;
-          }
-          const canvas = document.createElement('canvas');
-          canvas.width = w;
-          canvas.height = h;
-          const ctx = canvas.getContext('2d');
-          if (ctx) {
+          const compressWith = (maxDim: number, quality: number) => {
+            let w = img.width;
+            let h = img.height;
+            if (w > h && w > maxDim) {
+              h = Math.round(h * (maxDim / w));
+              w = maxDim;
+            } else if (h >= w && h > maxDim) {
+              w = Math.round(w * (maxDim / h));
+              h = maxDim;
+            }
+            const canvas = document.createElement('canvas');
+            canvas.width = w;
+            canvas.height = h;
+            const ctx = canvas.getContext('2d');
+            if (!ctx) return '';
             ctx.drawImage(img, 0, 0, w, h);
-            setFormData((prev) => ({ ...prev, receiptImage: canvas.toDataURL('image/jpeg', 0.68) }));
+            return canvas.toDataURL('image/jpeg', quality);
+          };
+
+          let compressed = compressWith(560, 0.68);
+          if (compressed.length > 350000) {
+            compressed = compressWith(560, 0.45);
+          }
+          if (compressed.length > 350000) {
+            compressed = compressWith(400, 0.45);
+          }
+
+          if (compressed && compressed.length <= 350000) {
+            setFormData((prev) => ({ ...prev, receiptImage: compressed }));
+          } else {
+            setFormData((prev) => ({ ...prev, receiptImage: '' }));
+            setReceiptError('Ukuran gambar nota melebihi batas 350 KB setelah dikompresi. Gunakan foto beresolusi lebih kecil.');
           }
         } catch {
-          setFormData((prev) => ({ ...prev, receiptImage: raw }));
+          if (raw && raw.length <= 350000) {
+            setFormData((prev) => ({ ...prev, receiptImage: raw }));
+          } else {
+            setFormData((prev) => ({ ...prev, receiptImage: '' }));
+            setReceiptError('Gagal mengompresi foto nota (>350 KB). Silakan pilih foto lain yang lebih ringan.');
+          }
         }
+      };
+      img.onerror = () => {
+        setReceiptError('Format gambar nota tidak didukung atau file rusak.');
       };
       img.src = raw;
     };
@@ -1110,8 +1187,8 @@ export const KeuanganView: React.FC<KeuanganViewProps> = ({
       const safeSchool = schoolName.replace(/[^a-zA-Z0-9]/g, '_');
       const docTitle = `Kuitansi_${safeSchool}_${monthObj.name}_${rekapYear}`;
 
-      // JIKA DI PONSEL: Direct download PDF menggunakan html2pdf
-      if (isMobile) {
+      // JIKA DI PONSEL ATAU POP-UP DIBLOKIR: Direct download PDF menggunakan html2pdf
+      if (isMobile || !printWindow) {
         const html2pdf = await getHtml2Pdf();
         container = document.createElement('div');
         container.style.position = 'fixed';
@@ -1303,22 +1380,17 @@ export const KeuanganView: React.FC<KeuanganViewProps> = ({
     );
   };
 
-  // Daftar Item Pembayaran per Bulan & Tahun
+  // Daftar Item Pembayaran per Bulan & Tahun (hanya bulan mulai berlaku iuran ke depan)
   const paymentItems = useMemo(() => {
     const items: { teacher: Teacher; month: { id: string; name: string }; year: string }[] = [];
     MONTH_OPTIONS.forEach(month => {
+      if (!isPeriodActive(filterYear, month.id)) return;
       sortedTeachers.forEach(teacher => {
         items.push({ teacher, month, year: filterYear });
       });
     });
 
     return items.filter(item => {
-      if (searchName.trim() && !item.teacher.name.toLowerCase().includes(searchName.toLowerCase())) {
-        return false;
-      }
-      if (filterGender !== 'Semua' && getGender(item.teacher) !== filterGender) {
-        return false;
-      }
       if (filterSchool !== 'Semua' && item.teacher.school !== filterSchool) {
         return false;
       }
@@ -1327,7 +1399,7 @@ export const KeuanganView: React.FC<KeuanganViewProps> = ({
       }
       return true;
     });
-  }, [MONTH_OPTIONS, sortedTeachers, searchName, filterGender, filterSchool, filterMonth, filterYear]);
+  }, [MONTH_OPTIONS, sortedTeachers, filterSchool, filterMonth, filterYear, duesStartPeriod]);
 
   // Pengelompokan Data Pembayaran berdasarkan Bulan & Tahun untuk Kotak Pembungkus
   const groupedPaymentItems = useMemo(() => {
@@ -1431,14 +1503,15 @@ export const KeuanganView: React.FC<KeuanganViewProps> = ({
       setEditingTx(null);
       setFormData({
         date: new Date().toISOString().split('T')[0],
-        type: 'Pemasukan',
+        type: 'Pengeluaran',
         amount: '',
         description: '',
         volume: '',
         satuan: '',
-        category: 'Kontribusi Anggota',
+        category: 'Operasional Sekretariat',
         receiptImage: ''
       });
+      setReceiptError('');
       setIsClosingModal(false);
       setIsModalOpen(true);
     });
@@ -1458,13 +1531,14 @@ export const KeuanganView: React.FC<KeuanganViewProps> = ({
       setFormData({
         date: tx.date,
         type: tx.type,
-        amount: tx.amount.toString(),
+        amount: tx.amount > 0 ? `Rp. ${tx.amount.toLocaleString('id-ID')}` : '',
         description: cleanDesc,
         volume: savedVol,
         satuan: savedSat,
         category: normalizedCategory || (tx.type === 'Pemasukan' ? 'Kontribusi Anggota' : 'Operasional Sekretariat'),
         receiptImage: tx.receiptImage || ''
       });
+      setReceiptError('');
       setIsClosingModal(false);
       setIsModalOpen(true);
     });
@@ -1567,6 +1641,7 @@ export const KeuanganView: React.FC<KeuanganViewProps> = ({
 
   // Cetak / Unduh LPJ Keuangan Resmi PGRI Ranting Gelang (PC: Jendela Cetak | Ponsel: Auto Download PDF)
   const handleExportOfficialLPJ = async () => {
+    const printWindow = !isMobileDevice() ? window.open('', '_blank') : null;
     const logoPgri = localStorage.getItem('logo-pgri') || localStorage.getItem('logo-kombel') || '';
     const ttdKetua = localStorage.getItem('ttd-ketua') || '';
     const ttdKetuaSize = localStorage.getItem('ttd-ketua-size') ? Number(localStorage.getItem('ttd-ketua-size')) : 100;
@@ -1953,8 +2028,8 @@ export const KeuanganView: React.FC<KeuanganViewProps> = ({
       .ttd-nip { font-size: 8pt; color: #111; }
     `;
 
-    // JIKA DI PONSEL: Gunakan html2pdf untuk direct download PDF yang presisi
-    if (isMobileDevice()) {
+    // JIKA DI PONSEL ATAU POP-UP DIBLOKIR: Gunakan html2pdf untuk direct download PDF yang presisi
+    if (!printWindow) {
       let container: HTMLDivElement | null = null;
       try {
         const html2pdf = await getHtml2Pdf();
@@ -1994,7 +2069,6 @@ export const KeuanganView: React.FC<KeuanganViewProps> = ({
     }
 
     // JIKA DI PC / LAPTOP: Gunakan pratinjau cetak bawaan browser
-    const printWindow = window.open('', '_blank');
     if (!printWindow) return;
 
     const htmlContent = `
@@ -2419,6 +2493,7 @@ export const KeuanganView: React.FC<KeuanganViewProps> = ({
 
   // 1. Handler Unduh PDF Laporan Buku Kas Umum (PC: Jendela Cetak | Ponsel: Auto Download PDF)
   const handleDownloadPDF = async () => {
+    const printWindow = !isMobileDevice() ? window.open('', '_blank') : null;
     const { settingsData, bendaharaName, bendaharaNpaLabel } = await fetchPrintSettingsAndSigner();
 
     const logoPgri = settingsData['logo-pgri'] || settingsData['logo-kombel'] || '';
@@ -2443,8 +2518,8 @@ export const KeuanganView: React.FC<KeuanganViewProps> = ({
       </tr>
     `).join('');
 
-    // JIKA DI PONSEL: Gunakan html2pdf untuk direct download PDF yang presisi
-    if (isMobileDevice()) {
+    // JIKA DI PONSEL ATAU POP-UP DIBLOKIR: Gunakan html2pdf untuk direct download PDF yang presisi
+    if (!printWindow) {
       let container: HTMLDivElement | null = null;
       try {
         const html2pdf = await getHtml2Pdf();
@@ -2790,7 +2865,6 @@ export const KeuanganView: React.FC<KeuanganViewProps> = ({
     }
 
     // JIKA DI PC / LAPTOP: Gunakan pratinjau cetak bawaan browser
-    const printWindow = window.open('', '_blank');
     if (!printWindow) return;
 
     const htmlContent = `
@@ -3169,6 +3243,7 @@ export const KeuanganView: React.FC<KeuanganViewProps> = ({
 
   // 2. Handler Unduh PDF Daftar Pembayaran Uang Kas Anggota (PC: Jendela Cetak | Ponsel: Auto Download PDF)
   const handleDownloadDaftarPembayaranPDF = async () => {
+    const printWindow = !isMobileDevice() ? window.open('', '_blank') : null;
     const { settingsData, bendaharaName, bendaharaNpaLabel } = await fetchPrintSettingsAndSigner();
 
     const logoPgri = settingsData['logo-pgri'] || settingsData['logo-kombel'] || '';
@@ -3215,8 +3290,8 @@ export const KeuanganView: React.FC<KeuanganViewProps> = ({
       `;
     }).join('');
 
-    // JIKA DI PONSEL: Gunakan html2pdf untuk direct download PDF yang presisi
-    if (isMobileDevice()) {
+    // JIKA DI PONSEL ATAU POP-UP DIBLOKIR: Gunakan html2pdf untuk direct download PDF yang presisi
+    if (!printWindow) {
       let container: HTMLDivElement | null = null;
       try {
         const html2pdf = await getHtml2Pdf();
@@ -3555,7 +3630,6 @@ export const KeuanganView: React.FC<KeuanganViewProps> = ({
     }
 
     // JIKA DI PC / LAPTOP: Gunakan pratinjau cetak bawaan browser
-    const printWindow = window.open('', '_blank');
     if (!printWindow) return;
 
     const htmlContent = `
@@ -3927,26 +4001,28 @@ export const KeuanganView: React.FC<KeuanganViewProps> = ({
     printWindow.document.close();
   };
 
-  // Sinkronisasi status guru murni per bulan & tahun yang dipilih
+  // Sinkronisasi status guru murni per bulan & tahun yang dipilih (mengabaikan periode sebelum mulai iuran)
   const lunasTeachersList = useMemo(() => {
     if (!selectedVerifikasiMonth || !selectedVerifikasiYear) return [];
+    if (!isPeriodActive(selectedVerifikasiYear, selectedVerifikasiMonth)) return [];
     return sortedTeachers
       .filter(t => {
         const p = getPayment(t.id, selectedVerifikasiMonth, t.name, selectedVerifikasiYear);
         return p?.status === 'Lunas';
       })
       .sort((a, b) => (a.name || '').localeCompare(b.name || '', 'id', { sensitivity: 'base' }));
-  }, [sortedTeachers, cashPayments, selectedVerifikasiMonth, selectedVerifikasiYear]);
+  }, [sortedTeachers, cashPayments, selectedVerifikasiMonth, selectedVerifikasiYear, duesStartPeriod]);
 
   const belumBayarTeachersList = useMemo(() => {
     if (!selectedVerifikasiMonth || !selectedVerifikasiYear) return sortedTeachers;
+    if (!isPeriodActive(selectedVerifikasiYear, selectedVerifikasiMonth)) return [];
     return sortedTeachers
       .filter(t => {
         const p = getPayment(t.id, selectedVerifikasiMonth, t.name, selectedVerifikasiYear);
         return p?.status !== 'Lunas';
       })
       .sort((a, b) => (a.name || '').localeCompare(b.name || '', 'id', { sensitivity: 'base' }));
-  }, [sortedTeachers, cashPayments, selectedVerifikasiMonth, selectedVerifikasiYear]);
+  }, [sortedTeachers, cashPayments, selectedVerifikasiMonth, selectedVerifikasiYear, duesStartPeriod]);
 
   const filteredVerifikasiTeachers = useMemo(() => {
     const baseList = verifikasiFilter === 'Lunas' ? lunasTeachersList : belumBayarTeachersList;
@@ -4331,38 +4407,21 @@ export const KeuanganView: React.FC<KeuanganViewProps> = ({
               {/* Header Tab & Deretan Filter di Sebelah Kanan */}
               <div className="flex flex-col xl:flex-row justify-between items-start xl:items-center gap-4">
                 <div>
-                  <h3 className="font-display text-lg font-semibold text-stone-900 [.dark_&]:text-white dark:text-white">Status Pembayaran Uang Kas</h3>
-                  <p className="text-sm text-stone-500 [.dark_&]:text-stone-400 dark:text-stone-400 mt-1">Daftar riwayat dan status pembayaran kas kegiatan anggota.</p>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <h3 className="font-display text-lg font-semibold text-stone-900 [.dark_&]:text-white dark:text-white">Status Pembayaran Uang Kas</h3>
+                    <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-lg text-[11px] font-bold bg-amber-50 [.dark_&]:bg-amber-950/60 dark:bg-amber-950/60 text-amber-800 [.dark_&]:text-amber-300 dark:text-amber-300 border border-amber-200/80 [.dark_&]:border-amber-800/50 dark:border-amber-800/50">
+                      <Calendar className="w-3 h-3" />
+                      Mulai: {MONTH_OPTIONS.find(m => m.id === duesStartMonth)?.name || 'November'} {duesStartYear}
+                    </span>
+                  </div>
+                  <p className="text-sm text-stone-500 [.dark_&]:text-stone-400 dark:text-stone-400 mt-1">
+                    Riwayat dan status pembayaran (berlaku mulai {MONTH_OPTIONS.find(m => m.id === duesStartMonth)?.name || 'November'} {duesStartYear}).
+                  </p>
                 </div>
 
                 {/* Filter Controls di Sebelah Kanan + Tombol Unduh PDF */}
                 <div className="flex flex-wrap items-center gap-2.5 w-full xl:w-auto">
-                  {/* 1. Filter Nama Guru */}
-                  <div className="relative flex-1 sm:flex-initial sm:w-48">
-                    <Search className="w-4 h-4 absolute left-3 top-1/2 transform -translate-y-1/2 text-stone-400 pointer-events-none" />
-                    <input
-                      type="text"
-                      placeholder="Cari nama anda ..."
-                      value={searchName}
-                      onChange={(e) => setSearchName(e.target.value)}
-                      className="w-full pl-9 pr-3.5 py-2.5 rounded-xl bg-[#faf8f5] [.dark_&]:bg-stone-800 dark:bg-stone-800 border border-stone-200 [.dark_&]:border-stone-700 dark:border-stone-700 text-stone-800 [.dark_&]:text-stone-100 dark:text-stone-100 text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-red-800/20 focus:border-red-700 placeholder:text-stone-400"
-                    />
-                  </div>
-
-                  {/* 2. Filter Jenis Kelamin (Disembunyikan pada Mobile) */}
-                  <div className="hidden sm:block sm:flex-initial sm:w-40">
-                    <select
-                      value={filterGender}
-                      onChange={(e) => setFilterGender(e.target.value as 'Semua' | 'L' | 'P')}
-                      className="w-full px-3.5 py-2.5 rounded-xl bg-[#faf8f5] [.dark_&]:bg-stone-800 dark:bg-stone-800 border border-stone-200 [.dark_&]:border-stone-700 dark:border-stone-700 text-stone-800 [.dark_&]:text-stone-100 dark:text-stone-100 text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-red-800/20 focus:border-red-700 cursor-pointer"
-                    >
-                      <option value="Semua" className={isDark ? "bg-stone-800 text-stone-100" : "bg-white text-stone-800"}>Semua Jenis Kelamin</option>
-                      <option value="L" className={isDark ? "bg-stone-800 text-stone-100" : "bg-white text-stone-800"}>Laki-laki</option>
-                      <option value="P" className={isDark ? "bg-stone-800 text-stone-100" : "bg-white text-stone-800"}>Perempuan</option>
-                    </select>
-                  </div>
-
-                  {/* 3. Filter Nama Sekolah (Disembunyikan pada Mobile) */}
+                  {/* Filter Nama Sekolah (Disembunyikan pada Mobile) */}
                   <div className="hidden sm:block sm:flex-initial sm:w-48">
                     <select
                       value={filterSchool}
@@ -4382,7 +4441,14 @@ export const KeuanganView: React.FC<KeuanganViewProps> = ({
                   <div className="flex-1 sm:flex-initial sm:w-32">
                     <select
                       value={filterYear}
-                      onChange={(e) => setFilterYear(e.target.value)}
+                      onChange={(e) => {
+                        const nextYear = e.target.value;
+                        setFilterYear(nextYear);
+                        if (filterMonth !== 'Semua' && !isPeriodActive(nextYear, filterMonth)) {
+                          const firstValid = MONTH_OPTIONS.find(m => isPeriodActive(nextYear, m.id));
+                          if (firstValid) setFilterMonth(firstValid.id);
+                        }
+                      }}
                       className="w-full px-3.5 py-2.5 rounded-xl bg-[#faf8f5] [.dark_&]:bg-stone-800 dark:bg-stone-800 border border-stone-200 [.dark_&]:border-stone-700 dark:border-stone-700 text-stone-800 [.dark_&]:text-stone-100 dark:text-stone-100 text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-red-800/20 focus:border-red-700 cursor-pointer truncate"
                     >
                       {YEAR_OPTIONS.map((yr) => (
@@ -4400,8 +4466,8 @@ export const KeuanganView: React.FC<KeuanganViewProps> = ({
                       onChange={(e) => setFilterMonth(e.target.value)}
                       className="w-full px-3.5 py-2.5 rounded-xl bg-[#faf8f5] [.dark_&]:bg-stone-800 dark:bg-stone-800 border border-stone-200 [.dark_&]:border-stone-700 dark:border-stone-700 text-stone-800 [.dark_&]:text-stone-100 dark:text-stone-100 text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-red-800/20 focus:border-red-700 cursor-pointer truncate"
                     >
-                      <option value="Semua" className={isDark ? "bg-stone-800 text-stone-100" : "bg-white text-stone-800"}>Semua Bulan</option>
-                      {MONTH_OPTIONS.map((m) => (
+                      <option value="Semua" className={isDark ? "bg-stone-800 text-stone-100" : "bg-white text-stone-800"}>Semua Bulan Aktif</option>
+                      {MONTH_OPTIONS.filter(m => isPeriodActive(filterYear, m.id)).map((m) => (
                         <option key={m.id} value={m.id} className={isDark ? "bg-stone-800 text-stone-100" : "bg-white text-stone-800"}>
                           Bulan {m.name}
                         </option>
@@ -4801,7 +4867,14 @@ export const KeuanganView: React.FC<KeuanganViewProps> = ({
                 </label>
                 <select
                   value={selectedVerifikasiYear}
-                  onChange={(e) => setSelectedVerifikasiYear(e.target.value)}
+                  onChange={(e) => {
+                    const nextYear = e.target.value;
+                    setSelectedVerifikasiYear(nextYear);
+                    if (!isPeriodActive(nextYear, selectedVerifikasiMonth)) {
+                      const firstValid = MONTH_OPTIONS.find(m => isPeriodActive(nextYear, m.id));
+                      if (firstValid) setSelectedVerifikasiMonth(firstValid.id);
+                    }
+                  }}
                   style={{ textAlignLast: 'center' }}
                   className="w-full px-3.5 py-2.5 rounded-xl bg-[#faf8f5] [.dark_&]:bg-stone-800 dark:bg-stone-800 border border-stone-200 [.dark_&]:border-stone-700 dark:border-stone-700 text-stone-800 [.dark_&]:text-stone-100 dark:text-stone-100 font-bold text-xs text-center focus:outline-none focus:ring-2 focus:ring-red-800/20 focus:border-red-700 cursor-pointer"
                 >
@@ -4823,7 +4896,7 @@ export const KeuanganView: React.FC<KeuanganViewProps> = ({
                   style={{ textAlignLast: 'center' }}
                   className="w-full px-3.5 py-2.5 rounded-xl bg-[#faf8f5] [.dark_&]:bg-stone-800 dark:bg-stone-800 border border-stone-200 [.dark_&]:border-stone-700 dark:border-stone-700 text-stone-800 [.dark_&]:text-stone-100 dark:text-stone-100 font-bold text-xs text-center focus:outline-none focus:ring-2 focus:ring-red-800/20 focus:border-red-700 cursor-pointer"
                 >
-                  {MONTH_OPTIONS.map((m) => (
+                  {MONTH_OPTIONS.filter(m => isPeriodActive(selectedVerifikasiYear, m.id)).map((m) => (
                     <option key={m.id} value={m.id} className={`text-left ${isDark ? "bg-stone-800 text-stone-100" : "bg-white text-stone-800"}`}>
                       Bulan {m.name}
                     </option>
@@ -5120,15 +5193,17 @@ export const KeuanganView: React.FC<KeuanganViewProps> = ({
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="block font-bold text-stone-700 [.dark_&]:text-stone-300 dark:text-stone-300 mb-1">
-                    Tanggal Transaksi *
+                    Pos Anggaran / Kategori PGRI
                   </label>
-                  <input
-                    type="date"
-                    required
-                    value={formData.date}
-                    onChange={(e) => setFormData({ ...formData, date: e.target.value })}
-                    className="w-full px-4 py-2.5 rounded-xl bg-[#faf8f5] [.dark_&]:bg-stone-800 dark:bg-stone-800 border border-stone-200 [.dark_&]:border-stone-700 dark:border-stone-700 text-stone-800 [.dark_&]:text-stone-100 dark:text-stone-100 font-medium focus:outline-none focus:ring-2 focus:ring-red-800/20 focus:border-red-700 [color-scheme:light] [.dark_&]:[color-scheme:dark] dark:[color-scheme:dark]"
-                  />
+                  <select
+                    value={formData.category}
+                    onChange={(e) => setFormData({ ...formData, category: e.target.value as NonNullable<FinancialTransaction['category']> })}
+                    className="w-full px-4 py-2.5 rounded-xl bg-[#faf8f5] [.dark_&]:bg-stone-800 dark:bg-stone-800 border border-stone-200 [.dark_&]:border-stone-700 dark:border-stone-700 text-stone-800 [.dark_&]:text-stone-100 dark:text-stone-100 font-medium focus:outline-none focus:ring-2 focus:ring-red-800/20 focus:border-red-700"
+                  >
+                    {POS_ANGGARAN_OPTIONS.map((opt) => (
+                      <option key={opt} value={opt}>{opt}</option>
+                    ))}
+                  </select>
                 </div>
 
                 <div>
@@ -5146,33 +5221,41 @@ export const KeuanganView: React.FC<KeuanganViewProps> = ({
                 </div>
               </div>
 
-              <div>
-                <label className="block font-bold text-stone-700 [.dark_&]:text-stone-300 dark:text-stone-300 mb-1">
-                  Nominal (Rp) *
-                </label>
-                <input
-                  type="text"
-                  required
-                  value={formData.amount}
-                  onChange={(e) => setFormData({ ...formData, amount: e.target.value })}
-                  placeholder="Contoh: 150000"
-                  className="w-full px-4 py-2.5 rounded-xl bg-[#faf8f5] [.dark_&]:bg-stone-800 dark:bg-stone-800 border border-stone-200 [.dark_&]:border-stone-700 dark:border-stone-700 text-stone-800 [.dark_&]:text-stone-100 dark:text-stone-100 font-medium font-mono focus:outline-none focus:ring-2 focus:ring-red-800/20 focus:border-red-700"
-                />
-              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block font-bold text-stone-700 [.dark_&]:text-stone-300 dark:text-stone-300 mb-1">
+                    Tanggal Transaksi *
+                  </label>
+                  <input
+                    type="date"
+                    required
+                    value={formData.date}
+                    onChange={(e) => setFormData({ ...formData, date: e.target.value })}
+                    className="w-full px-4 py-2.5 rounded-xl bg-[#faf8f5] [.dark_&]:bg-stone-800 dark:bg-stone-800 border border-stone-200 [.dark_&]:border-stone-700 dark:border-stone-700 text-stone-800 [.dark_&]:text-stone-100 dark:text-stone-100 font-medium focus:outline-none focus:ring-2 focus:ring-red-800/20 focus:border-red-700 [color-scheme:light] [.dark_&]:[color-scheme:dark] dark:[color-scheme:dark]"
+                  />
+                </div>
 
-              <div>
-                <label className="block font-bold text-stone-700 [.dark_&]:text-stone-300 dark:text-stone-300 mb-1">
-                  Pos Anggaran / Kategori PGRI
-                </label>
-                <select
-                  value={formData.category}
-                  onChange={(e) => setFormData({ ...formData, category: e.target.value as NonNullable<FinancialTransaction['category']> })}
-                  className="w-full px-4 py-2.5 rounded-xl bg-[#faf8f5] [.dark_&]:bg-stone-800 dark:bg-stone-800 border border-stone-200 [.dark_&]:border-stone-700 dark:border-stone-700 text-stone-800 [.dark_&]:text-stone-100 dark:text-stone-100 font-medium focus:outline-none focus:ring-2 focus:ring-red-800/20 focus:border-red-700"
-                >
-                  {POS_ANGGARAN_OPTIONS.map((opt) => (
-                    <option key={opt} value={opt}>{opt}</option>
-                  ))}
-                </select>
+                <div>
+                  <label className="block font-bold text-stone-700 [.dark_&]:text-stone-300 dark:text-stone-300 mb-1">
+                    Nominal (Rp) *
+                  </label>
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    required
+                    value={formData.amount}
+                    onChange={(e) => {
+                      const digitsOnly = e.target.value.replace(/[^0-9]/g, '');
+                      const numericValue = digitsOnly ? parseInt(digitsOnly, 10) : 0;
+                      setFormData({
+                        ...formData,
+                        amount: numericValue > 0 ? `Rp. ${numericValue.toLocaleString('id-ID')}` : ''
+                      });
+                    }}
+                    placeholder="Rp. 150.000"
+                    className="w-full px-4 py-2.5 rounded-xl bg-[#faf8f5] [.dark_&]:bg-stone-800 dark:bg-stone-800 border border-stone-200 [.dark_&]:border-stone-700 dark:border-stone-700 text-stone-800 [.dark_&]:text-stone-100 dark:text-stone-100 font-medium font-mono focus:outline-none focus:ring-2 focus:ring-red-800/20 focus:border-red-700"
+                  />
+                </div>
               </div>
 
               <div>
@@ -5231,13 +5314,19 @@ export const KeuanganView: React.FC<KeuanganViewProps> = ({
                   {formData.receiptImage && (
                     <button
                       type="button"
-                      onClick={() => setFormData((prev) => ({ ...prev, receiptImage: '' }))}
+                      onClick={() => {
+                        setFormData((prev) => ({ ...prev, receiptImage: '' }));
+                        setReceiptError('');
+                      }}
                       className="text-xs font-bold text-red-600 dark:text-red-400 hover:underline cursor-pointer"
                     >
                       Hapus Foto
                     </button>
                   )}
                 </div>
+                {receiptError && (
+                  <p className="mt-1.5 text-xs font-medium text-red-600 dark:text-red-400">{receiptError}</p>
+                )}
                 {formData.receiptImage && (
                   <img src={formData.receiptImage} alt="Pratinjau Nota" className="mt-2 h-24 rounded-xl border border-stone-200 dark:border-stone-700 object-cover" />
                 )}
@@ -5392,13 +5481,20 @@ export const KeuanganView: React.FC<KeuanganViewProps> = ({
                 onChange={(e) => setRekapMonth(e.target.value)}
                 className="px-3 py-2 rounded-xl border text-xs font-bold bg-[#faf8f5] [.dark_&]:bg-stone-800 dark:bg-stone-800 border-stone-200 [.dark_&]:border-stone-700 dark:border-stone-700 text-stone-800 [.dark_&]:text-stone-100 dark:text-stone-100 focus:outline-none focus:ring-2 focus:ring-red-800/20 focus:border-red-700 cursor-pointer"
               >
-                {MONTH_OPTIONS.map((m) => (
+                {MONTH_OPTIONS.filter(m => isPeriodActive(rekapYear, m.id)).map((m) => (
                   <option key={m.id} value={m.id} className={isDark ? 'bg-stone-800 text-stone-100' : 'bg-white text-stone-800'}>{m.name}</option>
                 ))}
               </select>
               <select
                 value={rekapYear}
-                onChange={(e) => setRekapYear(e.target.value)}
+                onChange={(e) => {
+                  const nextYear = e.target.value;
+                  setRekapYear(nextYear);
+                  if (!isPeriodActive(nextYear, rekapMonth)) {
+                    const firstValid = MONTH_OPTIONS.find(m => isPeriodActive(nextYear, m.id));
+                    if (firstValid) setRekapMonth(firstValid.id);
+                  }
+                }}
                 className="px-3 py-2 rounded-xl border text-xs font-bold bg-[#faf8f5] [.dark_&]:bg-stone-800 dark:bg-stone-800 border-stone-200 [.dark_&]:border-stone-700 dark:border-stone-700 text-stone-800 [.dark_&]:text-stone-100 dark:text-stone-100 focus:outline-none focus:ring-2 focus:ring-red-800/20 focus:border-red-700 cursor-pointer"
               >
                 {YEAR_OPTIONS.map((y) => (

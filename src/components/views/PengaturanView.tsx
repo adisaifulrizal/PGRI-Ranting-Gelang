@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Settings, Upload, Image as ImageIcon, CheckCircle, Save, RotateCw, ZoomIn, Download, UploadCloud, Loader2, AlertTriangle, X, Building2, ShieldCheck, History, UserPlus, Trash2, RefreshCw, Users, Plus, ArrowUp, ArrowDown, Database, QrCode } from 'lucide-react';
+import { Settings, Upload, Image as ImageIcon, CheckCircle, Save, RotateCw, ZoomIn, Download, UploadCloud, Loader2, AlertTriangle, X, Building2, ShieldCheck, History, UserPlus, Trash2, RefreshCw, Users, Plus, ArrowUp, ArrowDown, Database, QrCode, Edit2 } from 'lucide-react';
 import { backupAllFirebaseData, restoreAllFirebaseData, syncSettingsToCloud } from '../../lib/sync';
 import { safeDownloadBlob } from '../../lib/download';
 import { PengurusRole, PengurusAssignment, AuditLogEntry, OrgConfig, PengaturanSubTab } from '../../types';
@@ -428,8 +428,23 @@ export const PengaturanView: React.FC<{
     JSON.stringify(pengurusStruct) !== JSON.stringify(savedPengurusStruct);
 
   // State Konfigurasi Organisasi PGRI
+  const readDuesStartPeriod = (): { year: string; month: string } => {
+    try {
+      const saved = localStorage.getItem('pgri-dues-start-period');
+      if (saved && /^\d{4}-\d{2}$/.test(saved)) {
+        const [y, m] = saved.split('-');
+        return { year: y, month: m };
+      }
+    } catch {}
+    return { year: '2026', month: '11' };
+  };
+
   const [orgConfig, setOrgConfig] = useState<OrgConfig>(() => getOrgConfig());
   const [savedOrgConfig, setSavedOrgConfig] = useState<OrgConfig>(() => getOrgConfig());
+  const [duesStartYear, setDuesStartYear] = useState<string>(() => readDuesStartPeriod().year);
+  const [savedDuesStartYear, setSavedDuesStartYear] = useState<string>(() => readDuesStartPeriod().year);
+  const [duesStartMonth, setDuesStartMonth] = useState<string>(() => readDuesStartPeriod().month);
+  const [savedDuesStartMonth, setSavedDuesStartMonth] = useState<string>(() => readDuesStartPeriod().month);
   const [schoolsText, setSchoolsText] = useState<string>(() => getOrgConfig().schools.join('\n'));
   const [savedSchoolsText, setSavedSchoolsText] = useState<string>(() => getOrgConfig().schools.join('\n'));
   const [isSavingOrgConfig, setIsSavingOrgConfig] = useState(false);
@@ -446,6 +461,8 @@ export const PengaturanView: React.FC<{
     orgConfig.kopWilayah !== savedOrgConfig.kopWilayah ||
     orgConfig.kopSekretariat !== savedOrgConfig.kopSekretariat ||
     (orgConfig.qrisImage || '') !== (savedOrgConfig.qrisImage || '') ||
+    duesStartYear !== savedDuesStartYear ||
+    duesStartMonth !== savedDuesStartMonth ||
     schoolsText !== savedSchoolsText;
 
   // State Manajemen Peran Pengurus (RBAC)
@@ -455,6 +472,7 @@ export const PengaturanView: React.FC<{
   const [newRoleName, setNewRoleName] = useState('');
   const [newRoleType, setNewRoleType] = useState<PengurusRole>('sekretaris');
   const [newRolePosition, setNewRolePosition] = useState('');
+  const [editingRoleEmail, setEditingRoleEmail] = useState<string | null>(null);
   const [isSavingRole, setIsSavingRole] = useState(false);
 
   const isRoleFormComplete =
@@ -502,6 +520,11 @@ export const PengaturanView: React.FC<{
       const latestOrg = getOrgConfig();
       setOrgConfig(latestOrg);
       setSavedOrgConfig(latestOrg);
+      const latestStart = readDuesStartPeriod();
+      setDuesStartYear(latestStart.year);
+      setSavedDuesStartYear(latestStart.year);
+      setDuesStartMonth(latestStart.month);
+      setSavedDuesStartMonth(latestStart.month);
       setSchoolsText(latestOrg.schools.join('\n'));
       setSavedSchoolsText(latestOrg.schools.join('\n'));
 
@@ -573,14 +596,26 @@ export const PengaturanView: React.FC<{
         ...orgConfig,
         schools: parsedSchools.length > 0 ? parsedSchools : orgConfig.schools,
       };
-      const res = await saveOrgConfig(nextConfig);
+      const nextStartPeriod = `${duesStartYear}-${duesStartMonth}`;
+      try {
+        localStorage.setItem('pgri-dues-start-period', nextStartPeriod);
+      } catch {}
+      const [res, startSyncRes] = await Promise.all([
+        saveOrgConfig(nextConfig),
+        syncSettingsToCloud({ 'pgri-dues-start-period': nextStartPeriod }, 'Periode Mulai Kontribusi')
+      ]);
       const updatedOrg = getOrgConfig();
       const updatedSchools = updatedOrg.schools.join('\n');
       setOrgConfig(updatedOrg);
       setSavedOrgConfig(updatedOrg);
+      setSavedDuesStartYear(duesStartYear);
+      setSavedDuesStartMonth(duesStartMonth);
       setSchoolsText(updatedSchools);
       setSavedSchoolsText(updatedSchools);
-      if (res.success) {
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new Event('kombel-settings-updated'));
+      }
+      if (res.success && startSyncRes.success) {
         showSystemNotice('success', 'Konfigurasi organisasi PGRI berhasil disimpan ke Cloud.');
       } else {
         showSystemNotice('warning', 'Konfigurasi tersimpan di perangkat ini. Sinkronisasi Cloud akan dilanjutkan saat koneksi tersedia.');
@@ -714,6 +749,22 @@ export const PengaturanView: React.FC<{
     });
   };
 
+  const handleStartEditRole = (item: PengurusAssignment) => {
+    setEditingRoleEmail(item.email);
+    setNewRoleEmail(item.email);
+    setNewRoleName(item.name);
+    setNewRoleType(item.role);
+    setNewRolePosition(item.positionLabel || PENGURUS_ROLE_LABELS[item.role]);
+  };
+
+  const handleCancelEditRole = () => {
+    setEditingRoleEmail(null);
+    setNewRoleEmail('');
+    setNewRoleName('');
+    setNewRoleType('sekretaris');
+    setNewRolePosition('');
+  };
+
   const handleAddRole = async (e: React.FormEvent) => {
     e.preventDefault();
     if (pengurusRole !== 'ketua' || isSavingRole) return;
@@ -732,6 +783,8 @@ export const PengaturanView: React.FC<{
     }
     setIsSavingRole(true);
     try {
+      const isEditing = editingRoleEmail !== null;
+      const oldEmail = editingRoleEmail?.trim().toLowerCase();
       const ok = await savePengurusAssignment({
         email: cleanEmail,
         name: newRoleName.trim(),
@@ -740,12 +793,21 @@ export const PengaturanView: React.FC<{
         updatedAt: new Date().toISOString(),
       });
       if (ok) {
+        if (isEditing && oldEmail && oldEmail !== cleanEmail && oldEmail !== SUPER_ADMIN_EMAIL.toLowerCase()) {
+          await removePengurusAssignment(oldEmail);
+        }
         const updated = await fetchPengurusAssignments();
         setPengurusList(updated);
+        setEditingRoleEmail(null);
         setNewRoleEmail('');
         setNewRoleName('');
         setNewRolePosition('');
-        showSystemNotice('success', `Hak akses ${PENGURUS_ROLE_LABELS[newRoleType]} untuk ${cleanEmail} berhasil ditetapkan.`);
+        showSystemNotice(
+          'success',
+          isEditing
+            ? `Data hak akses ${PENGURUS_ROLE_LABELS[newRoleType]} untuk ${cleanEmail} berhasil diperbarui.`
+            : `Hak akses ${PENGURUS_ROLE_LABELS[newRoleType]} untuk ${cleanEmail} berhasil ditetapkan.`
+        );
       } else {
         showSystemNotice('error', 'Gagal menyimpan peran pengurus. Pastikan Anda masuk sebagai Ketua.');
       }
@@ -762,6 +824,9 @@ export const PengaturanView: React.FC<{
     }
     const ok = await removePengurusAssignment(email);
     if (ok) {
+      if (editingRoleEmail?.toLowerCase() === email.toLowerCase()) {
+        handleCancelEditRole();
+      }
       setPengurusList((prev) => prev.filter((item) => item.email.toLowerCase() !== email.toLowerCase()));
       showSystemNotice('success', `Hak akses pengurus untuk ${email} telah dicabut.`);
     } else {
@@ -1516,50 +1581,75 @@ export const PengaturanView: React.FC<{
                 />
               </div>
               <div>
-                <label className={`block text-xs font-bold mb-1.5 ${isDark ? 'text-stone-300' : 'text-stone-700'}`}>Nomor WhatsApp Bendahara (628...)</label>
-                <input
-                  type="text"
-                  value={orgConfig.bendaharaWa}
-                  onChange={(e) => setOrgConfig({ ...orgConfig, bendaharaWa: e.target.value.replace(/[^0-9]/g, '') })}
-                  placeholder="628xxxxxxxxxx"
-                  className={`w-full px-3.5 py-2.5 rounded-xl border text-xs font-medium font-mono focus:outline-none focus:border-red-700 ${isDark ? 'bg-stone-800 border-stone-700 text-white' : 'bg-[#faf8f5] border-stone-200 text-stone-800'}`}
-                />
+                <label className={`block text-xs font-bold mb-1.5 ${isDark ? 'text-stone-300' : 'text-stone-700'}`}>Mulai Tahun Kontribusi</label>
+                <select
+                  value={duesStartYear}
+                  onChange={(e) => setDuesStartYear(e.target.value)}
+                  className={`w-full px-3.5 py-2.5 rounded-xl border text-xs font-medium focus:outline-none focus:border-red-700 cursor-pointer ${isDark ? 'bg-stone-800 border-stone-700 text-white' : 'bg-[#faf8f5] border-stone-200 text-stone-800'}`}
+                >
+                  {['2025', '2026', '2027', '2028', '2029', '2030'].map((yr) => (
+                    <option key={yr} value={yr}>{yr}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className={`block text-xs font-bold mb-1.5 ${isDark ? 'text-stone-300' : 'text-stone-700'}`}>Mulai Bulan Kontribusi</label>
+                <select
+                  value={duesStartMonth}
+                  onChange={(e) => setDuesStartMonth(e.target.value)}
+                  className={`w-full px-3.5 py-2.5 rounded-xl border text-xs font-medium focus:outline-none focus:border-red-700 cursor-pointer ${isDark ? 'bg-stone-800 border-stone-700 text-white' : 'bg-[#faf8f5] border-stone-200 text-stone-800'}`}
+                >
+                  {[
+                    { id: '01', name: 'Januari' },
+                    { id: '02', name: 'Februari' },
+                    { id: '03', name: 'Maret' },
+                    { id: '04', name: 'April' },
+                    { id: '05', name: 'Mei' },
+                    { id: '06', name: 'Juni' },
+                    { id: '07', name: 'Juli' },
+                    { id: '08', name: 'Agustus' },
+                    { id: '09', name: 'September' },
+                    { id: '10', name: 'Oktober' },
+                    { id: '11', name: 'November' },
+                    { id: '12', name: 'Desember' }
+                  ].map((m) => (
+                    <option key={m.id} value={m.id}>{m.name}</option>
+                  ))}
+                </select>
               </div>
               <div>
                 <label className={`block text-xs font-bold mb-1.5 ${isDark ? 'text-stone-300' : 'text-stone-700'}`}>Nominal Kontribusi Bulanan (Rp)</label>
                 <input
-                  type="number"
-                  min={0}
-                  step={1000}
-                  value={orgConfig.monthlyDuesAmount}
-                  onChange={(e) => setOrgConfig({ ...orgConfig, monthlyDuesAmount: Number(e.target.value) || 0 })}
-                  className={`w-full px-3.5 py-2.5 rounded-xl border text-xs font-medium focus:outline-none focus:border-red-700 ${isDark ? 'bg-stone-800 border-stone-700 text-white' : 'bg-[#faf8f5] border-stone-200 text-stone-800'}`}
-                />
-              </div>
-              <div>
-                <label className={`block text-xs font-bold mb-1.5 ${isDark ? 'text-stone-300' : 'text-stone-700'}`}>Kode Prefix Nomor Surat</label>
-                <input
                   type="text"
-                  value={orgConfig.letterCodePrefix}
-                  onChange={(e) => setOrgConfig({ ...orgConfig, letterCodePrefix: e.target.value })}
-                  placeholder="PGRI.Rtg.Gelang"
-                  className={`w-full px-3.5 py-2.5 rounded-xl border text-xs font-medium focus:outline-none focus:border-red-700 ${isDark ? 'bg-stone-800 border-stone-700 text-white' : 'bg-[#faf8f5] border-stone-200 text-stone-800'}`}
+                  inputMode="numeric"
+                  value={
+                    orgConfig.monthlyDuesAmount > 0
+                      ? `Rp. ${orgConfig.monthlyDuesAmount.toLocaleString('id-ID')}`
+                      : 'Rp. 0'
+                  }
+                  onChange={(e) => {
+                    const digitsOnly = e.target.value.replace(/[^0-9]/g, '');
+                    const numericValue = digitsOnly ? parseInt(digitsOnly, 10) : 0;
+                    setOrgConfig({ ...orgConfig, monthlyDuesAmount: numericValue });
+                  }}
+                  placeholder="Rp. 10.000"
+                  className={`w-full px-3.5 py-2.5 rounded-xl border text-xs font-medium font-mono focus:outline-none focus:border-red-700 ${isDark ? 'bg-stone-800 border-stone-700 text-white' : 'bg-[#faf8f5] border-stone-200 text-stone-800'}`}
                 />
               </div>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div className="space-y-3">
-                <div>
-                  <label className={`block text-xs font-bold mb-1 ${isDark ? 'text-stone-300' : 'text-stone-700'}`}>Kop Surat Baris 1 (Organisasi)</label>
-                  <input
-                    type="text"
-                    value={orgConfig.kopOrganisasi}
-                    onChange={(e) => setOrgConfig({ ...orgConfig, kopOrganisasi: e.target.value })}
-                    className={`w-full px-3.5 py-2 rounded-xl border text-xs font-medium focus:outline-none focus:border-red-700 ${isDark ? 'bg-stone-800 border-stone-700 text-white' : 'bg-[#faf8f5] border-stone-200 text-stone-800'}`}
-                  />
-                </div>
-                <div className="grid grid-cols-2 gap-2">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                  <div>
+                    <label className={`block text-xs font-bold mb-1 ${isDark ? 'text-stone-300' : 'text-stone-700'}`}>Kop Surat Baris 1 (Organisasi)</label>
+                    <input
+                      type="text"
+                      value={orgConfig.kopOrganisasi}
+                      onChange={(e) => setOrgConfig({ ...orgConfig, kopOrganisasi: e.target.value })}
+                      className={`w-full px-3.5 py-2 rounded-xl border text-xs font-medium focus:outline-none focus:border-red-700 ${isDark ? 'bg-stone-800 border-stone-700 text-white' : 'bg-[#faf8f5] border-stone-200 text-stone-800'}`}
+                    />
+                  </div>
                   <div>
                     <label className={`block text-xs font-bold mb-1 ${isDark ? 'text-stone-300' : 'text-stone-700'}`}>Kop Baris 2 (Ranting)</label>
                     <input
@@ -1569,6 +1659,8 @@ export const PengaturanView: React.FC<{
                       className={`w-full px-3.5 py-2 rounded-xl border text-xs font-medium focus:outline-none focus:border-red-700 ${isDark ? 'bg-stone-800 border-stone-700 text-white' : 'bg-[#faf8f5] border-stone-200 text-stone-800'}`}
                     />
                   </div>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                   <div>
                     <label className={`block text-xs font-bold mb-1 ${isDark ? 'text-stone-300' : 'text-stone-700'}`}>Kop Baris 3 (Wilayah)</label>
                     <input
@@ -1578,19 +1670,41 @@ export const PengaturanView: React.FC<{
                       className={`w-full px-3.5 py-2 rounded-xl border text-xs font-medium focus:outline-none focus:border-red-700 ${isDark ? 'bg-stone-800 border-stone-700 text-white' : 'bg-[#faf8f5] border-stone-200 text-stone-800'}`}
                     />
                   </div>
+                  <div>
+                    <label className={`block text-xs font-bold mb-1 ${isDark ? 'text-stone-300' : 'text-stone-700'}`}>Kode Prefix Nomor Surat</label>
+                    <input
+                      type="text"
+                      value={orgConfig.letterCodePrefix}
+                      onChange={(e) => setOrgConfig({ ...orgConfig, letterCodePrefix: e.target.value })}
+                      placeholder="PGRI.Rtg.Gelang"
+                      className={`w-full px-3.5 py-2 rounded-xl border text-xs font-medium focus:outline-none focus:border-red-700 ${isDark ? 'bg-stone-800 border-stone-700 text-white' : 'bg-[#faf8f5] border-stone-200 text-stone-800'}`}
+                    />
+                  </div>
                 </div>
-                <div>
-                  <label className={`block text-xs font-bold mb-1 ${isDark ? 'text-stone-300' : 'text-stone-700'}`}>Alamat Sekretariat Kop Surat</label>
-                  <input
-                    type="text"
-                    value={orgConfig.kopSekretariat}
-                    onChange={(e) => setOrgConfig({ ...orgConfig, kopSekretariat: e.target.value })}
-                    className={`w-full px-3.5 py-2 rounded-xl border text-xs font-medium focus:outline-none focus:border-red-700 ${isDark ? 'bg-stone-800 border-stone-700 text-white' : 'bg-[#faf8f5] border-stone-200 text-stone-800'}`}
-                  />
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                  <div>
+                    <label className={`block text-xs font-bold mb-1 ${isDark ? 'text-stone-300' : 'text-stone-700'}`}>Nomor WhatsApp Bendahara (628...)</label>
+                    <input
+                      type="text"
+                      value={orgConfig.bendaharaWa}
+                      onChange={(e) => setOrgConfig({ ...orgConfig, bendaharaWa: e.target.value.replace(/[^0-9]/g, '') })}
+                      placeholder="628xxxxxxxxxx"
+                      className={`w-full px-3.5 py-2 rounded-xl border text-xs font-medium font-mono focus:outline-none focus:border-red-700 ${isDark ? 'bg-stone-800 border-stone-700 text-white' : 'bg-[#faf8f5] border-stone-200 text-stone-800'}`}
+                    />
+                  </div>
+                  <div>
+                    <label className={`block text-xs font-bold mb-1 ${isDark ? 'text-stone-300' : 'text-stone-700'}`}>Alamat Sekretariat Kop Surat</label>
+                    <input
+                      type="text"
+                      value={orgConfig.kopSekretariat}
+                      onChange={(e) => setOrgConfig({ ...orgConfig, kopSekretariat: e.target.value })}
+                      className={`w-full px-3.5 py-2 rounded-xl border text-xs font-medium focus:outline-none focus:border-red-700 ${isDark ? 'bg-stone-800 border-stone-700 text-white' : 'bg-[#faf8f5] border-stone-200 text-stone-800'}`}
+                    />
+                  </div>
                 </div>
               </div>
 
-              <div>
+              <div className="flex flex-col">
                 <label className={`block text-xs font-bold mb-1 ${isDark ? 'text-stone-300' : 'text-stone-700'}`}>
                   Daftar Sekolah Binaan Ranting (1 sekolah per baris)
                 </label>
@@ -1599,7 +1713,7 @@ export const PengaturanView: React.FC<{
                   value={schoolsText}
                   onChange={(e) => setSchoolsText(e.target.value)}
                   placeholder="SDN GELANG 01&#10;SDN GELANG 03"
-                  className={`w-full px-3.5 py-2.5 rounded-xl border text-xs font-medium leading-relaxed focus:outline-none focus:border-red-700 ${isDark ? 'bg-stone-800 border-stone-700 text-white' : 'bg-[#faf8f5] border-stone-200 text-stone-800'}`}
+                  className={`w-full flex-1 px-3.5 py-2 rounded-xl border text-xs font-medium leading-relaxed focus:outline-none focus:border-red-700 ${isDark ? 'bg-stone-800 border-stone-700 text-white' : 'bg-[#faf8f5] border-stone-200 text-stone-800'}`}
                 />
                 <p className="text-[11px] text-stone-400 mt-1">Otomatis digunakan pada pilihan asal sekolah di menu Daftar Anggota & Rekap Kontribusi.</p>
               </div>
@@ -1659,7 +1773,7 @@ export const PengaturanView: React.FC<{
                 [
                   ...FIREBASE_KEYS,
                   'kombel-visi', 'kombel-misi', 'kombel-pembina', 'kombel-penanggungjawab', 'kombel-pengurus',
-                  'logo-kombel', 'pgri-verified-pengurus-names', 'kombel-undangan-npa'
+                  'logo-kombel', 'pgri-verified-pengurus-names', 'kombel-undangan-npa', 'pgri-dues-start-period'
                 ].forEach((k) => {
                   const val = localStorage.getItem(k);
                   if (val !== null) settingsPayload[k] = val;
@@ -1735,99 +1849,141 @@ export const PengaturanView: React.FC<{
               </div>
             </div>
 
-            {pengurusRole === 'ketua' && (
-              <form onSubmit={handleAddRole} className={`p-4 rounded-2xl border grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 ${isDark ? 'bg-stone-800/40 border-stone-800' : 'bg-[#faf8f5] border-stone-200'}`}>
-                <input
-                  type="email"
-                  required
-                  value={newRoleEmail}
-                  onChange={(e) => setNewRoleEmail(e.target.value)}
-                  placeholder="Email Google Pengurus"
-                  className={`px-3 py-2 rounded-xl border text-xs font-medium focus:outline-none focus:border-red-700 ${isDark ? 'bg-stone-900 border-stone-700 text-white' : 'bg-white border-stone-200 text-stone-800'}`}
-                />
-                <input
-                  type="text"
-                  required
-                  value={newRoleName}
-                  onChange={(e) => setNewRoleName(e.target.value)}
-                  placeholder="Nama Lengkap"
-                  className={`px-3 py-2 rounded-xl border text-xs font-medium focus:outline-none focus:border-red-700 ${isDark ? 'bg-stone-900 border-stone-700 text-white' : 'bg-white border-stone-200 text-stone-800'}`}
-                />
-                <select
-                  value={newRoleType}
-                  onChange={(e) => setNewRoleType(e.target.value as PengurusRole)}
-                  className={`px-3 py-2 rounded-xl border text-xs font-bold focus:outline-none focus:border-red-700 ${isDark ? 'bg-stone-900 border-stone-700 text-white' : 'bg-white border-stone-200 text-stone-800'}`}
-                >
-                  <option value="ketua">Ketua / Super Admin</option>
-                  <option value="sekretaris">Sekretaris</option>
-                  <option value="bendahara">Bendahara</option>
-                  <option value="seksi">Pengurus Seksi</option>
-                </select>
-                <input
-                  type="text"
-                  required
-                  value={newRolePosition}
-                  onChange={(e) => setNewRolePosition(e.target.value)}
-                  placeholder="Jabatan (mis: Seksi Kaderisasi)"
-                  className={`px-3 py-2 rounded-xl border text-xs font-medium focus:outline-none focus:border-red-700 ${isDark ? 'bg-stone-900 border-stone-700 text-white' : 'bg-white border-stone-200 text-stone-800'}`}
-                />
-                <button
-                  type="submit"
-                  disabled={!isRoleFormComplete || isSavingRole}
-                  className={`px-4 py-2 rounded-xl font-bold text-xs flex items-center justify-center gap-1.5 transition-colors ${
-                    !isRoleFormComplete
-                      ? (isDark
-                          ? 'bg-stone-800 text-stone-400 border border-stone-700 opacity-75 cursor-not-allowed'
-                          : 'bg-stone-200 text-stone-500 border border-stone-300 opacity-75 cursor-not-allowed')
-                      : 'bg-red-800 hover:bg-red-700 disabled:opacity-60 text-white cursor-pointer active:scale-95'
-                  }`}
-                >
-                  {isSavingRole ? <Loader2 className="w-4 h-4 animate-spin" /> : <UserPlus className="w-4 h-4" />}
-                  <span>{isSavingRole ? 'Menyimpan...' : 'Tetapkan'}</span>
-                </button>
-              </form>
-            )}
-
-            <div className="space-y-2">
-              <div className={`p-3.5 rounded-2xl border flex flex-col sm:flex-row sm:items-center justify-between gap-2 ${isDark ? 'bg-red-950/30 border-red-900/50' : 'bg-red-50/60 border-red-200/80'}`}>
-                <div>
-                  <p className={`text-xs font-bold ${isDark ? 'text-white' : 'text-stone-900'}`}>Akun Pengelola Utama</p>
-                  <p className="text-[11px] text-stone-400 font-mono">{SUPER_ADMIN_EMAIL}</p>
-                </div>
-                <span className={`px-3 py-1 rounded-md text-[10px] font-extrabold uppercase self-start sm:self-center border ${isDark ? 'bg-red-950/80 border-red-800/60 text-amber-300' : 'bg-red-100 border-red-200 text-red-900'}`}>
-                  Ketua / Super Admin
-                </span>
-              </div>
-
-              {isLoadingRoles ? (
-                <p className="text-xs text-stone-400 py-2">Memuat daftar pengurus...</p>
-              ) : pengurusList.length === 0 ? (
-                <p className="text-xs text-stone-400 py-2">Belum ada akun pengurus tambahan. Ketua dapat menambahkan email Sekretaris, Bendahara, atau Pengurus Seksi di atas.</p>
-              ) : (
-                pengurusList.map((item) => (
-                  <div key={item.email} className={`p-3.5 rounded-2xl border flex flex-col sm:flex-row sm:items-center justify-between gap-2 ${isDark ? 'bg-stone-800/40 border-stone-800' : 'bg-[#faf8f5] border-stone-200/80'}`}>
-                    <div>
-                      <p className={`text-xs font-bold ${isDark ? 'text-white' : 'text-stone-900'}`}>{item.name} <span className="font-normal text-stone-400">• {item.positionLabel || PENGURUS_ROLE_LABELS[item.role]}</span></p>
-                      <p className="text-[11px] text-stone-400 font-mono">{item.email}</p>
-                    </div>
-                    <div className="flex items-center gap-2 self-end sm:self-center">
-                      <span className={`px-3 py-1 rounded-md text-[10px] font-extrabold uppercase border ${isDark ? 'bg-stone-800 border-stone-700 text-stone-200' : 'bg-stone-100 border-stone-200 text-stone-700'}`}>
-                        {PENGURUS_ROLE_LABELS[item.role]}
-                      </span>
-                      {pengurusRole === 'ketua' && item.email.toLowerCase() !== SUPER_ADMIN_EMAIL.toLowerCase() && (
-                        <button
-                          type="button"
-                          onClick={() => handleRemoveRole(item.email)}
-                          className="p-1.5 rounded-lg text-red-500 hover:bg-red-500/15 cursor-pointer"
-                          title="Cabut hak akses"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
+            <div className={`grid grid-cols-1 ${pengurusRole === 'ketua' ? 'lg:grid-cols-12' : ''} gap-6 items-start`}>
+              {pengurusRole === 'ketua' && (
+                <form onSubmit={handleAddRole} className={`lg:col-span-5 p-4 sm:p-5 rounded-2xl border flex flex-col gap-3 ${isDark ? 'bg-stone-800/40 border-stone-800' : 'bg-[#faf8f5] border-stone-200'}`}>
+                  <input
+                    type="email"
+                    required
+                    value={newRoleEmail}
+                    onChange={(e) => setNewRoleEmail(e.target.value)}
+                    placeholder="Email Google Pengurus"
+                    className={`w-full px-3 py-2.5 rounded-xl border text-xs font-medium focus:outline-none focus:border-red-700 ${isDark ? 'bg-stone-900 border-stone-700 text-white' : 'bg-white border-stone-200 text-stone-800'}`}
+                  />
+                  <input
+                    type="text"
+                    required
+                    value={newRoleName}
+                    onChange={(e) => setNewRoleName(e.target.value)}
+                    placeholder="Nama Lengkap"
+                    className={`w-full px-3 py-2.5 rounded-xl border text-xs font-medium focus:outline-none focus:border-red-700 ${isDark ? 'bg-stone-900 border-stone-700 text-white' : 'bg-white border-stone-200 text-stone-800'}`}
+                  />
+                  <select
+                    value={newRoleType}
+                    onChange={(e) => setNewRoleType(e.target.value as PengurusRole)}
+                    className={`w-full px-3 py-2.5 rounded-xl border text-xs font-bold focus:outline-none focus:border-red-700 ${isDark ? 'bg-stone-900 border-stone-700 text-white' : 'bg-white border-stone-200 text-stone-800'}`}
+                  >
+                    <option value="ketua">Ketua / Super Admin</option>
+                    <option value="sekretaris">Sekretaris</option>
+                    <option value="bendahara">Bendahara</option>
+                    <option value="seksi">Pengurus Seksi</option>
+                  </select>
+                  <input
+                    type="text"
+                    required
+                    value={newRolePosition}
+                    onChange={(e) => setNewRolePosition(e.target.value)}
+                    placeholder="Jabatan (mis: Seksi Kaderisasi)"
+                    className={`w-full px-3 py-2.5 rounded-xl border text-xs font-medium focus:outline-none focus:border-red-700 ${isDark ? 'bg-stone-900 border-stone-700 text-white' : 'bg-white border-stone-200 text-stone-800'}`}
+                  />
+                  <div className="flex items-center gap-2 pt-1">
+                    <button
+                      type="submit"
+                      disabled={!isRoleFormComplete || isSavingRole}
+                      className={`flex-1 px-4 py-2.5 rounded-xl font-bold text-xs flex items-center justify-center gap-1.5 transition-colors ${
+                        !isRoleFormComplete
+                          ? (isDark
+                              ? 'bg-stone-800 text-stone-400 border border-stone-700 opacity-75 cursor-not-allowed'
+                              : 'bg-stone-200 text-stone-500 border border-stone-300 opacity-75 cursor-not-allowed')
+                          : 'bg-red-800 hover:bg-red-700 disabled:opacity-60 text-white cursor-pointer active:scale-95'
+                      }`}
+                    >
+                      {isSavingRole ? (
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                      ) : editingRoleEmail ? (
+                        <Save className="w-4 h-4" />
+                      ) : (
+                        <UserPlus className="w-4 h-4" />
                       )}
-                    </div>
+                      <span>{isSavingRole ? 'Menyimpan...' : editingRoleEmail ? 'Simpan' : 'Tetapkan'}</span>
+                    </button>
+                    {editingRoleEmail && (
+                      <button
+                        type="button"
+                        onClick={handleCancelEditRole}
+                        className={`px-3 py-2.5 rounded-xl font-bold text-xs flex items-center justify-center border transition-colors cursor-pointer ${
+                          isDark
+                            ? 'bg-stone-800 border-stone-700 text-stone-300 hover:bg-stone-700'
+                            : 'bg-white border-stone-200 text-stone-600 hover:bg-stone-100'
+                        }`}
+                        title="Batal Edit"
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
+                    )}
                   </div>
-                ))
+                </form>
               )}
+
+              <div className={`${pengurusRole === 'ketua' ? 'lg:col-span-7' : ''} space-y-2.5`}>
+                <div className={`p-3.5 rounded-2xl border flex flex-col sm:flex-row sm:items-center justify-between gap-2 ${isDark ? 'bg-red-950/30 border-red-900/50' : 'bg-red-50/60 border-red-200/80'}`}>
+                  <div>
+                    <p className={`text-xs font-bold ${isDark ? 'text-white' : 'text-stone-900'}`}>Akun Pengelola Utama</p>
+                    <p className="text-[11px] text-stone-400 font-mono">{SUPER_ADMIN_EMAIL}</p>
+                  </div>
+                  <span className={`px-3 py-1 rounded-md text-[10px] font-extrabold uppercase self-start sm:self-center border ${isDark ? 'bg-red-950/80 border-red-800/60 text-amber-300' : 'bg-red-100 border-red-200 text-red-900'}`}>
+                    Ketua / Super Admin
+                  </span>
+                </div>
+
+                {isLoadingRoles ? (
+                  <p className="text-xs text-stone-400 py-2">Memuat daftar pengurus...</p>
+                ) : pengurusList.length === 0 ? (
+                  <p className="text-xs text-stone-400 py-2">Belum ada akun pengurus tambahan. Ketua dapat menambahkan email Sekretaris, Bendahara, atau Pengurus Seksi di samping.</p>
+                ) : (
+                  pengurusList.map((item) => (
+                    <div key={item.email} className={`p-3.5 rounded-2xl border flex flex-col sm:flex-row sm:items-center justify-between gap-2 ${
+                      editingRoleEmail?.toLowerCase() === item.email.toLowerCase()
+                        ? isDark
+                          ? 'bg-amber-950/25 border-amber-700/70'
+                          : 'bg-amber-50/80 border-amber-300'
+                        : isDark
+                        ? 'bg-stone-800/40 border-stone-800'
+                        : 'bg-[#faf8f5] border-stone-200/80'
+                    }`}>
+                      <div>
+                        <p className={`text-xs font-bold ${isDark ? 'text-white' : 'text-stone-900'}`}>{item.name} <span className="font-normal text-stone-400">• {item.positionLabel || PENGURUS_ROLE_LABELS[item.role]}</span></p>
+                        <p className="text-[11px] text-stone-400 font-mono">{item.email}</p>
+                      </div>
+                      <div className="flex items-center gap-2 self-end sm:self-center">
+                        <span className={`px-3 py-1 rounded-md text-[10px] font-extrabold uppercase border ${isDark ? 'bg-stone-800 border-stone-700 text-stone-200' : 'bg-stone-100 border-stone-200 text-stone-700'}`}>
+                          {PENGURUS_ROLE_LABELS[item.role]}
+                        </span>
+                        {pengurusRole === 'ketua' && item.email.toLowerCase() !== SUPER_ADMIN_EMAIL.toLowerCase() && (
+                          <>
+                            <button
+                              type="button"
+                              onClick={() => handleStartEditRole(item)}
+                              className="p-1.5 rounded-lg text-amber-600 dark:text-amber-400 hover:bg-amber-500/15 cursor-pointer"
+                              title="Edit hak akses pengurus"
+                            >
+                              <Edit2 className="w-4 h-4" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleRemoveRole(item.email)}
+                              className="p-1.5 rounded-lg text-red-500 hover:bg-red-500/15 cursor-pointer"
+                              title="Cabut hak akses"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </>
+                        )}
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
             </div>
           </div>
 
