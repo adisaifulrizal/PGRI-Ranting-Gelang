@@ -387,6 +387,117 @@ export const BerandaView: React.FC<BerandaViewProps> = ({
   // FILTER GLOBAL UNTUK MENGAMBIL ANGGOTA AKTIF SAJA
   const activeTeachersList = effectiveTeachers.filter(isMemberActive);
 
+  // Daftar Gabungan Anggota Aktif + Pengurus Wajib Kontribusi (Sinkron 100% dengan KeuanganView)
+  const cashContributionMembersList = useMemo(() => {
+    const fallbackPengurus = [
+      { id: 'pengurus-1', name: 'Umar Ali Kusuma', nip: '198912092025211092', school: 'SDN GELANG 03', gender: 'L', kategoriProfil: 'Pengurus Ranting' },
+      { id: 'pengurus-2', name: 'Hartatik, S.Pd', nip: '198301072022212001', school: 'SDN KALIGLAGAH 02', gender: 'P', kategoriProfil: 'Pengurus Ranting' },
+      { id: 'pengurus-3', name: 'Adi Saiful Rizal, S.Pd', nip: '199401162025211089', school: 'SDN GELANG 03', gender: 'L', kategoriProfil: 'Pengurus Ranting' },
+      { id: 'pengurus-4', name: 'Atik Andriyati, S.Pd', nip: '197701142014122002', school: 'SDN GELANG 06', gender: 'P', kategoriProfil: 'Pengurus Ranting' },
+      { id: 'pengurus-5', name: 'Saiful Arif, S.Pd', nip: '198604122022211003', school: 'SDN GELANG 07', gender: 'L', kategoriProfil: 'Pengurus Ranting' },
+      { id: 'pengurus-6', name: 'Siti Oktavia, S.Pd', nip: '197910072022212001', school: 'SDN GELANG 04', gender: 'P', kategoriProfil: 'Pengurus Ranting' },
+      { id: 'pengurus-7', name: 'Rohman, S.Pd', nip: '198904202022211002', school: 'SDN KALIGLAGAH 02', gender: 'L', kategoriProfil: 'Pengurus Ranting' },
+      { id: 'pengurus-8', name: 'Jasuri Budianto, S.Pd', nip: '196918082022211001', school: 'SDN GELANG 01', gender: 'L', kategoriProfil: 'Pengurus Ranting' },
+      { id: 'pengurus-9', name: 'Muhammad Jupri, S.Pd.I', nip: '', school: 'SD NU 21 MIFTAHUL ULUM', gender: 'L', kategoriProfil: 'Pengurus Ranting' },
+      { id: 'pj-1', name: 'Ghufron Atok Urrohman, S.Pd', nip: '197805192014121003', school: 'Ketua Kelompok Kerja Kepala Sekolah', gender: 'L', kategoriProfil: 'Penanggung Jawab' },
+      { id: 'pj-2', name: 'Christian Dri Firman Widodo, S.Pd', nip: '198012262014121002', school: 'Ketua PGRI Cabang Kecamatan Sumberbaru', gender: 'L', kategoriProfil: 'Penanggung Jawab' },
+      { id: 'pembina-1', name: 'Hanifatul Susmiyah, S.Pd', nip: '197306022002122005', school: 'Pengawas Bina Kecamatan Sumberbaru', gender: 'P', kategoriProfil: 'Pembina' },
+    ];
+
+    let candidates: any[] = [];
+    let selectedNames: string[] = fallbackPengurus
+      .filter(f => f.kategoriProfil === 'Pengurus Ranting')
+      .map(f => f.name.trim().toLowerCase());
+
+    if (typeof window !== 'undefined') {
+      try {
+        const savedPengurus = localStorage.getItem('kombel-pengurus');
+        if (savedPengurus) {
+          const parsed = JSON.parse(savedPengurus);
+          if (Array.isArray(parsed)) {
+            parsed.forEach((p: any, idx: number) => {
+              const nm = String(p?.name || '').trim();
+              if (!nm || nm === '-' || nm.toLowerCase().startsWith('semua ')) return;
+              candidates.push({
+                id: p.id || `pengurus-${idx + 1}`,
+                name: nm,
+                nip: p.nip && p.nip !== '-' ? p.nip : '',
+                school: p.instansi && p.instansi !== '-' ? p.instansi : 'PGRI Ranting Gelang',
+                gender: p.gender
+              });
+            });
+          }
+        }
+        const savedPj = localStorage.getItem('kombel-penanggungjawab');
+        if (savedPj) {
+          const parsed = JSON.parse(savedPj);
+          if (Array.isArray(parsed)) {
+            parsed.forEach((p: any, idx: number) => {
+              const nm = String(p?.name || '').trim();
+              if (!nm || nm === '-' || nm.toLowerCase().startsWith('semua ')) return;
+              if (!candidates.some(c => c.name.trim().toLowerCase() === nm.toLowerCase())) {
+                candidates.push({
+                  id: `pj-${idx + 1}`,
+                  name: nm,
+                  nip: p.nip && p.nip !== '-' ? p.nip : '',
+                  school: p.instansi && p.instansi !== '-' ? p.instansi : 'Penanggung Jawab',
+                  gender: p.gender
+                });
+              }
+            });
+          }
+        }
+        const savedPembina = localStorage.getItem('kombel-pembina');
+        if (savedPembina) {
+          const parsed = JSON.parse(savedPembina);
+          const nm = String(parsed?.name || '').trim();
+          if (nm && nm !== '-' && !nm.toLowerCase().startsWith('semua ')) {
+            if (!candidates.some(c => c.name.trim().toLowerCase() === nm.toLowerCase())) {
+              candidates.push({
+                id: 'pembina-1',
+                name: nm,
+                nip: parsed.nip && parsed.nip !== '-' ? parsed.nip : '',
+                school: parsed.instansi && parsed.instansi !== '-' ? parsed.instansi : 'Pembina',
+                gender: parsed.gender
+              });
+            }
+          }
+        }
+        const savedSelected = localStorage.getItem('pgri-verified-pengurus-names');
+        if (savedSelected) {
+          const parsedSel = JSON.parse(savedSelected);
+          if (Array.isArray(parsedSel)) selectedNames = parsedSel;
+        }
+      } catch {}
+    }
+
+    fallbackPengurus.forEach(f => {
+      if (!candidates.some(c => c.name.trim().toLowerCase() === f.name.trim().toLowerCase())) {
+        candidates.push(f);
+      }
+    });
+
+    const activePengurus = candidates.filter(c => selectedNames.includes(c.name.trim().toLowerCase()));
+    const normalizeName = (name?: string) =>
+      (name || '').replace(/(,?\s*(S\.Pd\.I|S\.Pd|M\.Pd|S\.Kom|M\.Si|Dr|Dra|Drs)\.?)/gi, '').trim().toLowerCase();
+
+    const combined: any[] = [...activeTeachersList];
+    activePengurus.forEach(p => {
+      const pNorm = normalizeName(p.name);
+      const exists = combined.some(
+        c =>
+          String(c.id).trim() === String(p.id).trim() ||
+          (p.nip && c.nip && String(c.nip).trim() === String(p.nip).trim()) ||
+          (pNorm && normalizeName(c.name) === pNorm)
+      );
+      if (!exists) {
+        combined.push(p);
+      }
+    });
+
+    return combined.sort((a, b) => (a.name || '').localeCompare(b.name || '', 'id', { sensitivity: 'base' }));
+  }, [activeTeachersList, localCashPayments, cashPayments]);
+
   // 1. Hitung jumlah anggota aktif
   const activeTeachersCount = activeTeachersList.length;
 
@@ -406,9 +517,108 @@ export const BerandaView: React.FC<BerandaViewProps> = ({
     });
   }, [events]);
 
-  // State untuk filter jadwal pada kotak Kehadiran & Tab Status Kontribusi
+  // Daftar Bulan & Rentang Periode (Dari Bulan Awal Pembayaran s.d. Bulan Sekarang)
+  const CASH_MONTH_OPTIONS = useMemo(() => [
+    { id: '01', name: 'Januari' },
+    { id: '02', name: 'Februari' },
+    { id: '03', name: 'Maret' },
+    { id: '04', name: 'April' },
+    { id: '05', name: 'Mei' },
+    { id: '06', name: 'Juni' },
+    { id: '07', name: 'Juli' },
+    { id: '08', name: 'Agustus' },
+    { id: '09', name: 'September' },
+    { id: '10', name: 'Oktober' },
+    { id: '11', name: 'November' },
+    { id: '12', name: 'Desember' }
+  ], []);
+
+  const [duesStartPeriod, setDuesStartPeriod] = useState<string>(() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('pgri-dues-start-period');
+      if (saved && /^\d{4}-\d{2}$/.test(saved)) return saved;
+    }
+    return '2026-11';
+  });
+
+  const nowYearStr = String(currentTime.getFullYear());
+  const nowMonthStr = String(currentTime.getMonth() + 1).padStart(2, '0');
+  const nowPeriodCode = `${nowYearStr}-${nowMonthStr}`;
+
+  // Batas maksimum periode dropdown: nilai terjauh antara bulan sekarang & pembayaran lunas terjauh di Keuangan
+  const maxCashDropdownPeriod = useMemo(() => {
+    let maxCode = nowPeriodCode < duesStartPeriod ? duesStartPeriod : nowPeriodCode;
+    effectiveCashPayments.forEach(cp => {
+      if (cp?.status !== 'Lunas') return;
+      const rawKey = String((cp as any).month || (cp as any).eventId || '').replace(/^month-/, '').trim();
+      if (/^\d{4}-\d{2}$/.test(rawKey) && rawKey > maxCode) {
+        maxCode = rawKey;
+      }
+    });
+    return maxCode;
+  }, [effectiveCashPayments, nowPeriodCode, duesStartPeriod]);
+
+  const cashYearOptions = useMemo(() => {
+    const startYr = Number(duesStartPeriod.split('-')[0]) || currentTime.getFullYear();
+    const endYr = Number(maxCashDropdownPeriod.split('-')[0]) || currentTime.getFullYear();
+    const years: string[] = [];
+    for (let y = startYr; y <= Math.max(startYr, endYr); y++) {
+      years.push(String(y));
+    }
+    return years;
+  }, [duesStartPeriod, maxCashDropdownPeriod, nowYearStr]);
+
+  // State untuk filter jadwal pada kotak Kehadiran & Tab Status Kontribusi (Default: Bulan & Tahun Sekarang)
   const [selectedAttendanceEventId, setSelectedAttendanceEventId] = useState<string>('');
   const [cashFilterTab, setCashFilterTab] = useState<'unpaid' | 'paid'>('unpaid');
+  const [selectedCashYear, setSelectedCashYear] = useState<string>(() => {
+    const curCode = `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}`;
+    const saved = typeof window !== 'undefined' ? localStorage.getItem('pgri-dues-start-period') : null;
+    const startCode = saved && /^\d{4}-\d{2}$/.test(saved) ? saved : '2026-11';
+    return (curCode < startCode ? startCode : curCode).split('-')[0];
+  });
+  const [selectedCashMonth, setSelectedCashMonth] = useState<string>(() => {
+    const curCode = `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}`;
+    const saved = typeof window !== 'undefined' ? localStorage.getItem('pgri-dues-start-period') : null;
+    const startCode = saved && /^\d{4}-\d{2}$/.test(saved) ? saved : '2026-11';
+    return (curCode < startCode ? startCode : curCode).split('-')[1];
+  });
+
+  // Daftar bulan valid pada tahun terpilih (mulai dari bulan awal pembayaran s.d. periode terjauh yang sudah dibayar)
+  const validCashMonthsForSelectedYear = useMemo(() => {
+    return CASH_MONTH_OPTIONS.filter(m => {
+      const code = `${selectedCashYear}-${m.id}`;
+      return code >= duesStartPeriod && code <= maxCashDropdownPeriod;
+    });
+  }, [CASH_MONTH_OPTIONS, selectedCashYear, duesStartPeriod, maxCashDropdownPeriod]);
+
+  useEffect(() => {
+    const syncDuesStart = () => {
+      if (typeof window !== 'undefined') {
+        const saved = localStorage.getItem('pgri-dues-start-period');
+        if (saved && /^\d{4}-\d{2}$/.test(saved)) {
+          setDuesStartPeriod(saved);
+        }
+      }
+    };
+    window.addEventListener('storage', syncDuesStart);
+    window.addEventListener('kombel-settings-updated', syncDuesStart);
+    return () => {
+      window.removeEventListener('storage', syncDuesStart);
+      window.removeEventListener('kombel-settings-updated', syncDuesStart);
+    };
+  }, []);
+
+  // Jaga agar tahun & bulan terpilih selalu berada dalam rentang [bulan awal pembayaran .. periode terjauh]
+  useEffect(() => {
+    const currentSelectedCode = `${selectedCashYear}-${selectedCashMonth}`;
+    if (currentSelectedCode < duesStartPeriod || currentSelectedCode > maxCashDropdownPeriod) {
+      const fallbackCode = nowPeriodCode >= duesStartPeriod && nowPeriodCode <= maxCashDropdownPeriod ? nowPeriodCode : maxCashDropdownPeriod;
+      const [validY, validM] = fallbackCode.split('-');
+      setSelectedCashYear(validY);
+      setSelectedCashMonth(validM);
+    }
+  }, [duesStartPeriod, maxCashDropdownPeriod, nowPeriodCode, selectedCashYear, selectedCashMonth]);
 
   useEffect(() => {
     if (sortedEvents.length > 0) {
@@ -420,26 +630,68 @@ export const BerandaView: React.FC<BerandaViewProps> = ({
     }
   }, [sortedEvents, selectedAttendanceEventId]);
 
-  // Helper menghitung berapa kegiatan yang belum dibayar oleh anggota
-  const getTeacherUnpaidCount = (teacherId: string): number => {
-    if (!events || events.length === 0) {
-      const payment = effectiveCashPayments.find(cp => cp.teacherId === teacherId);
-      return payment?.status === 'Lunas' ? 0 : 1;
-    }
-    return events.filter(evt => {
-      const payment = effectiveCashPayments.find(
-        cp => cp.teacherId === teacherId && String((cp as any).eventId) === String(evt.id)
-      );
-      return payment?.status !== 'Lunas';
-    }).length;
+  // Helper cek status pembayaran anggota pada Tahun & Bulan terpilih (YYYY-MM)
+  const isTeacherPaidForSelectedMonth = (teacher: Partial<Teacher>): boolean => {
+    const yearMonthCode = `${selectedCashYear}-${selectedCashMonth}`;
+    const targetKey = `month-${yearMonthCode}`;
+    const tId = String(teacher.id || '').trim();
+    const tName = (teacher.name || '').trim().toLowerCase();
+
+    const payment = effectiveCashPayments.find(cp => {
+      const cpKey = String((cp as any).month || (cp as any).eventId || '').trim();
+      const isSamePeriod = cpKey === targetKey || cpKey === yearMonthCode;
+      const isSameTeacher =
+        (cp.teacherId && String(cp.teacherId).trim() === tId) ||
+        (tName && (cp as any).teacherName && String((cp as any).teacherName).trim().toLowerCase() === tName);
+      return isSamePeriod && isSameTeacher;
+    });
+
+    return payment?.status === 'Lunas';
   };
 
-  // Data guru yang BELUM BAYAR kas (Hanya Anggota Aktif yang memiliki tunggakan kegiatan)
+  // Helper menghitung total bulan tunggakan jatuh tempo (dari bulan awal pembayaran s.d. bulan kalender sekarang)
+  const getTeacherUnpaidMonthsCount = (teacher: Partial<Teacher>): number => {
+    if (nowPeriodCode < duesStartPeriod) return 0;
+    const [startY, startM] = duesStartPeriod.split('-').map(Number);
+    const [endY, endM] = nowPeriodCode.split('-').map(Number);
+    if (!startY || !startM || !endY || !endM) return 0;
+
+    const tId = String(teacher.id || '').trim();
+    const tName = (teacher.name || '').trim().toLowerCase();
+    let unpaidMonths = 0;
+
+    let y = startY;
+    let m = startM;
+    while (y < endY || (y === endY && m <= endM)) {
+      const ymCode = `${y}-${String(m).padStart(2, '0')}`;
+      const targetKey = `month-${ymCode}`;
+      const payment = effectiveCashPayments.find(cp => {
+        const cpKey = String((cp as any).month || (cp as any).eventId || '').trim();
+        const isSamePeriod = cpKey === targetKey || cpKey === ymCode;
+        const isSameTeacher =
+          (cp.teacherId && String(cp.teacherId).trim() === tId) ||
+          (tName && (cp as any).teacherName && String((cp as any).teacherName).trim().toLowerCase() === tName);
+        return isSamePeriod && isSameTeacher;
+      });
+      if (payment?.status !== 'Lunas') {
+        unpaidMonths += 1;
+      }
+      m += 1;
+      if (m > 12) {
+        m = 1;
+        y += 1;
+      }
+    }
+
+    return unpaidMonths;
+  };
+
+  // Data anggota & pengurus wajib kontribusi yang BELUM BAYAR kas pada bulan & tahun terpilih
   const unpaidTeachers = useMemo(() => {
-    return [...activeTeachersList]
-      .filter(t => getTeacherUnpaidCount(t.id) > 0)
+    return [...cashContributionMembersList]
+      .filter(t => !isTeacherPaidForSelectedMonth(t))
       .sort((a, b) => (a.name || '').localeCompare(b.name || '', 'id', { sensitivity: 'base' }));
-  }, [activeTeachersList, effectiveCashPayments, events]);
+  }, [cashContributionMembersList, effectiveCashPayments, selectedCashYear, selectedCashMonth]);
 
   const unpaidMaleTeachers = useMemo(() => {
     return unpaidTeachers.filter(t => getTeacherGender(t) === 'L');
@@ -449,11 +701,12 @@ export const BerandaView: React.FC<BerandaViewProps> = ({
     return unpaidTeachers.filter(t => getTeacherGender(t) === 'P');
   }, [unpaidTeachers]);
 
+  // Data anggota & pengurus wajib kontribusi yang SUDAH LUNAS kas pada bulan & tahun terpilih
   const paidTeachers = useMemo(() => {
-    return [...activeTeachersList]
-      .filter(t => getTeacherUnpaidCount(t.id) === 0)
+    return [...cashContributionMembersList]
+      .filter(t => isTeacherPaidForSelectedMonth(t))
       .sort((a, b) => (a.name || '').localeCompare(b.name || '', 'id', { sensitivity: 'base' }));
-  }, [activeTeachersList, effectiveCashPayments, events]);
+  }, [cashContributionMembersList, effectiveCashPayments, selectedCashYear, selectedCashMonth]);
 
   const paidMaleTeachers = useMemo(() => {
     return paidTeachers.filter(t => getTeacherGender(t) === 'L');
@@ -463,8 +716,9 @@ export const BerandaView: React.FC<BerandaViewProps> = ({
     return paidTeachers.filter(t => getTeacherGender(t) === 'P');
   }, [paidTeachers]);
 
-  const paidTeachersCount = activeTeachersCount - unpaidTeachers.length;
-  const cashPaidPercentage = activeTeachersCount > 0 ? Math.round((paidTeachersCount / activeTeachersCount) * 100) : 0;
+  const totalCashMembersCount = cashContributionMembersList.length;
+  const paidTeachersCount = paidTeachers.length;
+  const cashPaidPercentage = totalCashMembersCount > 0 ? Math.round((paidTeachersCount / totalCashMembersCount) * 100) : 0;
 
   // Event terpilih untuk kehadiran
   const currentSelectedAttendanceEvent = useMemo(() => {
@@ -839,7 +1093,7 @@ export const BerandaView: React.FC<BerandaViewProps> = ({
             </div>
             <div className="min-w-0">
               <p className={`text-[11px] font-bold uppercase tracking-wider ${isLight ? 'text-stone-500' : 'text-stone-400'}`}>Pelunasan Kontribusi</p>
-              <p className={`font-display tabular-nums text-xl font-black ${isLight ? 'text-stone-900' : 'text-white'}`}>{animatedCashPercentage}% <span className="text-xs font-medium text-stone-400">({paidTeachersCount}/{activeTeachersCount})</span></p>
+              <p className={`font-display tabular-nums text-xl font-black ${isLight ? 'text-stone-900' : 'text-white'}`}>{animatedCashPercentage}% <span className="text-xs font-medium text-stone-400">({paidTeachersCount}/{totalCashMembersCount})</span></p>
             </div>
           </div>
           <TrendingUp className="w-5 h-5 text-emerald-500 shrink-0 relative z-10" />
@@ -1009,25 +1263,53 @@ export const BerandaView: React.FC<BerandaViewProps> = ({
               const statusInfo = getEventCountdownOrStatus(event);
               const dateParts = (event.date || ' -').split(' ');
 
+              const eventCardStatusClass = statusInfo.isOngoing
+                ? (isLight
+                    ? 'bg-emerald-50/75 hover:bg-emerald-50 border-emerald-300/90 shadow-[0_2px_10px_rgba(16,185,129,0.08)]'
+                    : 'bg-emerald-950/35 hover:bg-emerald-950/50 border-emerald-700/70 shadow-[0_2px_12px_rgba(16,185,129,0.12)]')
+                : statusInfo.isFinished
+                ? (isLight
+                    ? 'bg-stone-100/85 hover:bg-stone-100 border-stone-200/90 opacity-85'
+                    : 'bg-stone-900/70 hover:bg-stone-800/70 border-stone-800 opacity-80')
+                : (isLight
+                    ? 'bg-amber-50/65 hover:bg-amber-50 border-amber-200/90 shadow-[0_2px_10px_rgba(245,158,11,0.06)]'
+                    : 'bg-amber-950/25 hover:bg-amber-950/40 border-amber-800/50');
+
               return (
                 <div
                   key={event.id}
-                  className={`flex flex-col xl:flex-row items-start xl:items-center justify-between p-3.5 rounded-2xl border transition-all duration-200 hover:-translate-y-0.5 gap-3 ${itemBgClass}`}
+                  className={`flex flex-col xl:flex-row items-start xl:items-center justify-between p-3.5 rounded-2xl border transition-all duration-200 hover:-translate-y-0.5 gap-3 ${eventCardStatusClass}`}
                 >
                   <div className="flex items-center gap-3.5 min-w-0">
                     {/* Date Badge Box */}
-                    <div className={`w-12 h-12 rounded-xl border flex flex-col items-center justify-center font-black leading-none shadow-sm shrink-0 ${dateColorMap[event.categoryColor] || (isLight ? 'bg-gradient-to-br from-red-900 to-red-700 text-amber-200 border-red-800' : 'bg-gradient-to-br from-red-950 to-red-800 text-amber-300 border-red-800/70')}`}>
+                    <div className={`w-12 h-12 rounded-xl border flex flex-col items-center justify-center font-black leading-none shadow-sm shrink-0 ${
+                      statusInfo.isFinished
+                        ? (isLight ? 'bg-stone-200/90 text-stone-600 border-stone-300' : 'bg-stone-800 text-stone-400 border-stone-700')
+                        : (dateColorMap[event.categoryColor] || (isLight ? 'bg-gradient-to-br from-red-900 to-red-700 text-amber-200 border-red-800' : 'bg-gradient-to-br from-red-950 to-red-800 text-amber-300 border-red-800/70'))
+                    }`}>
                       <span className="font-display text-base">{dateParts[0]}</span>
                       <span className="text-[9px] uppercase font-extrabold tracking-wider">{dateParts[1] || ''}</span>
                     </div>
 
                     {/* Info */}
                     <div className="min-w-0">
-                      <h4 className={`font-bold text-sm truncate transition-colors ${isLight ? 'text-stone-900 hover:text-red-800' : 'text-stone-100 hover:text-amber-300'}`}>
+                      <h4 className={`font-bold text-sm truncate transition-colors ${
+                        statusInfo.isFinished
+                          ? (isLight ? 'text-stone-600' : 'text-stone-400')
+                          : (isLight ? 'text-stone-900 hover:text-red-800' : 'text-stone-100 hover:text-amber-300')
+                      }`}>
                         {event.title}
                       </h4>
-                      <p className="text-xs text-stone-400 font-medium flex items-center gap-1 mt-0.5">
-                        <Clock className="w-3.5 h-3.5 text-stone-400 shrink-0" />
+                      <p className={`text-xs font-medium flex items-center gap-1 mt-0.5 ${
+                        statusInfo.isOngoing
+                          ? (isLight ? 'text-emerald-700' : 'text-emerald-400')
+                          : 'text-stone-400'
+                      }`}>
+                        <Clock className={`w-3.5 h-3.5 shrink-0 ${
+                          statusInfo.isOngoing
+                            ? (isLight ? 'text-emerald-600' : 'text-emerald-400')
+                            : 'text-stone-400'
+                        }`} />
                         <span className="truncate">{event.time || '-'}</span>
                       </p>
                     </div>
@@ -1039,32 +1321,37 @@ export const BerandaView: React.FC<BerandaViewProps> = ({
                     </span>
 
                     {/* Countdown / Status Pill */}
-                    <div className={`px-2.5 py-1 rounded-lg border shadow-sm flex items-center gap-1.5 ${
+                    <div className={`px-2.5 py-1.5 rounded-lg border shadow-sm inline-flex items-center justify-center gap-1.5 leading-none ${
                       statusInfo.isOngoing
-                        ? (isLight ? 'bg-emerald-50/90 border-emerald-200/80 text-emerald-900' : 'bg-emerald-950/70 border-emerald-800/70 text-emerald-300')
-                        : (isLight ? 'bg-amber-50/90 border-amber-200/80 text-amber-900' : 'bg-stone-950/80 border-stone-700/80 text-amber-300')
+                        ? (isLight ? 'bg-emerald-100/90 border-emerald-300 text-emerald-900' : 'bg-emerald-950/80 border-emerald-700/80 text-emerald-300')
+                        : statusInfo.isFinished
+                        ? (isLight ? 'bg-stone-200/80 border-stone-300 text-stone-600' : 'bg-stone-800/90 border-stone-700 text-stone-400')
+                        : (isLight ? 'bg-amber-100/80 border-amber-300/80 text-amber-900' : 'bg-amber-950/70 border-amber-700/70 text-amber-300')
                     }`}>
                       {statusInfo.isOngoing ? (
                         <span className="relative flex h-2 w-2 shrink-0">
                           <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
                           <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
                         </span>
+                      ) : statusInfo.isFinished ? (
+                        <CheckCircle2 className={`w-3.5 h-3.5 shrink-0 ${isLight ? 'text-stone-500' : 'text-stone-400'}`} />
                       ) : (
-                        <Clock className={`w-3 h-3 ${isLight ? 'text-amber-700' : 'text-amber-400'}`} />
+                        <Clock className={`w-3.5 h-3.5 shrink-0 ${isLight ? 'text-amber-700' : 'text-amber-400'}`} />
                       )}
                       {statusInfo.isCountdown ? (
-                        <span className={`text-[11px] font-bold font-mono tabular-nums tracking-wide ${isLight ? 'text-amber-900' : 'text-amber-300'} flex items-center`}>
-                          <span className="font-sans text-[9px] font-extrabold uppercase tracking-wider opacity-70 mr-1.5">Mulai Dalam</span>
-                          <span>{statusInfo.h}</span>
-                          <span className="animate-colon mx-0.5">:</span>
-                          <span>{statusInfo.m}</span>
-                          <span className="animate-colon mx-0.5">:</span>
-                          <span>{statusInfo.s}</span>
+                        <span className={`text-[11px] font-bold font-mono tabular-nums tracking-wide leading-none ${isLight ? 'text-amber-900' : 'text-amber-300'} inline-flex items-center`}>
+                          <span className="leading-none">{statusInfo.h}</span>
+                          <span className="animate-colon mx-0.5 leading-none">:</span>
+                          <span className="leading-none">{statusInfo.m}</span>
+                          <span className="animate-colon mx-0.5 leading-none">:</span>
+                          <span className="leading-none">{statusInfo.s}</span>
                         </span>
                       ) : (
-                        <span className={`text-[11px] font-bold font-mono tracking-wide ${
+                        <span className={`text-[11px] font-bold font-mono tracking-wide leading-none inline-flex items-center ${
                           statusInfo.isOngoing
                             ? (isLight ? 'text-emerald-800' : 'text-emerald-300')
+                            : statusInfo.isFinished
+                            ? (isLight ? 'text-stone-600' : 'text-stone-400')
                             : (isLight ? 'text-amber-900' : 'text-amber-300')
                         }`}>
                           {statusInfo.text}
@@ -1119,38 +1406,95 @@ export const BerandaView: React.FC<BerandaViewProps> = ({
                   </div>
                 </div>
 
-                {/* Tab Switcher: Belum Lunas vs Sudah Lunas */}
-                <div className={`inline-flex p-1 rounded-xl border self-start sm:self-auto ${isLight ? 'bg-stone-100 border-stone-200/80' : 'bg-stone-800/90 border-stone-700'}`}>
-                  <button
-                    type="button"
-                    onClick={() => setCashFilterTab('unpaid')}
-                    className={`px-3 py-1.5 rounded-lg text-[11px] font-extrabold tabular-nums transition-all cursor-pointer ${
-                      cashFilterTab === 'unpaid'
-                        ? (isLight ? 'bg-white text-red-800 shadow-sm' : 'bg-red-950 text-amber-300 shadow-sm')
-                        : (isLight ? 'text-stone-500 hover:text-stone-800' : 'text-stone-400 hover:text-stone-200')
+                {/* Filter Tahun, Bulan & Tab Switcher: Belum Lunas vs Sudah Lunas */}
+                <div className="flex flex-wrap items-center gap-2 self-start sm:self-auto">
+                  {/* Dropdown Filter Tahun */}
+                  <select
+                    value={selectedCashYear}
+                    onChange={(e) => {
+                      const nextYr = e.target.value;
+                      setSelectedCashYear(nextYr);
+                      const validMonths = CASH_MONTH_OPTIONS.filter(m => {
+                        const code = `${nextYr}-${m.id}`;
+                        return code >= duesStartPeriod && code <= maxCashDropdownPeriod;
+                      });
+                      if (validMonths.length > 0 && !validMonths.some(m => m.id === selectedCashMonth)) {
+                        const defaultMonthInYear = validMonths.find(m => m.id === nowMonthStr && nextYr === nowYearStr);
+                        setSelectedCashMonth(defaultMonthInYear ? defaultMonthInYear.id : validMonths[0].id);
+                      }
+                    }}
+                    aria-label="Filter Tahun Kontribusi"
+                    className={`px-2.5 py-1.5 rounded-xl border text-[11px] font-bold focus:outline-none focus:ring-2 focus:ring-red-800/20 focus:border-red-700 transition-all cursor-pointer ${
+                      isLight
+                        ? 'bg-[#faf8f5] border-stone-200 text-stone-800'
+                        : 'bg-stone-800 border-stone-700 text-stone-200'
                     }`}
                   >
-                    Belum ({unpaidTeachers.length})
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setCashFilterTab('paid')}
-                    className={`px-3 py-1.5 rounded-lg text-[11px] font-extrabold tabular-nums transition-all cursor-pointer ${
-                      cashFilterTab === 'paid'
-                        ? (isLight ? 'bg-white text-emerald-700 shadow-sm' : 'bg-emerald-950 text-emerald-300 shadow-sm')
-                        : (isLight ? 'text-stone-500 hover:text-stone-800' : 'text-stone-400 hover:text-stone-200')
+                    {cashYearOptions.map((yr) => (
+                      <option key={yr} value={yr} className={isLight ? 'bg-white text-stone-800' : 'bg-stone-800 text-stone-100'}>
+                        {yr}
+                      </option>
+                    ))}
+                  </select>
+
+                  {/* Dropdown Filter Bulan (Dari Awal Pembayaran s.d. Bulan Sekarang) */}
+                  <select
+                    value={selectedCashMonth}
+                    onChange={(e) => setSelectedCashMonth(e.target.value)}
+                    aria-label="Filter Bulan Kontribusi"
+                    className={`px-2.5 py-1.5 rounded-xl border text-[11px] font-bold focus:outline-none focus:ring-2 focus:ring-red-800/20 focus:border-red-700 transition-all cursor-pointer ${
+                      isLight
+                        ? 'bg-[#faf8f5] border-stone-200 text-stone-800'
+                        : 'bg-stone-800 border-stone-700 text-stone-200'
                     }`}
                   >
-                    Lunas ({paidTeachers.length})
-                  </button>
+                    {validCashMonthsForSelectedYear.map((m) => (
+                      <option key={m.id} value={m.id} className={isLight ? 'bg-white text-stone-800' : 'bg-stone-800 text-stone-100'}>
+                        {m.name}
+                      </option>
+                    ))}
+                  </select>
+
+                  {/* Tab Switcher: Belum Lunas vs Sudah Lunas */}
+                  <div className={`inline-flex p-1 rounded-xl border ${isLight ? 'bg-stone-100 border-stone-200/80' : 'bg-stone-800/90 border-stone-700'}`}>
+                    <button
+                      type="button"
+                      onClick={() => setCashFilterTab('unpaid')}
+                      className={`px-3 py-1.5 rounded-lg text-[11px] font-extrabold tabular-nums transition-all cursor-pointer ${
+                        cashFilterTab === 'unpaid'
+                          ? (isLight ? 'bg-white text-red-800 shadow-sm' : 'bg-red-950 text-amber-300 shadow-sm')
+                          : (isLight ? 'text-stone-500 hover:text-stone-800' : 'text-stone-400 hover:text-stone-200')
+                      }`}
+                    >
+                      Belum ({unpaidTeachers.length})
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setCashFilterTab('paid')}
+                      className={`px-3 py-1.5 rounded-lg text-[11px] font-extrabold tabular-nums transition-all cursor-pointer ${
+                        cashFilterTab === 'paid'
+                          ? (isLight ? 'bg-white text-emerald-700 shadow-sm' : 'bg-emerald-950 text-emerald-300 shadow-sm')
+                          : (isLight ? 'text-stone-500 hover:text-stone-800' : 'text-stone-400 hover:text-stone-200')
+                      }`}
+                    >
+                      Lunas ({paidTeachers.length})
+                    </button>
+                  </div>
                 </div>
               </div>
 
               {/* Progress Bar */}
               <div className="mb-4">
-                <div className="flex items-center justify-between text-[11px] font-bold tabular-nums mb-1.5">
-                  <span className={isLight ? 'text-stone-500' : 'text-stone-400'}>Progres Kelunasan</span>
-                  <span className={isLight ? 'text-stone-700' : 'text-stone-200'}>{paidTeachersCount}/{activeTeachersCount} Guru ({animatedCashPercentage}%)</span>
+                <div className="flex items-center justify-between gap-2 text-[11px] font-bold tabular-nums mb-1.5">
+                  <span className={isLight ? 'text-stone-500' : 'text-stone-400'}>
+                    {(() => {
+                      const [startY, startM] = duesStartPeriod.split('-');
+                      const startMonthName = CASH_MONTH_OPTIONS.find(m => m.id === startM)?.name || startM;
+                      const endMonthName = CASH_MONTH_OPTIONS.find(m => m.id === selectedCashMonth)?.name || selectedCashMonth;
+                      return `Progres Kelunasan (${startMonthName} ${startY} - ${endMonthName} ${selectedCashYear})`;
+                    })()}
+                  </span>
+                  <span className={`shrink-0 ${isLight ? 'text-stone-700' : 'text-stone-200'}`}>{paidTeachersCount}/{totalCashMembersCount} Anggota ({animatedCashPercentage}%)</span>
                 </div>
                 <div className={`w-full h-2 rounded-full overflow-hidden ${isLight ? 'bg-stone-100' : 'bg-stone-800'}`}>
                   <div 
@@ -1179,82 +1523,126 @@ export const BerandaView: React.FC<BerandaViewProps> = ({
                     <>
                       {/* Kolom Kiri: Laki-laki */}
                       <div className="space-y-2.5">
-                        {unpaidMaleTeachers.map((teacher, index) => (
-                          <div
-                            key={teacher.id}
-                            className={`p-3 rounded-2xl border transition-all duration-200 hover:-translate-y-0.5 flex items-center justify-between gap-3 ${itemBgClass}`}
-                          >
-                            <div className="flex items-center gap-3 min-w-0">
-                              <div className={`w-8 h-8 rounded-xl flex items-center justify-center font-black text-xs shrink-0 border ${
-                                isLight ? 'bg-stone-100 text-stone-700 border-stone-200' : 'bg-stone-800 text-stone-200 border-stone-700'
-                              }`}>
-                                L
-                              </div>
+                        {unpaidMaleTeachers.map((teacher, index) => {
+                          const unpaidMonths = getTeacherUnpaidMonthsCount(teacher);
+                          const isFuturePeriod = `${selectedCashYear}-${selectedCashMonth}` > nowPeriodCode;
+                          return (
+                            <div
+                              key={teacher.id}
+                              className={`p-3 rounded-2xl border transition-all duration-200 hover:-translate-y-0.5 flex items-center justify-between gap-3 ${itemBgClass}`}
+                            >
+                              <div className="flex items-center gap-3 min-w-0">
+                                <div className={`w-8 h-8 rounded-xl flex items-center justify-center font-black text-xs shrink-0 border ${
+                                  isLight ? 'bg-stone-100 text-stone-700 border-stone-200' : 'bg-stone-800 text-stone-200 border-stone-700'
+                                }`}>
+                                  L
+                                </div>
 
-                              <div className="min-w-0">
-                                <h4 className={`font-bold text-xs sm:text-sm truncate ${isLight ? 'text-stone-900' : 'text-stone-100'}`}>
-                                  {index + 1}. {teacher.name || 'Tanpa Nama'}
-                                </h4>
-                                <div className="flex items-center gap-2 text-[10px] text-stone-400 font-medium mt-0.5">
-                                  <span>NIP: {teacher.nip || '-'}</span>
-                                  <span>•</span>
-                                  <span className="truncate">{teacher.school || '-'}</span>
+                                <div className="min-w-0">
+                                  <h4 className={`font-bold text-xs sm:text-sm truncate ${isLight ? 'text-stone-900' : 'text-stone-100'}`}>
+                                    {index + 1}. {teacher.name || 'Tanpa Nama'}
+                                  </h4>
+                                  <div className="flex items-center gap-2 text-[10px] text-stone-400 font-medium mt-0.5">
+                                    <span>NIP: {teacher.nip || '-'}</span>
+                                    <span>•</span>
+                                    <span className="truncate">{teacher.school || '-'}</span>
+                                  </div>
                                 </div>
                               </div>
-                            </div>
 
-                            <span 
-                              title={`${getTeacherUnpaidCount(teacher.id)} kegiatan belum dibayar`}
-                              className={`text-[10px] font-extrabold tabular-nums px-2.5 py-1 rounded-lg border shrink-0 ${
-                                isLight 
-                                  ? 'bg-red-50 text-red-800 border-red-200/80' 
-                                  : 'bg-red-950/80 text-red-300 border-red-800/70'
-                              }`}
-                            >
-                              Tunggakan : {getTeacherUnpaidCount(teacher.id)}
-                            </span>
-                          </div>
-                        ))}
+                              <div className="flex items-center gap-1.5 shrink-0">
+                                {unpaidMonths > 0 && (
+                                  <span
+                                    title={`Total tunggakan jatuh tempo: ${unpaidMonths} bulan`}
+                                    className={`text-[10px] font-extrabold tabular-nums px-2.5 py-1 rounded-lg border shrink-0 ${
+                                      isLight
+                                        ? 'bg-amber-50 text-amber-800 border-amber-200/80'
+                                        : 'bg-amber-950/70 text-amber-300 border-amber-800/60'
+                                    }`}
+                                  >
+                                    {unpaidMonths} Bulan
+                                  </span>
+                                )}
+                                <span 
+                                  title={`${isFuturePeriod && unpaidMonths === 0 ? 'Belum jatuh tempo untuk bulan' : 'Belum bayar kontribusi bulan'} ${CASH_MONTH_OPTIONS.find(m => m.id === selectedCashMonth)?.name || ''} ${selectedCashYear}`}
+                                  className={`text-[10px] font-extrabold px-2.5 py-1 rounded-lg border shrink-0 ${
+                                    isFuturePeriod && unpaidMonths === 0
+                                      ? (isLight
+                                          ? 'bg-stone-100 text-stone-600 border-stone-200/90'
+                                          : 'bg-stone-800 text-stone-300 border-stone-700')
+                                      : (isLight 
+                                          ? 'bg-red-50 text-red-800 border-red-200/80' 
+                                          : 'bg-red-950/80 text-red-300 border-red-800/70')
+                                  }`}
+                                >
+                                  {isFuturePeriod && unpaidMonths === 0 ? 'Belum Jatuh Tempo' : 'Belum Bayar'}
+                                </span>
+                              </div>
+                            </div>
+                          );
+                        })}
                       </div>
 
                       {/* Kolom Kanan: Perempuan */}
                       <div className="space-y-2.5">
-                        {unpaidFemaleTeachers.map((teacher, index) => (
-                          <div
-                            key={teacher.id}
-                            className={`p-3 rounded-2xl border transition-all duration-200 hover:-translate-y-0.5 flex items-center justify-between gap-3 ${itemBgClass}`}
-                          >
-                            <div className="flex items-center gap-3 min-w-0">
-                              <div className={`w-8 h-8 rounded-xl flex items-center justify-center font-black text-xs shrink-0 border ${
-                                isLight ? 'bg-amber-50 text-amber-800 border-amber-200' : 'bg-amber-950/70 text-amber-300 border-amber-800/60'
-                              }`}>
-                                P
-                              </div>
+                        {unpaidFemaleTeachers.map((teacher, index) => {
+                          const unpaidMonths = getTeacherUnpaidMonthsCount(teacher);
+                          const isFuturePeriod = `${selectedCashYear}-${selectedCashMonth}` > nowPeriodCode;
+                          return (
+                            <div
+                              key={teacher.id}
+                              className={`p-3 rounded-2xl border transition-all duration-200 hover:-translate-y-0.5 flex items-center justify-between gap-3 ${itemBgClass}`}
+                            >
+                              <div className="flex items-center gap-3 min-w-0">
+                                <div className={`w-8 h-8 rounded-xl flex items-center justify-center font-black text-xs shrink-0 border ${
+                                  isLight ? 'bg-amber-50 text-amber-800 border-amber-200' : 'bg-amber-950/70 text-amber-300 border-amber-800/60'
+                                }`}>
+                                  P
+                                </div>
 
-                              <div className="min-w-0">
-                                <h4 className={`font-bold text-xs sm:text-sm truncate ${isLight ? 'text-stone-900' : 'text-stone-100'}`}>
-                                  {index + 1}. {teacher.name || 'Tanpa Nama'}
-                                </h4>
-                                <div className="flex items-center gap-2 text-[10px] text-stone-400 font-medium mt-0.5">
-                                  <span>NIP: {teacher.nip || '-'}</span>
-                                  <span>•</span>
-                                  <span className="truncate">{teacher.school || '-'}</span>
+                                <div className="min-w-0">
+                                  <h4 className={`font-bold text-xs sm:text-sm truncate ${isLight ? 'text-stone-900' : 'text-stone-100'}`}>
+                                    {index + 1}. {teacher.name || 'Tanpa Nama'}
+                                  </h4>
+                                  <div className="flex items-center gap-2 text-[10px] text-stone-400 font-medium mt-0.5">
+                                    <span>NIP: {teacher.nip || '-'}</span>
+                                    <span>•</span>
+                                    <span className="truncate">{teacher.school || '-'}</span>
+                                  </div>
                                 </div>
                               </div>
-                            </div>
 
-                            <span 
-                              title={`${getTeacherUnpaidCount(teacher.id)} kegiatan belum dibayar`}
-                              className={`text-[10px] font-extrabold tabular-nums px-2.5 py-1 rounded-lg border shrink-0 ${
-                                isLight 
-                                  ? 'bg-red-50 text-red-800 border-red-200/80' 
-                                  : 'bg-red-950/80 text-red-300 border-red-800/70'
-                              }`}
-                            >
-                              Tunggakan : {getTeacherUnpaidCount(teacher.id)}
-                            </span>
-                          </div>
-                        ))}
+                              <div className="flex items-center gap-1.5 shrink-0">
+                                {unpaidMonths > 0 && (
+                                  <span
+                                    title={`Total tunggakan jatuh tempo: ${unpaidMonths} bulan`}
+                                    className={`text-[10px] font-extrabold tabular-nums px-2.5 py-1 rounded-lg border shrink-0 ${
+                                      isLight
+                                        ? 'bg-amber-50 text-amber-800 border-amber-200/80'
+                                        : 'bg-amber-950/70 text-amber-300 border-amber-800/60'
+                                    }`}
+                                  >
+                                    {unpaidMonths} Bulan
+                                  </span>
+                                )}
+                                <span 
+                                  title={`${isFuturePeriod && unpaidMonths === 0 ? 'Belum jatuh tempo untuk bulan' : 'Belum bayar kontribusi bulan'} ${CASH_MONTH_OPTIONS.find(m => m.id === selectedCashMonth)?.name || ''} ${selectedCashYear}`}
+                                  className={`text-[10px] font-extrabold px-2.5 py-1 rounded-lg border shrink-0 ${
+                                    isFuturePeriod && unpaidMonths === 0
+                                      ? (isLight
+                                          ? 'bg-stone-100 text-stone-600 border-stone-200/90'
+                                          : 'bg-stone-800 text-stone-300 border-stone-700')
+                                      : (isLight 
+                                          ? 'bg-red-50 text-red-800 border-red-200/80' 
+                                          : 'bg-red-950/80 text-red-300 border-red-800/70')
+                                  }`}
+                                >
+                                  {isFuturePeriod && unpaidMonths === 0 ? 'Belum Jatuh Tempo' : 'Belum Bayar'}
+                                </span>
+                              </div>
+                            </div>
+                          );
+                        })}
                       </div>
                     </>
                   )}
@@ -1295,13 +1683,24 @@ export const BerandaView: React.FC<BerandaViewProps> = ({
                                 </div>
                               </div>
                             </div>
-                            <span className={`text-[10px] font-extrabold px-2.5 py-1 rounded-lg border shrink-0 ${
-                              isLight
-                                ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                                : 'bg-emerald-950/70 text-emerald-300 border-emerald-800/60'
-                            }`}>
-                              Lunas
-                            </span>
+                            <div className="flex items-center gap-1.5 shrink-0">
+                              {`${selectedCashYear}-${selectedCashMonth}` > nowPeriodCode && (
+                                <span className={`text-[10px] font-extrabold px-2.5 py-1 rounded-lg border shrink-0 ${
+                                  isLight
+                                    ? 'bg-sky-50 text-sky-800 border-sky-200/80'
+                                    : 'bg-sky-950/70 text-sky-300 border-sky-800/60'
+                                }`}>
+                                  Bayar di Muka
+                                </span>
+                              )}
+                              <span className={`text-[10px] font-extrabold px-2.5 py-1 rounded-lg border shrink-0 ${
+                                isLight
+                                  ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                                  : 'bg-emerald-950/70 text-emerald-300 border-emerald-800/60'
+                              }`}>
+                                Lunas
+                              </span>
+                            </div>
                           </div>
                         ))}
                       </div>
@@ -1330,13 +1729,24 @@ export const BerandaView: React.FC<BerandaViewProps> = ({
                                 </div>
                               </div>
                             </div>
-                            <span className={`text-[10px] font-extrabold px-2.5 py-1 rounded-lg border shrink-0 ${
-                              isLight
-                                ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                                : 'bg-emerald-950/70 text-emerald-300 border-emerald-800/60'
-                            }`}>
-                              Lunas
-                            </span>
+                            <div className="flex items-center gap-1.5 shrink-0">
+                              {`${selectedCashYear}-${selectedCashMonth}` > nowPeriodCode && (
+                                <span className={`text-[10px] font-extrabold px-2.5 py-1 rounded-lg border shrink-0 ${
+                                  isLight
+                                    ? 'bg-sky-50 text-sky-800 border-sky-200/80'
+                                    : 'bg-sky-950/70 text-sky-300 border-sky-800/60'
+                                }`}>
+                                  Bayar di Muka
+                                </span>
+                              )}
+                              <span className={`text-[10px] font-extrabold px-2.5 py-1 rounded-lg border shrink-0 ${
+                                isLight
+                                  ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                                  : 'bg-emerald-950/70 text-emerald-300 border-emerald-800/60'
+                              }`}>
+                                Lunas
+                              </span>
+                            </div>
                           </div>
                         ))}
                       </div>
@@ -1345,14 +1755,6 @@ export const BerandaView: React.FC<BerandaViewProps> = ({
                 </div>
               )}
             </div>
-
-            <button
-              onClick={() => onNavigate('keuangan')}
-              className={`w-full mt-4 py-2.5 rounded-xl font-bold text-xs flex items-center justify-center gap-1 transition-all active:scale-95 ${buttonSubtleClass}`}
-            >
-              Lihat di Catatan Keuangan
-              <ChevronRight className="w-4 h-4" />
-            </button>
           </div>
 
         </div>

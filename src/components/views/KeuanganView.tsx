@@ -267,7 +267,9 @@ export const KeuanganView: React.FC<KeuanganViewProps> = ({
   // Konfigurasi Dinamis Organisasi PGRI (Rekening, WA Bendahara, Nominal Kontribusi)
   const [orgConfig, setOrgConfig] = useState(() => getOrgConfig());
   const [previewReceiptUrl, setPreviewReceiptUrl] = useState<string | null>(null);
+  const [isClosingPreviewReceipt, setIsClosingPreviewReceipt] = useState(false);
   const [isRekapSekolahOpen, setIsRekapSekolahOpen] = useState(false);
+  const [isClosingRekapSekolah, setIsClosingRekapSekolah] = useState(false);
   const [rekapMonth, setRekapMonth] = useState<string>(() => initialActivePeriod.split('-')[1]);
   const [rekapYear, setRekapYear] = useState<string>(() => initialActivePeriod.split('-')[0]);
 
@@ -310,7 +312,32 @@ export const KeuanganView: React.FC<KeuanganViewProps> = ({
     year: string;
     payment: CashPayment;
   } | null>(null);
+  const [isClosingReceiptPreview, setIsClosingReceiptPreview] = useState(false);
   const [isDownloadingReceipt, setIsDownloadingReceipt] = useState(false);
+
+  const handleClosePreviewReceipt = () => {
+    setIsClosingPreviewReceipt(true);
+    setTimeout(() => {
+      setPreviewReceiptUrl(null);
+      setIsClosingPreviewReceipt(false);
+    }, 250);
+  };
+
+  const handleCloseRekapSekolah = () => {
+    setIsClosingRekapSekolah(true);
+    setTimeout(() => {
+      setIsRekapSekolahOpen(false);
+      setIsClosingRekapSekolah(false);
+    }, 250);
+  };
+
+  const handleCloseReceiptPreview = () => {
+    setIsClosingReceiptPreview(true);
+    setTimeout(() => {
+      setReceiptPreviewTarget(null);
+      setIsClosingReceiptPreview(false);
+    }, 250);
+  };
 
   useEffect(() => {
     const syncOrg = () => setOrgConfig(getOrgConfig());
@@ -1555,10 +1582,14 @@ export const KeuanganView: React.FC<KeuanganViewProps> = ({
       const cleanDesc = !(tx as any).volume && !(tx as any).satuan && match ? match[1].trim() : rawDesc;
       const normalizedCategory = tx.category === 'Iuran Anggota' ? 'Kontribusi Anggota' : tx.category;
 
+      const parsedVolNum = savedVol ? parseFloat(savedVol.replace(',', '.')) : 1;
+      const validVolNum = !isNaN(parsedVolNum) && parsedVolNum > 0 ? parsedVolNum : 1;
+      const unitNominal = tx.amount > 0 ? Math.round(tx.amount / validVolNum) : 0;
+
       setFormData({
         date: tx.date,
         type: tx.type,
-        amount: tx.amount > 0 ? `Rp. ${tx.amount.toLocaleString('id-ID')}` : '',
+        amount: unitNominal > 0 ? `Rp. ${unitNominal.toLocaleString('id-ID')}` : '',
         description: cleanDesc,
         volume: savedVol,
         satuan: savedSat,
@@ -1574,17 +1605,21 @@ export const KeuanganView: React.FC<KeuanganViewProps> = ({
   // Simpan Transaksi (Tambah/Edit) + Dual-Write Per-Doc & Audit Log
   const handleSaveTransaction = async (e: React.FormEvent) => {
     e.preventDefault();
-    const parsedAmount = parseInt(formData.amount.replace(/[^0-9]/g, ''), 10);
-    if (isNaN(parsedAmount) || parsedAmount <= 0) return;
+    const parsedUnitNominal = parseInt(formData.amount.replace(/[^0-9]/g, ''), 10);
+    if (isNaN(parsedUnitNominal) || parsedUnitNominal <= 0) return;
     if (!formData.description.trim()) return;
 
     const targetEditId = editingTx?.id;
     const trimmedVol = formData.volume.trim();
     const trimmedSat = formData.satuan.trim();
+    const parsedVol = trimmedVol ? parseFloat(trimmedVol.replace(',', '.')) : 1;
+    const effectiveVol = !isNaN(parsedVol) && parsedVol > 0 ? parsedVol : 1;
+    const computedTotalAmount = Math.round(parsedUnitNominal * effectiveVol);
+
     const editedValues: any = {
       date: formData.date,
       type: formData.type,
-      amount: parsedAmount,
+      amount: computedTotalAmount,
       description: formData.description.trim(),
       volume: trimmedVol,
       satuan: trimmedSat,
@@ -4106,6 +4141,21 @@ export const KeuanganView: React.FC<KeuanganViewProps> = ({
         .modal-content-exit {
           animation: smoothModalOut 0.25s cubic-bezier(0.16, 1, 0.3, 1) forwards;
         }
+        @keyframes tabPanelEnter {
+          from { opacity: 0; transform: translateY(8px); }
+          to { opacity: 1; transform: translateY(0); }
+        }
+        @keyframes panelFadeIn {
+          from { opacity: 0; transform: translateY(-4px); }
+          to { opacity: 1; transform: translateY(0); }
+        }
+        .animate-tab-enter {
+          animation: tabPanelEnter 0.28s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+        }
+        .animate-fadeIn,
+        .animate-panel-in {
+          animation: panelFadeIn 0.22s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+        }
       `}</style>
 
       {/* Header Banner — Wibawa Kusuma Bangsa */}
@@ -4136,9 +4186,13 @@ export const KeuanganView: React.FC<KeuanganViewProps> = ({
           <div
             onClick={handleCopyAccount}
             title="Klik untuk menyalin nomor rekening"
-            className={`group px-4 py-2.5 rounded-xl border flex items-center justify-between gap-3 shadow-sm transition-colors cursor-pointer select-none active:scale-95 ${isDark
-              ? 'bg-stone-900/90 hover:bg-stone-800 border-stone-700 hover:border-amber-500/50 text-stone-100'
-              : 'bg-white hover:bg-[#faf8f5] border-stone-300 hover:border-red-300 text-stone-800'
+            className={`group px-4 py-2.5 rounded-xl border flex items-center justify-between gap-3 shadow-sm transition-all duration-300 cursor-pointer select-none active:scale-95 ${copiedBank
+              ? isDark
+                ? 'bg-emerald-950/60 border-emerald-500/70 ring-2 ring-emerald-500/25 text-stone-100'
+                : 'bg-emerald-50/70 border-emerald-400 ring-2 ring-emerald-400/25 text-stone-800'
+              : isDark
+                ? 'bg-stone-900/90 hover:bg-stone-800 border-stone-700 hover:border-amber-500/50 text-stone-100'
+                : 'bg-white hover:bg-[#faf8f5] border-stone-300 hover:border-red-300 text-stone-800'
               }`}
           >
             <div className="flex items-center gap-2.5">
@@ -4267,18 +4321,19 @@ export const KeuanganView: React.FC<KeuanganViewProps> = ({
 
         <div className="p-6">
           {activeTab === 'transaksi' && (
-            <div className="space-y-4">
+            <div className="space-y-4 animate-tab-enter">
               <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-6">
                 <h3 className="font-display text-lg font-semibold text-stone-900 [.dark_&]:text-white dark:text-white">Riwayat Transaksi</h3>
-                <div className="flex items-center gap-2.5 w-full md:w-auto justify-end">
+                <div className="flex flex-wrap items-center gap-2 w-full md:w-auto justify-start md:justify-end">
 
                   {/* 1. Tombol Tambah Transaksi */}
                   {isAdmin && (
                     <button
                       onClick={handleOpenAdd}
-                      className="relative overflow-hidden flex-1 sm:flex-initial sm:w-auto px-4 sm:px-5 py-2.5 rounded-xl bg-red-800 hover:bg-red-700 text-white font-bold text-xs sm:text-sm shadow-sm active:scale-95 flex items-center justify-center gap-2 cursor-pointer shrink-0 transition-colors"
+                      className="relative overflow-hidden flex-1 sm:flex-initial sm:w-auto px-3.5 sm:px-5 py-2.5 rounded-xl bg-red-800 hover:bg-red-700 text-white font-bold text-xs sm:text-sm shadow-sm active:scale-95 flex items-center justify-center gap-1.5 sm:gap-2 cursor-pointer shrink-0 transition-colors"
                     >
                       <Plus className="w-4 h-4 stroke-[2.5]" />
+                      <span className="tracking-wide sm:hidden">Tambah</span>
                       <span className="tracking-wide hidden sm:inline">Tambah Transaksi</span>
                     </button>
                   )}
@@ -4288,22 +4343,25 @@ export const KeuanganView: React.FC<KeuanganViewProps> = ({
                     <button
                       onClick={handleOpenVerifikasiModal}
                       title="Verifikasi Pembayaran Uang Kas Anggota"
-                      className="flex-1 sm:flex-initial sm:w-auto px-4 sm:px-5 py-2.5 rounded-xl bg-[#faf8f5] [.dark_&]:bg-stone-800 dark:bg-stone-800 border border-stone-300 [.dark_&]:border-stone-700 dark:border-stone-700 hover:border-red-300 [.dark_&]:hover:border-amber-500/40 dark:hover:border-amber-500/40 text-stone-800 [.dark_&]:text-stone-200 dark:text-stone-200 font-semibold text-xs sm:text-sm hover:bg-stone-100 [.dark_&]:hover:bg-stone-700 dark:hover:bg-stone-700 active:scale-95 flex items-center justify-center gap-2 cursor-pointer shrink-0 shadow-sm transition-colors"
+                      className="flex-1 sm:flex-initial sm:w-auto px-3.5 sm:px-5 py-2.5 rounded-xl bg-[#faf8f5] [.dark_&]:bg-stone-800 dark:bg-stone-800 border border-stone-300 [.dark_&]:border-stone-700 dark:border-stone-700 hover:border-red-300 [.dark_&]:hover:border-amber-500/40 dark:hover:border-amber-500/40 text-stone-800 [.dark_&]:text-stone-200 dark:text-stone-200 font-semibold text-xs sm:text-sm hover:bg-stone-100 [.dark_&]:hover:bg-stone-700 dark:hover:bg-stone-700 active:scale-95 flex items-center justify-center gap-1.5 sm:gap-2 cursor-pointer shrink-0 shadow-sm transition-colors"
                     >
                       <ShieldCheck className="w-4 h-4 text-red-800 [.dark_&]:text-amber-400 dark:text-amber-400" />
-                      <span className="hidden sm:inline">Verifikasi</span>
+                      <span>Verifikasi</span>
                     </button>
                   )}
 
                   {/* 3. Tombol Rekap per Sekolah & WA */}
                   <button
                     type="button"
-                    onClick={() => setIsRekapSekolahOpen(true)}
+                    onClick={() => {
+                      setIsClosingRekapSekolah(false);
+                      setIsRekapSekolahOpen(true);
+                    }}
                     title="Rekap Tunggakan per Sekolah & Pengingat WA Koordinator"
                     className="flex-1 sm:flex-initial sm:w-auto px-3.5 sm:px-4 py-2.5 rounded-xl bg-[#faf8f5] [.dark_&]:bg-stone-800 dark:bg-stone-800 border border-stone-300 [.dark_&]:border-stone-700 dark:border-stone-700 hover:border-emerald-500/50 text-stone-800 [.dark_&]:text-stone-200 dark:text-stone-200 font-semibold text-xs sm:text-sm hover:bg-stone-100 [.dark_&]:hover:bg-stone-700 dark:hover:bg-stone-700 active:scale-95 flex items-center justify-center gap-1.5 cursor-pointer shrink-0 shadow-sm transition-colors"
                   >
                     <School className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
-                    <span className="hidden lg:inline">Rekap Sekolah</span>
+                    <span>Rekap Sekolah</span>
                   </button>
 
                   {/* 4. Tombol LPJ Resmi PGRI */}
@@ -4314,7 +4372,7 @@ export const KeuanganView: React.FC<KeuanganViewProps> = ({
                     className="flex-1 sm:flex-initial sm:w-auto px-3.5 sm:px-4 py-2.5 rounded-xl bg-[#faf8f5] [.dark_&]:bg-stone-800 dark:bg-stone-800 border border-stone-300 [.dark_&]:border-stone-700 dark:border-stone-700 hover:border-amber-500/50 text-stone-800 [.dark_&]:text-stone-200 dark:text-stone-200 font-semibold text-xs sm:text-sm hover:bg-stone-100 [.dark_&]:hover:bg-stone-700 dark:hover:bg-stone-700 active:scale-95 flex items-center justify-center gap-1.5 cursor-pointer shrink-0 shadow-sm transition-colors"
                   >
                     <FileSpreadsheet className="w-4 h-4 text-amber-700 dark:text-amber-400" />
-                    <span className="hidden lg:inline">Cetak LPJ</span>
+                    <span>Cetak LPJ</span>
                   </button>
                 </div>
               </div>
@@ -4339,7 +4397,7 @@ export const KeuanganView: React.FC<KeuanganViewProps> = ({
                   <tbody className="text-sm">
                     {transactionsWithRunningBalance.length > 0 ? (
                       transactionsWithRunningBalance.map((tx, index) => (
-                        <tr key={tx.id} className="border-b border-stone-100 [.dark_&]:border-stone-800/60 dark:border-stone-800/60 hover:bg-[#faf8f5] [.dark_&]:hover:bg-stone-800/60 dark:hover:bg-stone-800/60 transition-colors duration-150 group">
+                        <tr key={tx.id} className={`border-b border-stone-100 [.dark_&]:border-stone-800/60 dark:border-stone-800/60 border-l-2 ${tx.type === 'Pemasukan' ? 'border-l-emerald-500/70' : 'border-l-red-500/70'} hover:bg-[#faf8f5] [.dark_&]:hover:bg-stone-800/60 dark:hover:bg-stone-800/60 transition-colors duration-150 group`}>
                           <td className="py-3.5 px-2 text-center font-bold text-stone-500 [.dark_&]:text-stone-400 dark:text-stone-400">
                             {index + 1}
                           </td>
@@ -4371,8 +4429,11 @@ export const KeuanganView: React.FC<KeuanganViewProps> = ({
                               {tx.receiptImage && (
                                 <button
                                   type="button"
-                                  onClick={() => setPreviewReceiptUrl(tx.receiptImage || null)}
-                                  className="px-2 py-0.5 rounded-lg text-[10px] font-bold bg-amber-500/15 text-amber-800 dark:text-amber-300 hover:bg-amber-500/25 border border-amber-500/30 flex items-center gap-1 cursor-pointer shrink-0"
+                                  onClick={() => {
+                                    setIsClosingPreviewReceipt(false);
+                                    setPreviewReceiptUrl(tx.receiptImage || null);
+                                  }}
+                                  className="px-2 py-0.5 rounded-lg text-[10px] font-bold bg-amber-500/15 text-amber-800 dark:text-amber-300 hover:bg-amber-500/25 hover:scale-105 active:scale-95 transition-all border border-amber-500/30 flex items-center gap-1 cursor-pointer shrink-0"
                                   title="Lihat Foto Bukti Kwitansi / Nota"
                                 >
                                   <ImageIcon className="w-3 h-3" />
@@ -4439,7 +4500,7 @@ export const KeuanganView: React.FC<KeuanganViewProps> = ({
           )}
 
           {activeTab === 'peserta' && (
-            <div className="space-y-6">
+            <div className="space-y-6 animate-tab-enter">
 
               {/* Header Tab & Deretan Filter di Sebelah Kanan */}
               <div className="flex flex-col xl:flex-row justify-between items-start xl:items-center gap-4">
@@ -4458,8 +4519,8 @@ export const KeuanganView: React.FC<KeuanganViewProps> = ({
 
                 {/* Filter Controls di Sebelah Kanan + Tombol Unduh PDF */}
                 <div className="flex flex-wrap items-center gap-2.5 w-full xl:w-auto">
-                  {/* Filter Nama Sekolah (Disembunyikan pada Mobile) */}
-                  <div className="hidden sm:block sm:flex-initial sm:w-48">
+                  {/* Filter Nama Sekolah */}
+                  <div className="w-full sm:flex-initial sm:w-48">
                     <select
                       value={filterSchool}
                       onChange={(e) => setFilterSchool(e.target.value)}
@@ -4496,8 +4557,8 @@ export const KeuanganView: React.FC<KeuanganViewProps> = ({
                     </select>
                   </div>
 
-                  {/* 5. Filter Bulan Pembayaran (Disembunyikan pada Mobile) */}
-                  <div className="hidden sm:block sm:flex-initial sm:w-44">
+                  {/* 5. Filter Bulan Pembayaran */}
+                  <div className="flex-1 sm:flex-initial sm:w-44">
                     <select
                       value={filterMonth}
                       onChange={(e) => setFilterMonth(e.target.value)}
@@ -4546,6 +4607,7 @@ export const KeuanganView: React.FC<KeuanganViewProps> = ({
                       return p?.status === 'Lunas';
                     }).length;
                     const groupBelumCount = sortedTeachers.length - groupLunasCount;
+                    const groupPct = sortedTeachers.length > 0 ? Math.round((groupLunasCount / sortedTeachers.length) * 100) : 0;
 
                     return (
                       <div
@@ -4553,34 +4615,49 @@ export const KeuanganView: React.FC<KeuanganViewProps> = ({
                         className="p-5 sm:p-6 rounded-2xl bg-[#faf8f5] [.dark_&]:bg-stone-800/40 dark:bg-stone-800/40 border border-stone-200/80 [.dark_&]:border-stone-800 dark:border-stone-800 space-y-4"
                       >
                         {/* Header Kotak Pembungkus Bulan & Tahun */}
-                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-stone-200/80 [.dark_&]:border-stone-700/60 dark:border-stone-700/60 pb-3.5">
-                          <div className="flex items-center gap-2.5">
-                            <div className="w-8 h-8 rounded-xl bg-red-50 [.dark_&]:bg-red-950/70 dark:bg-red-950/70 border border-red-200 [.dark_&]:border-red-800/60 dark:border-red-800/60 text-red-800 [.dark_&]:text-amber-400 dark:text-amber-400 flex items-center justify-center shrink-0">
-                              <Calendar className="w-4 h-4" />
+                        <div className="space-y-3 border-b border-stone-200/80 [.dark_&]:border-stone-700/60 dark:border-stone-700/60 pb-3.5">
+                          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                            <div className="flex items-center gap-2.5">
+                              <div className="w-8 h-8 rounded-xl bg-red-50 [.dark_&]:bg-red-950/70 dark:bg-red-950/70 border border-red-200 [.dark_&]:border-red-800/60 dark:border-red-800/60 text-red-800 [.dark_&]:text-amber-400 dark:text-amber-400 flex items-center justify-center shrink-0">
+                                <Calendar className="w-4 h-4" />
+                              </div>
+                              <div>
+                                <h4 className="font-display text-base font-bold text-stone-900 [.dark_&]:text-white dark:text-white">
+                                  Kontribusi Kas Bulan {group.month.name} {currentYearItem}
+                                </h4>
+                                <p className="text-xs text-stone-500 [.dark_&]:text-stone-400 dark:text-stone-400 font-medium">
+                                  Rekapitulasi Pembayaran Bulan {group.month.name} Tahun {currentYearItem}
+                                </p>
+                              </div>
                             </div>
-                            <div>
-                              <h4 className="font-display text-base font-bold text-stone-900 [.dark_&]:text-white dark:text-white">
-                                Kontribusi Kas Bulan {group.month.name} {currentYearItem}
-                              </h4>
-                              <p className="text-xs text-stone-500 [.dark_&]:text-stone-400 dark:text-stone-400 font-medium">
-                                Rekapitulasi Pembayaran Bulan {group.month.name} Tahun {currentYearItem}
-                              </p>
+
+                            {/* Badges Jumlah Pengurus, Anggota, Sudah Bayar, dan Belum Bayar */}
+                            <div className="grid grid-cols-2 sm:flex sm:items-center gap-1.5 w-full sm:w-auto">
+                              <span className="text-xs font-bold px-3 py-1 rounded-lg bg-amber-100/80 [.dark_&]:bg-amber-950/60 dark:bg-amber-950/60 text-amber-800 [.dark_&]:text-amber-300 dark:text-amber-300 border border-amber-200/70 [.dark_&]:border-amber-800/40 dark:border-amber-800/40 text-center flex items-center justify-center">
+                                Pengurus ({pengurusTeachers.length})
+                              </span>
+                              <span className="text-xs font-bold px-3 py-1 rounded-lg bg-stone-200/70 [.dark_&]:bg-stone-800 dark:bg-stone-800 text-stone-700 [.dark_&]:text-stone-300 dark:text-stone-300 border border-stone-300/60 [.dark_&]:border-stone-700 dark:border-stone-700 text-center flex items-center justify-center">
+                                Anggota ({sortedTeachers.length})
+                              </span>
+                              <span className="text-xs font-bold px-3 py-1 rounded-lg bg-emerald-100/70 [.dark_&]:bg-emerald-950/70 dark:bg-emerald-950/70 text-emerald-700 [.dark_&]:text-emerald-300 dark:text-emerald-300 border border-emerald-200/50 [.dark_&]:border-emerald-800/40 dark:border-emerald-800/40 text-center flex items-center justify-center">
+                                Sudah Bayar ({groupLunasCount})
+                              </span>
+                              <span className="text-xs font-bold px-3 py-1 rounded-lg bg-red-100/70 [.dark_&]:bg-red-950/70 dark:bg-red-950/70 text-red-700 [.dark_&]:text-red-300 dark:text-red-300 border border-red-200/50 [.dark_&]:border-red-800/40 dark:border-red-800/40 text-center flex items-center justify-center">
+                                Belum Bayar ({groupBelumCount})
+                              </span>
                             </div>
                           </div>
 
-                          {/* Badges Jumlah Pengurus, Anggota, Sudah Bayar, dan Belum Bayar */}
-                          <div className="grid grid-cols-2 sm:flex sm:items-center gap-1.5 w-full sm:w-auto">
-                            <span className="text-xs font-bold px-3 py-1 rounded-lg bg-amber-100/80 [.dark_&]:bg-amber-950/60 dark:bg-amber-950/60 text-amber-800 [.dark_&]:text-amber-300 dark:text-amber-300 border border-amber-200/70 [.dark_&]:border-amber-800/40 dark:border-amber-800/40 text-center flex items-center justify-center">
-                              Pengurus ({pengurusTeachers.length})
-                            </span>
-                            <span className="text-xs font-bold px-3 py-1 rounded-lg bg-stone-200/70 [.dark_&]:bg-stone-800 dark:bg-stone-800 text-stone-700 [.dark_&]:text-stone-300 dark:text-stone-300 border border-stone-300/60 [.dark_&]:border-stone-700 dark:border-stone-700 text-center flex items-center justify-center">
-                              Anggota ({sortedTeachers.length})
-                            </span>
-                            <span className="text-xs font-bold px-3 py-1 rounded-lg bg-emerald-100/70 [.dark_&]:bg-emerald-950/70 dark:bg-emerald-950/70 text-emerald-700 [.dark_&]:text-emerald-300 dark:text-emerald-300 border border-emerald-200/50 [.dark_&]:border-emerald-800/40 dark:border-emerald-800/40 text-center flex items-center justify-center">
-                              Sudah Bayar ({groupLunasCount})
-                            </span>
-                            <span className="text-xs font-bold px-3 py-1 rounded-lg bg-red-100/70 [.dark_&]:bg-red-950/70 dark:bg-red-950/70 text-red-700 [.dark_&]:text-red-300 dark:text-red-300 border border-red-200/50 [.dark_&]:border-red-800/40 dark:border-red-800/40 text-center flex items-center justify-center">
-                              Belum Bayar ({groupBelumCount})
+                          {/* Batang Progres Pelunasan Bulan */}
+                          <div className="flex items-center gap-2.5">
+                            <div className="flex-1 h-1.5 rounded-full bg-stone-200/90 [.dark_&]:bg-stone-700/70 dark:bg-stone-700/70 overflow-hidden">
+                              <div
+                                className="h-full rounded-full bg-gradient-to-r from-emerald-500 to-emerald-600 transition-all duration-500 ease-out"
+                                style={{ width: `${groupPct}%` }}
+                              />
+                            </div>
+                            <span className="text-[11px] font-mono font-bold text-stone-600 [.dark_&]:text-stone-300 dark:text-stone-300 shrink-0">
+                              {groupPct}% Lunas
                             </span>
                           </div>
                         </div>
@@ -4595,7 +4672,7 @@ export const KeuanganView: React.FC<KeuanganViewProps> = ({
                             return (
                               <div
                                 key={`${teacher.id}-${year}-${month.id}`}
-                                className={`p-4 rounded-xl border transition-all duration-200 flex items-center justify-between gap-3 ${isLunas
+                                className={`p-4 rounded-xl border transition-all duration-300 flex items-center justify-between gap-3 hover:-translate-y-0.5 hover:shadow-sm ${isLunas
                                   ? 'bg-emerald-50/50 border-emerald-200/70 [.dark_&]:bg-emerald-950/25 dark:bg-emerald-950/25 [.dark_&]:border-emerald-800/50 dark:border-emerald-800/50 shadow-xs'
                                   : 'bg-white [.dark_&]:bg-stone-900 dark:bg-stone-900 border-stone-200/80 [.dark_&]:border-stone-800 dark:border-stone-800 hover:border-red-300 [.dark_&]:hover:border-red-900/60 dark:hover:border-red-900/60'
                                   }`}
@@ -4623,7 +4700,10 @@ export const KeuanganView: React.FC<KeuanganViewProps> = ({
                                   {isLunas && payment && (
                                     <button
                                       type="button"
-                                      onClick={() => setReceiptPreviewTarget({ teacher, month, year, payment })}
+                                      onClick={() => {
+                                        setIsClosingReceiptPreview(false);
+                                        setReceiptPreviewTarget({ teacher, month, year, payment });
+                                      }}
                                       title="Lihat & Unduh Kuitansi Digital"
                                       className="w-8 h-8 flex items-center justify-center rounded-xl bg-amber-100/80 hover:bg-amber-200/80 text-amber-800 [.dark_&]:bg-amber-500/20 dark:bg-amber-500/20 [.dark_&]:hover:bg-amber-500/30 dark:hover:bg-amber-500/30 [.dark_&]:text-amber-300 dark:text-amber-300 border border-amber-200/70 [.dark_&]:border-amber-700/40 dark:border-amber-700/40 transition-all cursor-pointer active:scale-95"
                                     >
@@ -4631,7 +4711,7 @@ export const KeuanganView: React.FC<KeuanganViewProps> = ({
                                     </button>
                                   )}
 
-                                  <span className={`hidden sm:inline-block text-[10px] font-bold px-2 py-0.5 rounded-md ${isLunas
+                                  <span className={`hidden sm:inline-block text-[10px] font-bold px-2 py-0.5 rounded-md transition-colors duration-300 ${isLunas
                                     ? 'bg-emerald-100/70 text-emerald-700 dark:bg-emerald-950/70 dark:text-emerald-300'
                                     : 'bg-red-100/70 text-red-700 dark:bg-red-950/70 dark:text-red-300'
                                     }`}>
@@ -4639,14 +4719,14 @@ export const KeuanganView: React.FC<KeuanganViewProps> = ({
                                   </span>
 
                                   <div
-                                    className={`w-8 h-8 flex items-center justify-center rounded-xl transition-all duration-200 ${isLunas
-                                      ? 'bg-emerald-100 text-emerald-700 [.dark_&]:bg-emerald-500/20 dark:bg-emerald-500/20 [.dark_&]:text-emerald-400 dark:text-emerald-400'
+                                    className={`w-8 h-8 flex items-center justify-center rounded-xl transition-all duration-300 ${isLunas
+                                      ? 'bg-emerald-100 text-emerald-700 [.dark_&]:bg-emerald-500/20 dark:bg-emerald-500/20 [.dark_&]:text-emerald-400 dark:text-emerald-400 scale-100'
                                       : 'bg-red-100 text-red-700 [.dark_&]:bg-red-950/70 dark:bg-red-950/70 [.dark_&]:text-red-400 dark:text-red-400'
                                       }`}
                                     title={isLunas ? 'Sudah Bayar' : 'Belum Bayar'}
                                   >
                                     {isLunas ? (
-                                      <CheckCircle className="w-4 h-4" />
+                                      <CheckCircle className="w-4 h-4 transition-transform duration-300 scale-105" />
                                     ) : (
                                       <X className="w-4 h-4 stroke-[2.5]" />
                                     )}
@@ -4984,7 +5064,7 @@ export const KeuanganView: React.FC<KeuanganViewProps> = ({
 
             {/* Panel Seleksi Pengurus dari ProfilKBView (Collapsible) */}
             {isSelectingPengurus && (
-              <div className="p-3.5 rounded-2xl bg-amber-50/60 [.dark_&]:bg-amber-950/25 dark:bg-amber-950/25 border border-amber-200/80 [.dark_&]:border-amber-800/50 dark:border-amber-800/50 space-y-2.5 animate-in fade-in duration-200">
+              <div className="p-3.5 rounded-2xl bg-amber-50/60 [.dark_&]:bg-amber-950/25 dark:bg-amber-950/25 border border-amber-200/80 [.dark_&]:border-amber-800/50 dark:border-amber-800/50 space-y-2.5 animate-panel-in">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <p className="text-[11px] font-bold text-amber-900 [.dark_&]:text-amber-300 dark:text-amber-300 flex items-center gap-1.5">
                     <UserCheck className="w-3.5 h-3.5" />
@@ -5227,24 +5307,23 @@ export const KeuanganView: React.FC<KeuanganViewProps> = ({
             </div>
 
             <form onSubmit={handleSaveTransaction} className="space-y-4 text-xs sm:text-sm">
+              {/* Baris 1: Tanggal & Jenis Transaksi */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
-                  <label className="block font-bold text-stone-700 [.dark_&]:text-stone-300 dark:text-stone-300 mb-1">
-                    Pos Anggaran / Kategori PGRI
+                  <label className="block text-center font-bold text-stone-700 [.dark_&]:text-stone-300 dark:text-stone-300 mb-1">
+                    Tanggal Transaksi *
                   </label>
-                  <select
-                    value={formData.category}
-                    onChange={(e) => setFormData({ ...formData, category: e.target.value as NonNullable<FinancialTransaction['category']> })}
-                    className="w-full px-4 py-2.5 rounded-xl bg-[#faf8f5] [.dark_&]:bg-stone-800 dark:bg-stone-800 border border-stone-200 [.dark_&]:border-stone-700 dark:border-stone-700 text-stone-800 [.dark_&]:text-stone-100 dark:text-stone-100 font-medium focus:outline-none focus:ring-2 focus:ring-red-800/20 focus:border-red-700"
-                  >
-                    {POS_ANGGARAN_OPTIONS.map((opt) => (
-                      <option key={opt} value={opt}>{opt}</option>
-                    ))}
-                  </select>
+                  <input
+                    type="date"
+                    required
+                    value={formData.date}
+                    onChange={(e) => setFormData({ ...formData, date: e.target.value })}
+                    className="w-full px-4 py-2.5 rounded-xl bg-[#faf8f5] [.dark_&]:bg-stone-800 dark:bg-stone-800 border border-stone-200 [.dark_&]:border-stone-700 dark:border-stone-700 text-stone-800 [.dark_&]:text-stone-100 dark:text-stone-100 font-medium focus:outline-none focus:ring-2 focus:ring-red-800/20 focus:border-red-700 [color-scheme:light] [.dark_&]:[color-scheme:dark] dark:[color-scheme:dark]"
+                  />
                 </div>
 
                 <div>
-                  <label className="block font-bold text-stone-700 [.dark_&]:text-stone-300 dark:text-stone-300 mb-1">
+                  <label className="block text-center font-bold text-stone-700 [.dark_&]:text-stone-300 dark:text-stone-300 mb-1">
                     Jenis Transaksi *
                   </label>
                   <select
@@ -5258,22 +5337,68 @@ export const KeuanganView: React.FC<KeuanganViewProps> = ({
                 </div>
               </div>
 
+              {/* Baris 2: Pos Anggaran & Uraian */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
-                  <label className="block font-bold text-stone-700 [.dark_&]:text-stone-300 dark:text-stone-300 mb-1">
-                    Tanggal Transaksi *
+                  <label className="block text-center font-bold text-stone-700 [.dark_&]:text-stone-300 dark:text-stone-300 mb-1">
+                    Kategori Anggaran
+                  </label>
+                  <select
+                    value={formData.category}
+                    onChange={(e) => setFormData({ ...formData, category: e.target.value as NonNullable<FinancialTransaction['category']> })}
+                    className="w-full px-4 py-2.5 rounded-xl bg-[#faf8f5] [.dark_&]:bg-stone-800 dark:bg-stone-800 border border-stone-200 [.dark_&]:border-stone-700 dark:border-stone-700 text-stone-800 [.dark_&]:text-stone-100 dark:text-stone-100 font-medium focus:outline-none focus:ring-2 focus:ring-red-800/20 focus:border-red-700"
+                  >
+                    {POS_ANGGARAN_OPTIONS.map((opt) => (
+                      <option key={opt} value={opt}>{opt}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-center font-bold text-stone-700 [.dark_&]:text-stone-300 dark:text-stone-300 mb-1">
+                    Uraian *
                   </label>
                   <input
-                    type="date"
+                    type="text"
                     required
-                    value={formData.date}
-                    onChange={(e) => setFormData({ ...formData, date: e.target.value })}
-                    className="w-full px-4 py-2.5 rounded-xl bg-[#faf8f5] [.dark_&]:bg-stone-800 dark:bg-stone-800 border border-stone-200 [.dark_&]:border-stone-700 dark:border-stone-700 text-stone-800 [.dark_&]:text-stone-100 dark:text-stone-100 font-medium focus:outline-none focus:ring-2 focus:ring-red-800/20 focus:border-red-700 [color-scheme:light] [.dark_&]:[color-scheme:dark] dark:[color-scheme:dark]"
+                    value={formData.description}
+                    onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+                    placeholder="Contoh: Membeli Air Mineral"
+                    className="w-full px-4 py-2.5 rounded-xl bg-[#faf8f5] [.dark_&]:bg-stone-800 dark:bg-stone-800 border border-stone-200 [.dark_&]:border-stone-700 dark:border-stone-700 text-stone-800 [.dark_&]:text-stone-100 dark:text-stone-100 font-medium focus:outline-none focus:ring-2 focus:ring-red-800/20 focus:border-red-700"
+                  />
+                </div>
+              </div>
+
+              {/* Baris 3: Volume, Satuan, Nominal */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div>
+                  <label className="block text-center font-bold text-stone-700 [.dark_&]:text-stone-300 dark:text-stone-300 mb-1">
+                    Volume
+                  </label>
+                  <input
+                    type="text"
+                    value={formData.volume}
+                    onChange={(e) => setFormData({ ...formData, volume: e.target.value })}
+                    placeholder="Contoh: 3"
+                    className="w-full px-4 py-2.5 rounded-xl bg-[#faf8f5] [.dark_&]:bg-stone-800 dark:bg-stone-800 border border-stone-200 [.dark_&]:border-stone-700 dark:border-stone-700 text-stone-800 [.dark_&]:text-stone-100 dark:text-stone-100 font-medium focus:outline-none focus:ring-2 focus:ring-red-800/20 focus:border-red-700"
                   />
                 </div>
 
                 <div>
-                  <label className="block font-bold text-stone-700 [.dark_&]:text-stone-300 dark:text-stone-300 mb-1">
+                  <label className="block text-center font-bold text-stone-700 [.dark_&]:text-stone-300 dark:text-stone-300 mb-1">
+                    Satuan
+                  </label>
+                  <input
+                    type="text"
+                    value={formData.satuan}
+                    onChange={(e) => setFormData({ ...formData, satuan: e.target.value })}
+                    placeholder="Contoh: Dus / Pcs"
+                    className="w-full px-4 py-2.5 rounded-xl bg-[#faf8f5] [.dark_&]:bg-stone-800 dark:bg-stone-800 border border-stone-200 [.dark_&]:border-stone-700 dark:border-stone-700 text-stone-800 [.dark_&]:text-stone-100 dark:text-stone-100 font-medium focus:outline-none focus:ring-2 focus:ring-red-800/20 focus:border-red-700"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-center font-bold text-stone-700 [.dark_&]:text-stone-300 dark:text-stone-300 mb-1">
                     Nominal (Rp) *
                   </label>
                   <input
@@ -5295,51 +5420,41 @@ export const KeuanganView: React.FC<KeuanganViewProps> = ({
                 </div>
               </div>
 
-              <div>
-                <label className="block font-bold text-stone-700 [.dark_&]:text-stone-300 dark:text-stone-300 mb-1">
-                  Uraian *
-                </label>
-                <input
-                  type="text"
-                  required
-                  value={formData.description}
-                  onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-                  placeholder="Contoh: Membeli Air Mineral / Kontribusi Anggota"
-                  className="w-full px-4 py-2.5 rounded-xl bg-[#faf8f5] [.dark_&]:bg-stone-800 dark:bg-stone-800 border border-stone-200 [.dark_&]:border-stone-700 dark:border-stone-700 text-stone-800 [.dark_&]:text-stone-100 dark:text-stone-100 font-medium focus:outline-none focus:ring-2 focus:ring-red-800/20 focus:border-red-700"
-                />
-              </div>
+              {/* Baris 4: Total (sejajar kolom Volume) & Teks Terbilang (batas kiri sejajar kolom Satuan) */}
+              {(() => {
+                const nominalVal = parseInt(formData.amount.replace(/[^0-9]/g, ''), 10) || 0;
+                const volRaw = formData.volume.trim();
+                const volParsed = volRaw ? parseFloat(volRaw.replace(',', '.')) : 1;
+                const effectiveVol = !isNaN(volParsed) && volParsed > 0 ? volParsed : 1;
+                const totalComputed = nominalVal > 0 ? Math.round(nominalVal * effectiveVol) : 0;
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label className="block font-bold text-stone-700 [.dark_&]:text-stone-300 dark:text-stone-300 mb-1">
-                    Volume
-                  </label>
-                  <input
-                    type="text"
-                    value={formData.volume}
-                    onChange={(e) => setFormData({ ...formData, volume: e.target.value })}
-                    placeholder="Contoh: 3"
-                    className="w-full px-4 py-2.5 rounded-xl bg-[#faf8f5] [.dark_&]:bg-stone-800 dark:bg-stone-800 border border-stone-200 [.dark_&]:border-stone-700 dark:border-stone-700 text-stone-800 [.dark_&]:text-stone-100 dark:text-stone-100 font-medium focus:outline-none focus:ring-2 focus:ring-red-800/20 focus:border-red-700"
-                  />
-                </div>
+                return (
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 items-end">
+                    <div>
+                      <label className="block text-center font-bold text-stone-700 [.dark_&]:text-stone-300 dark:text-stone-300 mb-1">
+                        Total (Rp)
+                      </label>
+                      <input
+                        type="text"
+                        readOnly
+                        disabled
+                        value={totalComputed > 0 ? `Rp. ${totalComputed.toLocaleString('id-ID')}` : 'Rp. 0'}
+                        className="w-full px-4 py-2.5 rounded-xl bg-stone-100/90 [.dark_&]:bg-stone-800/60 dark:bg-stone-800/60 border border-stone-200 [.dark_&]:border-stone-700/70 dark:border-stone-700/70 text-stone-900 [.dark_&]:text-amber-300 dark:text-amber-300 font-bold font-mono cursor-not-allowed select-none"
+                      />
+                    </div>
 
-                <div>
-                  <label className="block font-bold text-stone-700 [.dark_&]:text-stone-300 dark:text-stone-300 mb-1">
-                    Satuan
-                  </label>
-                  <input
-                    type="text"
-                    value={formData.satuan}
-                    onChange={(e) => setFormData({ ...formData, satuan: e.target.value })}
-                    placeholder="Contoh: Dus / Pcs / Buah"
-                    className="w-full px-4 py-2.5 rounded-xl bg-[#faf8f5] [.dark_&]:bg-stone-800 dark:bg-stone-800 border border-stone-200 [.dark_&]:border-stone-700 dark:border-stone-700 text-stone-800 [.dark_&]:text-stone-100 dark:text-stone-100 font-medium focus:outline-none focus:ring-2 focus:ring-red-800/20 focus:border-red-700"
-                  />
-                </div>
-              </div>
+                    <div className="sm:col-span-2 py-2.5 flex items-center">
+                      <p className="text-xs sm:text-sm italic font-medium text-stone-600 [.dark_&]:text-stone-300 dark:text-stone-300 leading-snug">
+                        {totalComputed > 0 ? formatTerbilangRupiah(totalComputed) : '(Nol rupiah)'}
+                      </p>
+                    </div>
+                  </div>
+                );
+              })()}
 
               <div>
                 <label className="block font-bold text-stone-700 [.dark_&]:text-stone-300 dark:text-stone-300 mb-1">
-                  Bukti Kwitansi / Nota (Opsional)
+                  Bukti Nota / Kuitansi (Opsional)
                 </label>
                 <div className="flex items-center gap-3">
                   <input
@@ -5463,8 +5578,11 @@ export const KeuanganView: React.FC<KeuanganViewProps> = ({
 
       {/* Modal Pratinjau Foto Kwitansi / Nota */}
       {previewReceiptUrl && (
-        <div className="fixed inset-0 z-[70] flex items-center justify-center p-4 bg-black/75 backdrop-blur-sm">
-          <div className="bg-white [.dark_&]:bg-stone-900 dark:bg-stone-900 rounded-2xl max-w-lg w-full p-5 border border-stone-200/90 [.dark_&]:border-stone-800 dark:border-stone-800 shadow-2xl space-y-4">
+        <div
+          onClick={(e) => { if (e.target === e.currentTarget) handleClosePreviewReceipt(); }}
+          className={`fixed inset-0 z-[70] flex items-center justify-center p-4 bg-black/75 backdrop-blur-sm ${isClosingPreviewReceipt ? 'modal-backdrop-exit' : 'animate-backdrop-fade'}`}
+        >
+          <div className={`bg-white [.dark_&]:bg-stone-900 dark:bg-stone-900 rounded-2xl max-w-lg w-full p-5 border border-stone-200/90 [.dark_&]:border-stone-800 dark:border-stone-800 shadow-2xl space-y-4 ${isClosingPreviewReceipt ? 'modal-content-exit' : 'animate-modal-pop'}`}>
             <div className="flex items-center justify-between">
               <h3 className="font-display font-bold text-sm text-stone-800 [.dark_&]:text-stone-100 dark:text-stone-100 flex items-center gap-2">
                 <ImageIcon className="w-4 h-4 text-red-800 [.dark_&]:text-amber-400 dark:text-amber-400" />
@@ -5472,8 +5590,8 @@ export const KeuanganView: React.FC<KeuanganViewProps> = ({
               </h3>
               <button
                 type="button"
-                onClick={() => setPreviewReceiptUrl(null)}
-                className="p-1.5 rounded-xl hover:bg-stone-100 [.dark_&]:hover:bg-stone-800 dark:hover:bg-stone-800 text-stone-400 cursor-pointer"
+                onClick={handleClosePreviewReceipt}
+                className="p-1.5 rounded-xl hover:bg-stone-100 [.dark_&]:hover:bg-stone-800 dark:hover:bg-stone-800 text-stone-400 transition-colors cursor-pointer"
               >
                 <X className="w-4 h-4" />
               </button>
@@ -5487,8 +5605,11 @@ export const KeuanganView: React.FC<KeuanganViewProps> = ({
 
       {/* Modal Rekap Tunggakan per Sekolah & Pengingat WA Koordinator */}
       {isRekapSekolahOpen && (
-        <div className="fixed inset-0 z-[70] flex items-center justify-center p-4 bg-black/75 backdrop-blur-sm animate-backdrop-fade">
-          <div className="bg-white [.dark_&]:bg-stone-900 dark:bg-stone-900 rounded-2xl max-w-2xl w-full p-6 border border-stone-200/90 [.dark_&]:border-stone-800 dark:border-stone-800 shadow-2xl space-y-4 max-h-[85vh] flex flex-col animate-modal-pop">
+        <div
+          onClick={(e) => { if (e.target === e.currentTarget) handleCloseRekapSekolah(); }}
+          className={`fixed inset-0 z-[70] flex items-center justify-center p-4 bg-black/75 backdrop-blur-sm ${isClosingRekapSekolah ? 'modal-backdrop-exit' : 'animate-backdrop-fade'}`}
+        >
+          <div className={`bg-white [.dark_&]:bg-stone-900 dark:bg-stone-900 rounded-2xl max-w-2xl w-full p-6 border border-stone-200/90 [.dark_&]:border-stone-800 dark:border-stone-800 shadow-2xl space-y-4 max-h-[85vh] flex flex-col ${isClosingRekapSekolah ? 'modal-content-exit' : 'animate-modal-pop'}`}>
             <div className="flex items-center justify-between border-b border-stone-200/80 [.dark_&]:border-stone-800 dark:border-stone-800 pb-3">
               <div className="flex items-center gap-2.5">
                 <div className="w-9 h-9 rounded-xl bg-emerald-50 [.dark_&]:bg-emerald-950/60 dark:bg-emerald-950/60 border border-emerald-200 [.dark_&]:border-emerald-800/60 dark:border-emerald-800/60 text-emerald-700 [.dark_&]:text-emerald-400 dark:text-emerald-400 flex items-center justify-center">
@@ -5505,7 +5626,7 @@ export const KeuanganView: React.FC<KeuanganViewProps> = ({
               </div>
               <button
                 type="button"
-                onClick={() => setIsRekapSekolahOpen(false)}
+                onClick={handleCloseRekapSekolah}
                 className="p-1.5 rounded-xl hover:bg-stone-100 [.dark_&]:hover:bg-stone-800 dark:hover:bg-stone-800 text-stone-400 cursor-pointer transition-colors"
               >
                 <X className="w-5 h-5" />
@@ -5548,7 +5669,7 @@ export const KeuanganView: React.FC<KeuanganViewProps> = ({
                 const monthLabel = MONTH_OPTIONS.find((m) => m.id === rekapMonth)?.name || rekapMonth;
                 const pct = grp.total > 0 ? Math.round((grp.paid.length / grp.total) * 100) : 0;
                 return (
-                  <div key={grp.school} className="p-4 rounded-2xl border border-stone-200/80 [.dark_&]:border-stone-800 dark:border-stone-800 bg-[#faf8f5] [.dark_&]:bg-stone-800/60 dark:bg-stone-800/60 space-y-2">
+                  <div key={grp.school} className="p-4 rounded-2xl border border-stone-200/80 [.dark_&]:border-stone-800 dark:border-stone-800 bg-[#faf8f5] [.dark_&]:bg-stone-800/60 dark:bg-stone-800/60 space-y-2.5">
                     <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                       <div>
                         <h4 className="font-bold text-sm text-stone-900 [.dark_&]:text-stone-100 dark:text-stone-100">{grp.school}</h4>
@@ -5595,6 +5716,12 @@ export const KeuanganView: React.FC<KeuanganViewProps> = ({
                         </button>
                       </div>
                     </div>
+                    <div className="h-1.5 w-full rounded-full bg-stone-200/90 [.dark_&]:bg-stone-700/70 dark:bg-stone-700/70 overflow-hidden">
+                      <div
+                        className={`h-full rounded-full transition-all duration-500 ease-out ${pct === 100 ? 'bg-emerald-500' : 'bg-gradient-to-r from-amber-500 to-emerald-500'}`}
+                        style={{ width: `${pct}%` }}
+                      />
+                    </div>
                     {grp.unpaid.length > 0 && (
                       <p className="text-[11px] text-red-600/90 [.dark_&]:text-red-400/90 dark:text-red-400/90 leading-relaxed">
                         Belum bayar: {grp.unpaid.map((t) => t.name).join(', ')}
@@ -5610,8 +5737,11 @@ export const KeuanganView: React.FC<KeuanganViewProps> = ({
 
       {/* Modal D2: Kuitansi Digital Pembayaran Kontribusi */}
       {receiptPreviewTarget && (
-        <div className="fixed inset-0 z-[75] flex items-center justify-center p-4 bg-black/75 backdrop-blur-sm animate-backdrop-fade">
-          <div className="bg-white [.dark_&]:bg-stone-900 dark:bg-stone-900 rounded-2xl max-w-lg w-full overflow-hidden border border-stone-200/90 [.dark_&]:border-stone-800 dark:border-stone-800 shadow-2xl animate-modal-pop">
+        <div
+          onClick={(e) => { if (e.target === e.currentTarget) handleCloseReceiptPreview(); }}
+          className={`fixed inset-0 z-[75] flex items-center justify-center p-4 bg-black/75 backdrop-blur-sm ${isClosingReceiptPreview ? 'modal-backdrop-exit' : 'animate-backdrop-fade'}`}
+        >
+          <div className={`bg-white [.dark_&]:bg-stone-900 dark:bg-stone-900 rounded-2xl max-w-lg w-full overflow-hidden border border-stone-200/90 [.dark_&]:border-stone-800 dark:border-stone-800 shadow-2xl ${isClosingReceiptPreview ? 'modal-content-exit' : 'animate-modal-pop'}`}>
             {/* Header Kuitansi Crimson-Gold */}
             <div className="bg-gradient-to-r from-red-900 via-red-800 to-red-900 px-6 py-4 border-b-2 border-amber-500 flex items-center justify-between text-white">
               <div className="flex items-center gap-3">
@@ -5627,7 +5757,7 @@ export const KeuanganView: React.FC<KeuanganViewProps> = ({
               </div>
               <button
                 type="button"
-                onClick={() => setReceiptPreviewTarget(null)}
+                onClick={handleCloseReceiptPreview}
                 className="p-1.5 rounded-xl hover:bg-white/15 text-white/80 hover:text-white transition-colors cursor-pointer"
               >
                 <X className="w-5 h-5" />

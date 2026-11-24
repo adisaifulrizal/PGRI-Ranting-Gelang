@@ -171,6 +171,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
       setIsPengaturanOpen(false);
     } else if (activeTab === 'pengaturan') {
       setIsPengaturanOpen(true);
+    } else {
+      setIsPengaturanOpen(false);
     }
   }, [canSeePengaturan, activeTab]);
 
@@ -427,6 +429,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
       setLockedMenuName(label);
       setShowLockedModal(true);
       return;
+    }
+    if (id !== 'pengaturan') {
+      setIsPengaturanOpen(false);
     }
     onTabChange(id);
     onCloseMobile();

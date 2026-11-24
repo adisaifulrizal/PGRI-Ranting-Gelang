@@ -94,13 +94,35 @@
         };
       })();
     </script>
+    <style>
+      @keyframes pgriPrebootSpin {
+        to { transform: rotate(360deg); }
+      }
+      @keyframes pgriPrebootFadeUp {
+        from { opacity: 0; transform: translateY(8px); }
+        to { opacity: 1; transform: translateY(0); }
+      }
+      .pgri-preboot-spinner {
+        width: 28px;
+        height: 28px;
+        border-radius: 9999px;
+        border: 2.5px solid rgba(251, 191, 36, 0.22);
+        border-top-color: #fbbf24;
+        animation: pgriPrebootSpin 0.85s linear infinite;
+        margin-bottom: 14px;
+      }
+      .pgri-recovery-enter {
+        animation: pgriPrebootFadeUp 0.35s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+      }
+    </style>
   </head>
   <body style="margin:0;background:#2b1012;color:#fef3c7;font-family:system-ui,-apple-system,sans-serif;">
     <div id="root">
       <div id="pgri-preboot" style="min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:24px;text-align:center;">
+        <div class="pgri-preboot-spinner" aria-hidden="true"></div>
         <p style="font-size:12px;letter-spacing:0.18em;text-transform:uppercase;font-weight:700;color:#fbbf24;margin:0 0 8px;">PGRI Ranting Gelang</p>
         <p style="font-size:15px;font-weight:600;color:#fffbeb;margin:0;">Menyiapkan aplikasi...</p>
-        <div id="pgri-preboot-recovery" style="display:none;position:relative;z-index:20;margin-top:20px;max-width:390px;background:rgba(255,255,255,0.08);border:1px solid rgba(251,191,36,0.35);border-radius:14px;padding:16px;">
+        <div id="pgri-preboot-recovery" class="pgri-recovery-enter" style="display:none;position:relative;z-index:20;margin-top:20px;max-width:390px;background:rgba(255,255,255,0.08);border:1px solid rgba(251,191,36,0.35);border-radius:14px;padding:16px;">
           <p id="pgri-preboot-msg" style="font-size:13px;line-height:1.5;color:#fde68a;margin:0 0 12px;">
             Aplikasi membutuhkan penyegaran cache browser agar dapat dimuat dengan normal. Tunggu beberapa detik lalu klik tombol di bawah.
           </p>

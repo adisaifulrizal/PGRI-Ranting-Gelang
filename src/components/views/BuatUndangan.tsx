@@ -27,7 +27,8 @@ import {
   Hash,
   ExternalLink,
   Calendar,
-  MapPin
+  MapPin,
+  ShieldCheck
 } from 'lucide-react';
 import { doc, getDoc, getDocFromServer } from 'firebase/firestore';
 import { auth, db } from '../../lib/firebase';
@@ -545,8 +546,17 @@ export const buildAutoLetterNumber = (codeType: 'Und' | 'ST' | 'BA', existingCou
   return `${seq}/${codeType}/${cfg.letterCodePrefix}/${roman}/${now.getFullYear()}`;
 };
 
+export interface PengawasUjianRow {
+  id: string;
+  teacherId?: string;
+  namaPengawas: string;
+  nipNpa: string;
+  asalSekolah: string;
+  tempatMengawas: string;
+}
+
 interface EOfficeProps {
-  mode: 'surat_tugas' | 'agenda_surat' | 'notulen';
+  mode: 'surat_tugas' | 'pengawas_ujian' | 'agenda_surat' | 'notulen';
   isAdmin: boolean;
   isDark: boolean;
   teachers: Teacher[];
@@ -788,6 +798,241 @@ export const EOfficeSubPanels: React.FC<EOfficeProps> = ({
     await safeDownloadBlob(blob, `Surat_Tugas_${stNomor.replace(/[^a-zA-Z0-9]/g, '_')}.html`);
     logAuditEvent('E-Office', 'Cetak Surat Tugas', `Menerbitkan Surat Tugas No. ${stNomor} (${selectedDelegates.length} delegasi).`);
     onNotice('success', 'File Surat Tugas berhasil diunduh (buka di browser lalu Ctrl+P untuk simpan PDF).');
+  };
+
+  // =========================================================================
+  // 1B. PENGAWAS UJIAN (SILANG ANTAR SEKOLAH)
+  // =========================================================================
+  const [puNomor, setPuNomor] = useState(() => buildAutoLetterNumber('ST', 0));
+  const [puNamaUjian, setPuNamaUjian] = useState('Sumatif Akhir Semester (SAS) Ganjil Tahun Pelajaran 2026/2027');
+  const [puDasar, setPuDasar] = useState(
+    'Hasil musyawarah Pengurus PGRI Ranting Gelang dan Kepala Sekolah tentang pelaksanaan pengawas ujian silang antar sekolah di PGRI Ranting Gelang.'
+  );
+  const [puHari, setPuHari] = useState('Senin - Sabtu');
+  const [puTanggalPelaksanaan, setPuTanggalPelaksanaan] = useState('30 November 2026 - 05 Desember 2026');
+  const [puWaktu, setPuWaktu] = useState('07.30 WIB - Selesai');
+  const [puSelectedTeacherId, setPuSelectedTeacherId] = useState('');
+  const [puRows, setPuRows] = useState<PengawasUjianRow[]>([]);
+  const [puTembusanList, setPuTembusanList] = useState<string[]>([
+    'Pengawas Bina Kecamatan Sumberbaru',
+    'Ketua K3S Kecamatan Sumberbaru',
+    'Kepala SD Negeri / Swasta Se-Ranting Gelang',
+    'Arsip'
+  ]);
+
+  const schoolOptions = useMemo(() => {
+    const set = new Set<string>();
+    teachers.forEach((t) => {
+      if (t.school && t.school.trim()) set.add(t.school.trim());
+    });
+    return Array.from(set).sort();
+  }, [teachers]);
+
+  const handleAddPengawasFromTeacher = () => {
+    const t = teachers.find((x) => x.id === puSelectedTeacherId);
+    if (!t) return;
+    setPuRows((prev) => [
+      ...prev,
+      {
+        id: `pu-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        teacherId: t.id,
+        namaPengawas: t.name,
+        nipNpa: (t as any).npa || t.nip || '-',
+        asalSekolah: t.school || '-',
+        tempatMengawas: ''
+      }
+    ]);
+    setPuSelectedTeacherId('');
+  };
+
+  const handleAddPengawasManual = () => {
+    setPuRows((prev) => [
+      ...prev,
+      {
+        id: `pu-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        namaPengawas: '',
+        nipNpa: '-',
+        asalSekolah: '',
+        tempatMengawas: ''
+      }
+    ]);
+  };
+
+  const updatePuRow = (id: string, field: keyof PengawasUjianRow, value: string) => {
+    setPuRows((prev) => prev.map((r) => (r.id === id ? { ...r, [field]: value } : r)));
+  };
+
+  const removePuRow = (id: string) => {
+    setPuRows((prev) => prev.filter((r) => r.id !== id));
+  };
+
+  const buildPengawasUjianHtml = () => {
+    const logoPgri = localStorage.getItem('logo-pgri') || localStorage.getItem('logo-kombel') || '';
+    const ttdKetua = localStorage.getItem('ttd-ketua') || '';
+    const ttdKetuaScale = Math.max(0.3, Math.min(2.5, (Number(localStorage.getItem('ttd-ketua-size')) || 100) / 100));
+    const stempel = localStorage.getItem('logo-stempel') || '';
+    const stempelScale = Math.max(0.3, Math.min(2.5, (Number(localStorage.getItem('logo-stempel-size')) || 100) / 100));
+    const stempelRotation = Number(localStorage.getItem('logo-stempel-rotation')) || 0;
+    const namaKetua = (orgConfig as any).ketuaName || localStorage.getItem('pgri-ketua-name') || 'UMAR ALI KUSUMA';
+    const npaKetua = (orgConfig as any).ketuaNpa || localStorage.getItem('pgri-ketua-npa') || '13301500431';
+    const todayStr = new Date().toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' });
+
+    const puTembusanItemsHtml = (puTembusanList || [])
+      .filter((item) => item.trim() !== '')
+      .map((item, idx) => `<div>${idx + 1}. ${escapeHtml(item)}</div>`)
+      .join('');
+
+    const verifyText = `SURAT TUGAS PENGAWAS UJIAN SILANG PGRI RANTING GELANG | No: ${puNomor} | Kegiatan: ${puNamaUjian}`;
+    const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=140x140&data=${encodeURIComponent(verifyText)}`;
+
+    return `<!DOCTYPE html><html lang="id"><head><meta charset="UTF-8"><title>Surat Tugas Pengawas Ujian ${escapeHtml(puNomor)}</title>
+      <style>
+        @page { size: A4 portrait; margin: 0; }
+        * { box-sizing: border-box; }
+        html, body { margin: 0; padding: 0; background: transparent; }
+        .sheet-a4 {
+          width: 210mm;
+          min-height: 297mm;
+          margin: 0 auto;
+          background: #ffffff;
+          color: #000000;
+          padding: 14mm 18mm 14mm 18mm;
+          font-family: 'Times New Roman', Times, serif;
+          font-size: 11pt;
+          line-height: 1.45;
+          display: flex;
+          flex-direction: column;
+        }
+        .content-body { flex: 1; }
+        .kop { display: flex; align-items: center; gap: 14px; padding-bottom: 6px; position: relative; z-index: 2; font-family: 'Times New Roman', Times, serif; }
+        .kop-logo-wrap { width: 94px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; }
+        .kop-logo-wrap img { width: 92px; height: 92px; object-fit: contain; display: block; }
+        .kop-logo-placeholder { width: 92px; height: 92px; border: 1.5px dashed #94a3b8; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 9pt; color: #64748b; text-align: center; }
+        .kop-text { flex: 1; text-align: center; line-height: 1.18; color: #000000; padding-left: 8px; }
+        .kop-text .org-main { font-size: 13pt; font-weight: bold; text-transform: uppercase; letter-spacing: 0.3px; }
+        .kop-text .sub-org { font-size: 10.5pt; font-weight: bold; font-style: italic; margin-top: 1px; }
+        .kop-text .ranting-main { font-size: 16.5pt; font-weight: bold; text-transform: uppercase; letter-spacing: 0.5px; margin-top: 1px; }
+        .kop-text .wilayah { font-size: 12pt; font-weight: bold; text-transform: uppercase; letter-spacing: 0.3px; margin-top: 1px; }
+        .kop-text .sekretariat { font-size: 8.5pt; font-style: italic; margin-top: 2px; }
+        .kop-divider { border-top: 2px solid #000000; border-bottom: 1px solid #000000; height: 4px; margin-bottom: 16px; position: relative; z-index: 2; }
+        .title { text-align: center; margin: 10px 0 14px; }
+        .title h3 { margin: 0; font-size: 12.5pt; text-decoration: underline; letter-spacing: 0.8px; }
+        table.pengawas { width: 100%; border-collapse: collapse; margin: 10px 0 12px; font-size: 9.8pt; }
+        table.pengawas th, table.pengawas td { border: 1px solid #000; padding: 5px 7px; vertical-align: middle; }
+        table.pengawas th { background: #f3f4f6; text-align: center; font-weight: bold; }
+        .footer-wrap { margin-top: 18px; padding-top: 6px; }
+        .ttd-single-wrap { display: flex; justify-content: flex-end; }
+        .ttd-col { width: 240px; text-align: center; position: relative; }
+        .ttd-space { height: 64px; position: relative; display: flex; align-items: center; justify-content: center; }
+        .stempel-ketua { position: absolute; left: -34px; top: 50%; width: 96px; opacity: 0.88; mix-blend-mode: multiply; pointer-events: none; }
+        @media print {
+          html, body { background: #ffffff; }
+          .sheet-a4 { width: 210mm; min-height: 297mm; margin: 0; box-shadow: none; }
+        }
+      </style></head><body>
+      <div class="sheet-a4">
+        <div class="content-body">
+          <div class="kop">
+            <div class="kop-logo-wrap">
+              ${logoPgri ? `<img src="${logoPgri}" alt="Logo PGRI" />` : `<div class="kop-logo-placeholder">Logo<br/>PGRI</div>`}
+            </div>
+            <div class="kop-text">
+              <div class="org-main">${escapeHtml(orgConfig.kopOrganisasi)}</div>
+              <div class="sub-org">(Teachers Association Of Republic Indonesia)</div>
+              <div class="ranting-main">${escapeHtml(orgConfig.kopRanting)}</div>
+              <div class="wilayah">${escapeHtml(orgConfig.kopWilayah)}</div>
+              <div class="sekretariat">${escapeHtml(orgConfig.kopSekretariat)}</div>
+            </div>
+          </div>
+          <div class="kop-divider"></div>
+          <div class="title">
+            <h3>SURAT TUGAS PENGAWAS UJIAN SILANG</h3>
+            <div>Nomor : ${escapeHtml(puNomor)}</div>
+          </div>
+          <p style="margin: 0 0 8px; text-align: justify;"><strong>Dasar :</strong> ${escapeHtml(puDasar)}</p>
+          <p style="text-align:center; font-weight:bold; letter-spacing:1px; margin: 10px 0 6px;">MENUGASKAN</p>
+          <p style="margin: 0 0 6px;">Kepada nama-nama guru PGRI Ranting Gelang berikut untuk bertugas sebagai <strong>Pengawas Ujian Silang</strong> pada kegiatan <strong>${escapeHtml(puNamaUjian)}</strong>:</p>
+          <table class="pengawas">
+            <thead>
+              <tr>
+                <th style="width:32px">No</th>
+                <th>Nama Pengawas</th>
+                <th style="width:105px">NPA / NIP</th>
+                <th>Asal Sekolah</th>
+                <th>Tempat Ujian</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${
+                puRows.length > 0
+                  ? puRows
+                      .map(
+                        (r, idx) =>
+                          `<tr>
+                            <td style="text-align:center">${idx + 1}</td>
+                            <td><strong>${escapeHtml(r.namaPengawas || '-')}</strong></td>
+                            <td style="text-align:center">${escapeHtml(r.nipNpa || '-')}</td>
+                            <td>${escapeHtml(r.asalSekolah || '-')}</td>
+                            <td><strong>${escapeHtml(r.tempatMengawas || '-')}</strong></td>
+                          </tr>`
+                      )
+                      .join('')
+                  : `<tr><td colspan="5" style="text-align:center; color:#666; padding:12px;">(Belum ada daftar penugasan pengawas silang yang ditambahkan)</td></tr>`
+              }
+            </tbody>
+          </table>
+          <table style="margin: 6px 0 10px; font-size: 10.5pt;">
+            <tr><td style="width:140px">Hari</td><td>: ${escapeHtml(puHari)}</td></tr>
+            <tr><td>Tanggal</td><td>: ${escapeHtml(puTanggalPelaksanaan)}</td></tr>
+            <tr><td>Waktu</td><td>: ${escapeHtml(puWaktu)}</td></tr>
+          </table>
+          <p style="margin: 0; text-align: justify;">Demikian Surat Tugas Pengawas Ujian Silang ini dibuat untuk dilaksanakan dengan penuh tanggung jawab dan integritas sesuai tata tertib pengawas ujian.</p>
+        </div>
+        <div class="footer-wrap">
+          <div class="ttd-single-wrap">
+            <div class="ttd-col">
+              <div style="margin-bottom:4px;">Gelang, ${escapeHtml(todayStr)}</div>
+              <div>Ketua</div>
+              <div>PGRI Ranting Gelang</div>
+              <div class="ttd-space">
+                ${stempel ? `<img src="${stempel}" class="stempel-ketua" style="width:${Math.round(110 * stempelScale)}px; height:${Math.round(110 * stempelScale)}px; object-fit:contain; transform:translateY(-50%) rotate(${stempelRotation}deg);" alt="Stempel" />` : ''}
+                ${ttdKetua ? `<img src="${ttdKetua}" style="max-height:${Math.round(60 * ttdKetuaScale)}px; max-width:${Math.round(145 * ttdKetuaScale)}px; object-fit:contain; position:relative; z-index:2;" alt="TTD Ketua" />` : ''}
+              </div>
+              <div style="font-weight:bold; text-decoration:underline;">${escapeHtml(namaKetua)}</div>
+              <div style="font-size:10pt;">NPA. ${escapeHtml(npaKetua)}</div>
+            </div>
+          </div>
+          <div style="margin-top:14px; display:flex; justify-content:space-between; align-items:flex-end; gap:12px;">
+            ${
+              puTembusanItemsHtml
+                ? `
+              <div style="font-size: 10pt; line-height: 1.4; flex: 1;">
+                <div style="margin-bottom: 3px;">Tembusan disampaikan kepada :</div>
+                ${puTembusanItemsHtml}
+              </div>
+            `
+                : '<div style="flex: 1;"></div>'
+            }
+            <div style="width:96px; display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center; font-size:8.5pt; color:#334155; flex-shrink:0;">
+              <img src="${qrUrl}" alt="QR Verifikasi" style="width:56px; height:56px; border:1px solid #cbd5e1; padding:3px; background:#fff; display:block; margin:0 auto;" />
+              <div style="margin-top:4px; width:100%; text-align:center; line-height:1.2;">Verifikasi Surat</div>
+            </div>
+          </div>
+        </div>
+      </div>
+      </body></html>`;
+  };
+
+  const handleExportPengawasUjian = async () => {
+    const html = buildPengawasUjianHtml();
+    const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
+    await safeDownloadBlob(blob, `Pengawas_Ujian_Silang_${puNomor.replace(/[^a-zA-Z0-9]/g, '_')}.html`);
+    logAuditEvent(
+      'E-Office',
+      'Cetak Surat Tugas Pengawas Ujian',
+      `Menerbitkan Surat Tugas Pengawas Ujian Silang No. ${puNomor} (${puRows.length} pengawas).`
+    );
+    onNotice('success', 'Dokumen Pengawas Ujian Silang berhasil diunduh (buka di browser lalu Ctrl+P untuk simpan PDF).');
   };
 
   // =========================================================================
@@ -1509,6 +1754,325 @@ export const EOfficeSubPanels: React.FC<EOfficeProps> = ({
     );
   }
 
+  if (mode === 'pengawas_ujian') {
+    return (
+      <div className="grid grid-cols-1 xl:grid-cols-12 gap-5 items-start">
+        {/* KIRI: KOTAK PENGISIAN PENGAWAS UJIAN SILANG */}
+        <div className={`xl:col-span-5 rounded-2xl border p-5 space-y-4 ${cardClass}`}>
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2.5">
+              <div className={`p-2 rounded-xl border ${isDark ? 'bg-red-950/70 border-red-800/60 text-amber-400' : 'bg-red-50 border-red-200 text-red-800'}`}>
+                <ShieldCheck className="w-4 h-4" />
+              </div>
+              <div>
+                <h2 className="font-display text-sm font-bold">Editor Pengawas Ujian Silang</h2>
+                <p className={`text-[11px] ${isDark ? 'text-stone-400' : 'text-stone-500'}`}>
+                  Atur penugasan silang pengawas dari SD A ke SD B.
+                </p>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => setPuNomor(buildAutoLetterNumber('ST', agendaList.length))}
+              className={`px-3 py-1.5 rounded-xl text-xs font-bold border shrink-0 cursor-pointer transition-colors ${isDark ? 'bg-stone-800 border-stone-700 text-stone-200 hover:bg-stone-700' : 'bg-[#faf8f5] border-stone-200 text-stone-700 hover:bg-stone-100'}`}
+            >
+              Auto Nomor
+            </button>
+          </div>
+
+          <div className="space-y-3">
+            <div>
+              <label className={labelClass}>Nomor Surat Tugas</label>
+              <input value={puNomor} onChange={(e) => setPuNomor(e.target.value)} className={inputClass} />
+            </div>
+            <div>
+              <label className={labelClass}>Nama Kegiatan Ujian</label>
+              <input value={puNamaUjian} onChange={(e) => setPuNamaUjian(e.target.value)} className={inputClass} placeholder="Misal: Sumatif Akhir Semester (SAS) Ganjil" />
+            </div>
+            <div>
+              <label className={labelClass}>Dasar Penugasan</label>
+              <textarea rows={2} value={puDasar} onChange={(e) => setPuDasar(e.target.value)} className={inputClass} />
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div>
+                <label className={labelClass}>Hari</label>
+                <input
+                  value={puHari}
+                  onChange={(e) => setPuHari(e.target.value)}
+                  placeholder="Senin - Sabtu"
+                  className={inputClass}
+                />
+              </div>
+              <div>
+                <label className={labelClass}>Tanggal</label>
+                <input
+                  value={puTanggalPelaksanaan}
+                  onChange={(e) => setPuTanggalPelaksanaan(e.target.value)}
+                  placeholder="30 November 2026 - 05 Desember 2026"
+                  className={inputClass}
+                />
+              </div>
+              <div>
+                <label className={labelClass}>Waktu Pelaksanaan</label>
+                <input value={puWaktu} onChange={(e) => setPuWaktu(e.target.value)} className={inputClass} />
+              </div>
+            </div>
+
+            {/* Pemilih Guru & Penempatan Silang */}
+            <div className={`rounded-2xl border p-3.5 space-y-3 ${isDark ? 'bg-stone-950/60 border-stone-800' : 'bg-[#faf8f5] border-stone-200'}`}>
+              <div className="flex items-center justify-between gap-2">
+                <label className="text-xs font-bold">Daftar Pengawas Silang ({puRows.length} Pengawas)</label>
+                <button
+                  type="button"
+                  onClick={handleAddPengawasManual}
+                  className="text-xs font-semibold text-red-800 dark:text-amber-400 hover:underline inline-flex items-center gap-1 cursor-pointer"
+                >
+                  <Plus className="w-3.5 h-3.5" /> Baris Manual
+                </button>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <select
+                  value={puSelectedTeacherId}
+                  onChange={(e) => setPuSelectedTeacherId(e.target.value)}
+                  className={inputClass}
+                >
+                  <option value="">-- Pilih Guru dari Data Anggota --</option>
+                  {teachers.map((t) => (
+                    <option key={t.id} value={t.id}>
+                      {t.name} ({t.school})
+                    </option>
+                  ))}
+                </select>
+                <button
+                  type="button"
+                  onClick={handleAddPengawasFromTeacher}
+                  disabled={!puSelectedTeacherId}
+                  className="px-3.5 py-2.5 rounded-xl bg-red-800 hover:bg-red-700 disabled:opacity-50 text-white text-xs font-bold shrink-0 cursor-pointer transition-colors"
+                >
+                  Tambah
+                </button>
+              </div>
+
+              {puRows.length === 0 ? (
+                <p className="text-[11px] text-stone-400 text-center py-3">
+                  Pilih guru di atas atau klik &quot;Baris Manual&quot; untuk mengatur pengawas silang antar sekolah.
+                </p>
+              ) : (
+                <div className="space-y-2.5 max-h-72 overflow-y-auto pr-1">
+                  {puRows.map((row, idx) => (
+                    <div
+                      key={row.id}
+                      className={`p-3 rounded-xl border space-y-2 ${isDark ? 'bg-stone-900 border-stone-800' : 'bg-white border-stone-200/90'}`}
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-[11px] font-extrabold text-red-800 dark:text-amber-400">
+                          Pengawas #{idx + 1}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => removePuRow(row.id)}
+                          className="p-1 text-red-600 dark:text-red-400 hover:bg-red-500/10 rounded-lg cursor-pointer"
+                          title="Hapus baris"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                        <div>
+                          <label className="block text-[10px] font-semibold text-stone-400 mb-0.5">Nama Pengawas</label>
+                          <input
+                            value={row.namaPengawas}
+                            onChange={(e) => updatePuRow(row.id, 'namaPengawas', e.target.value)}
+                            placeholder="Nama Lengkap & Gelar"
+                            className={inputClass}
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[10px] font-semibold text-stone-400 mb-0.5">NPA / NIP</label>
+                          <input
+                            value={row.nipNpa}
+                            onChange={(e) => updatePuRow(row.id, 'nipNpa', e.target.value)}
+                            placeholder="NPA / NIP"
+                            className={inputClass}
+                          />
+                        </div>
+                      </div>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                        <div>
+                          <label className="block text-[10px] font-semibold text-stone-400 mb-0.5">Asal Sekolah (SD A)</label>
+                          <input
+                            list={`pu-schools-${row.id}`}
+                            value={row.asalSekolah}
+                            onChange={(e) => updatePuRow(row.id, 'asalSekolah', e.target.value)}
+                            placeholder="Sekolah asal pengawas"
+                            className={inputClass}
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[10px] font-semibold text-stone-400 mb-0.5">Tempat Mengawas (SD B)</label>
+                          <input
+                            list={`pu-schools-${row.id}`}
+                            value={row.tempatMengawas}
+                            onChange={(e) => updatePuRow(row.id, 'tempatMengawas', e.target.value)}
+                            placeholder="Sekolah tujuan mengawas"
+                            className={inputClass}
+                          />
+                        </div>
+                        <datalist id={`pu-schools-${row.id}`}>
+                          {schoolOptions.map((sc) => (
+                            <option key={sc} value={sc} />
+                          ))}
+                        </datalist>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Daftar Tembusan */}
+            <div>
+              <div className="flex items-center justify-between mb-1.5">
+                <label className="text-xs font-semibold">Daftar Tembusan</label>
+                <button
+                  type="button"
+                  onClick={() => setPuTembusanList([...puTembusanList, ''])}
+                  className="text-xs font-semibold text-red-800 dark:text-amber-400 hover:underline inline-flex items-center gap-1 cursor-pointer"
+                >
+                  <Plus className="w-3.5 h-3.5" /> Tambah
+                </button>
+              </div>
+              <div className="space-y-2">
+                {puTembusanList.map((item, idx) => (
+                  <div key={idx} className="flex items-center gap-2">
+                    <span className="text-xs font-bold w-5 text-stone-400">{idx + 1}.</span>
+                    <input
+                      type="text"
+                      className={inputClass}
+                      value={item}
+                      onChange={(e) => {
+                        const next = [...puTembusanList];
+                        next[idx] = e.target.value;
+                        setPuTembusanList(next);
+                      }}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setPuTembusanList(puTembusanList.filter((_, i) => i !== idx))}
+                      className="p-2 text-red-600 dark:text-red-400 hover:bg-red-500/10 rounded-lg cursor-pointer"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* KANAN: KOTAK PREVIEW PENGAWAS UJIAN SILANG */}
+        <div className={`xl:col-span-7 rounded-2xl border p-5 space-y-3 xl:sticky xl:top-4 ${cardClass}`}>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <div className="flex items-center gap-2 font-display text-xs sm:text-sm font-bold">
+                <Eye className="w-4 h-4 text-red-800 dark:text-amber-400" />
+                <span>Pratinjau Langsung Pengawas Ujian Silang (A4)</span>
+              </div>
+              <p className={`text-[11px] ${isDark ? 'text-stone-400' : 'text-stone-500'}`}>
+                Tampilan di bawah ini identik dengan hasil dokumen yang akan diunduh / dicetak.
+              </p>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              {isAdmin && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    const nextNum = buildAutoLetterNumber('ST', archiveCount + agendaList.length);
+                    setPuNomor(nextNum);
+                    onNotice('success', `Nomor Surat Tugas Pengawas Ujian otomatis diterapkan: ${nextNum}`);
+                  }}
+                  className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold border cursor-pointer transition-colors ${
+                    isDark ? 'bg-stone-800 border-stone-700 text-stone-200 hover:bg-stone-700' : 'bg-[#faf8f5] border-stone-200 text-stone-700 hover:bg-stone-100'
+                  }`}
+                >
+                  <Hash className="w-3.5 h-3.5" />
+                  <span>Auto No. Surat</span>
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={() => {
+                  const daftarText = puRows
+                    .map(
+                      (r, i) =>
+                        `${i + 1}. ${r.namaPengawas || '-'} (${r.asalSekolah || '-'}) ➔ Mengawas di *${r.tempatMengawas || '-'}*`
+                    )
+                    .join('\n');
+                  const msg =
+                    `📋 *SURAT TUGAS PENGAWAS UJIAN SILANG*\n` +
+                    `PGRI Ranting Gelang\n` +
+                    `Nomor: ${puNomor}\n` +
+                    `Kegiatan: ${puNamaUjian}\n` +
+                    `Hari: ${puHari}\n` +
+                    `Tanggal: ${puTanggalPelaksanaan} (${puWaktu})\n\n` +
+                    `*Daftar Penempatan Silang:*\n${daftarText || '-'}`;
+                  openWhatsAppShare(msg);
+                }}
+                className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold bg-emerald-600/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30 hover:bg-emerald-600/25 transition cursor-pointer"
+              >
+                <Share2 className="w-3.5 h-3.5" />
+                <span>Bagikan WA</span>
+              </button>
+              {isAdmin && onSaveArchiveItem && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    const base = createInitialDraft(teachers);
+                    onSaveArchiveItem({
+                      ...base,
+                      id: `inv-pu-${Date.now()}`,
+                      title: `Pengawas Ujian Silang - ${puNamaUjian.slice(0, 45)}`,
+                      nomorSurat: puNomor,
+                      perihal: 'Surat Tugas Pengawas Ujian Silang',
+                      hari: puHari,
+                      tanggalAcara: puTanggalPelaksanaan,
+                      pukul: puWaktu,
+                      acara: puNamaUjian,
+                      paragrafPembuka: puDasar
+                    });
+                  }}
+                  disabled={isSavingCloud}
+                  className="inline-flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-semibold bg-emerald-700 hover:bg-emerald-600 text-white transition cursor-pointer disabled:opacity-60"
+                >
+                  {isSavingCloud ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
+                  <span>Simpan Arsip</span>
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={handleExportPengawasUjian}
+                className="px-4 py-2 rounded-xl text-xs font-bold bg-red-800 hover:bg-red-700 text-white flex items-center gap-1.5 cursor-pointer transition-colors"
+              >
+                <Printer className="w-4 h-4" />
+                <span>Unduh / Cetak Surat</span>
+              </button>
+            </div>
+          </div>
+          <div className={`rounded-2xl overflow-x-auto ${isDark ? 'bg-stone-950' : 'bg-stone-200/80'} py-4 px-2 sm:px-6`}>
+            <iframe
+              title="Pratinjau Pengawas Ujian Silang"
+              srcDoc={buildPengawasUjianHtml()}
+              scrolling="no"
+              style={{ width: '210mm', height: '297mm' }}
+              className="bg-transparent border-0 shadow-2xl mx-auto block shrink-0"
+            />
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   if (mode === 'agenda_surat') {
     return (
       <div className="grid grid-cols-1 xl:grid-cols-12 gap-5 items-start">
@@ -1990,7 +2554,7 @@ export const BuatUndangan: React.FC<BuatUndanganProps> = ({
     return [];
   });
 
-  const [viewMode, setViewMode] = useState<'editor' | 'surat_tugas' | 'agenda_surat' | 'notulen'>('editor');
+  const [viewMode, setViewMode] = useState<'editor' | 'surat_tugas' | 'pengawas_ujian' | 'agenda_surat' | 'notulen'>('editor');
   const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
   const [isSavingCloud, setIsSavingCloud] = useState(false);
   const [isSyncingArchive, setIsSyncingArchive] = useState(false);
@@ -2453,28 +3017,19 @@ export const BuatUndangan: React.FC<BuatUndanganProps> = ({
       }`}>
         <div className="absolute top-0 inset-x-0 h-[3px] pgri-top-accent pointer-events-none" />
         <div className="relative z-10 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
-          <div className="flex items-start gap-4">
-            <div className={`w-12 h-12 rounded-xl border flex items-center justify-center shrink-0 ${
-              isDark
-                ? 'bg-red-950/70 border-red-800/60 text-amber-400'
-                : 'bg-red-50 border-red-200/90 text-red-800'
+          <div>
+            <p className={`inline-flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-[0.14em] mb-1.5 ${
+              isAdmin ? 'text-red-800 dark:text-amber-400' : 'text-amber-700 dark:text-amber-400'
             }`}>
-              <FileText className="w-6 h-6" />
-            </div>
-            <div>
-              <p className={`text-[11px] font-bold uppercase tracking-[0.14em] mb-1 ${
-                isAdmin ? 'text-red-800 dark:text-amber-400' : 'text-amber-700 dark:text-amber-400'
-              }`}>
-                Tata Persuratan • {isAdmin ? 'Mode Admin / Pengurus' : 'Mode Baca Guru'}
-              </p>
-              <h1 className="font-display text-2xl sm:text-3xl font-extrabold tracking-tight">E-Office &amp; Pembuatan Undangan</h1>
-              <p className={`text-xs sm:text-sm mt-1 ${isDark ? 'text-stone-400' : 'text-stone-600'}`}>
-                Buat undangan resmi, Surat Tugas, Buku Agenda Surat Masuk/Keluar, serta Notulen Rapat PGRI Ranting Gelang.
-              </p>
-            </div>
+              <FileText className="w-3.5 h-3.5" />
+              Tata Persuratan • {isAdmin ? 'Mode Admin / Pengurus' : 'Mode Baca Guru'}
+            </p>
+            <h1 className="font-display text-2xl sm:text-3xl font-extrabold tracking-tight">E-Office &amp; Pembuatan Undangan</h1>
+            <p className={`text-xs sm:text-sm mt-1 ${isDark ? 'text-stone-400' : 'text-stone-600'}`}>
+              Buat undangan resmi, Surat Tugas, Buku Agenda Surat Masuk/Keluar, serta Notulen Rapat PGRI Ranting Gelang.
+            </p>
           </div>
-
-          </div>
+        </div>
 
         {/* Switcher Tab Internal */}
         <div className="relative z-10 mt-5 flex flex-wrap items-center gap-2">
@@ -2519,6 +3074,20 @@ export const BuatUndangan: React.FC<BuatUndanganProps> = ({
           >
             <FileCheck2 className="w-3.5 h-3.5" />
             Surat Tugas
+          </button>
+          <button
+            type="button"
+            onClick={() => setViewMode('pengawas_ujian')}
+            className={`inline-flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-colors cursor-pointer ${
+              viewMode === 'pengawas_ujian'
+                ? 'bg-red-800 text-white shadow-sm'
+                : isDark
+                  ? 'bg-stone-800 text-stone-300 hover:bg-stone-700'
+                  : 'bg-white border border-stone-200 text-stone-700 hover:bg-stone-50'
+            }`}
+          >
+            <ShieldCheck className="w-3.5 h-3.5" />
+            Pengawas Ujian
           </button>
           <button
             type="button"
@@ -3029,8 +3598,8 @@ export const BuatUndangan: React.FC<BuatUndanganProps> = ({
         </div>
       )}
       
-      {/* SUB-MODUL E-OFFICE: SURAT TUGAS, BUKU AGENDA SURAT, NOTULEN RAPAT */}
-      {(viewMode === 'surat_tugas' || viewMode === 'agenda_surat' || viewMode === 'notulen') && (
+      {/* SUB-MODUL E-OFFICE: SURAT TUGAS, PENGAWAS UJIAN, BUKU AGENDA SURAT, NOTULEN RAPAT */}
+      {(viewMode === 'surat_tugas' || viewMode === 'pengawas_ujian' || viewMode === 'agenda_surat' || viewMode === 'notulen') && (
         <EOfficeSubPanels
           mode={viewMode}
           isAdmin={isAdmin}
