@@ -1,5 +1,5 @@
 import { safeDownloadBlob } from './download';
-import { getOrgConfig } from './orgConfig';
+import { getOrgConfig, DEFAULT_KETUA_FALLBACK } from './orgConfig';
 
 let cachedHtml2Pdf: any = null;
 
@@ -42,9 +42,9 @@ export interface KetuaSignerInfo {
   jabatan: string;
 }
 
-const DEFAULT_KETUA_NAME = 'Umar Ali Kusuma';
+const DEFAULT_KETUA_NAME = DEFAULT_KETUA_FALLBACK.name;
 const DEFAULT_KETUA_NPA = '13301500431';
-const DEFAULT_KETUA_NIP = '198912092025211092';
+const DEFAULT_KETUA_NIP = DEFAULT_KETUA_FALLBACK.nip;
 
 /**
  * Membaca nama dan NPA Ketua PGRI Ranting secara dinamis dari Pengaturan Kepengurusan,

@@ -28,9 +28,15 @@ import {
   markLocalVersionSynced
 } from '../../lib/sync';
 import { logAuditEvent } from '../../lib/auth';
-import { openWhatsAppShare } from '../../lib/orgConfig';
+import {
+  getOrgConfig,
+  openWhatsAppShare,
+  DEFAULT_PEMBINA_MEMBER,
+  DEFAULT_PENANGGUNG_JAWAB_MEMBERS,
+  DEFAULT_PENGURUS_MEMBERS
+} from '../../lib/orgConfig';
 import { safeDownloadBlob } from '../../lib/download';
-import { isMobileDevice, downloadContainerAsPdf } from '../../lib/pdfExport';
+import { isMobileDevice, downloadContainerAsPdf, resolveKetuaSigner, escapePdfHtml } from '../../lib/pdfExport';
 
 interface ProkerViewProps {
   activeRole: 'guru' | 'admin';
@@ -108,32 +114,9 @@ export const ProkerView: React.FC<ProkerViewProps> = ({
 
   useEffect(() => {
     const loadPenanggungJawabFromProfile = () => {
-      const defaultPembina = {
-        role: 'Pengawas Bina',
-        name: 'Hanifatul Susmiyah, S.Pd'
-      };
-
-      const defaultPenanggungJawab = [
-        { role: 'Ketua K3S', name: 'Ghufron Atok Urrohman, S.Pd' },
-        { role: 'Ketua PGRI Cabang', name: 'Christian Dri Firman Widodo, S.Pd' }
-      ];
-
-      const defaultPengurus = [
-        { role: 'Penasehat', name: 'Semua Kepala Sekolah' },
-        { role: 'Ketua PGRI Ranting Gelang', name: 'Umar Ali Kusuma' },
-        { role: 'Wakil Ketua', name: 'Hartatik, S.Pd' },
-        { role: 'Sekretaris', name: 'Adi Saiful Rizal, S.Pd' },
-        { role: 'Bendahara', name: 'Atik Andriyati, S.Pd' },
-        { role: 'Seksi Pembinaan Olahraga', name: 'Saiful Arif, S.Pd' },
-        { role: 'Seksi Pemberdayaan Perempuan', name: 'Siti Oktavia, S.Pd' },
-        { role: 'Seksi Pengembangan Profesi & Karir', name: 'Rohman, S.Pd' },
-        { role: 'Seksi Humas', name: 'Jasuri Budianto, S.Pd' },
-        { role: 'Seksi Keagamaan', name: 'Muhammad Jupri, S.Pd.I' }
-      ];
-
-      let pembinaData = defaultPembina;
-      let pjData = defaultPenanggungJawab;
-      let pengurusData = defaultPengurus;
+      let pembinaData: { name: string; role: string } = DEFAULT_PEMBINA_MEMBER;
+      let pjData: { name: string; role: string }[] = DEFAULT_PENANGGUNG_JAWAB_MEMBERS;
+      let pengurusData: { name: string; role: string }[] = DEFAULT_PENGURUS_MEMBERS;
 
       try {
         const sPembina = localStorage.getItem('kombel-pembina');
@@ -162,7 +145,11 @@ export const ProkerView: React.FC<ProkerViewProps> = ({
       } catch {}
 
       const combined = [pembinaData, ...pjData, ...pengurusData]
-        .filter((item) => item && item.name && item.name.trim() !== '' && item.name !== '-')
+        .filter((item) => {
+          const cleanName = (item?.name || '').trim();
+          const lower = cleanName.toLowerCase();
+          return Boolean(cleanName) && cleanName !== '-' && !lower.startsWith('semua ');
+        })
         .map((item) => ({ name: item.name, role: item.role || '' }));
 
       setPenanggungJawabOptions(combined);
@@ -401,25 +388,54 @@ export const ProkerView: React.FC<ProkerViewProps> = ({
     setIsPrintingProker(true);
     let container: HTMLDivElement | null = null;
     try {
+      const orgCfg = getOrgConfig();
+      const logoPgri = localStorage.getItem('logo-pgri') || localStorage.getItem('logo-kombel') || '';
+      const ttdKetua = localStorage.getItem('ttd-ketua') || '';
+      const ttdKetuaScale = Math.max(0.3, Math.min(2.5, (Number(localStorage.getItem('ttd-ketua-size')) || 100) / 100));
+      const stempel = localStorage.getItem('logo-stempel') || '';
+      const stempelScale = Math.max(0.3, Math.min(2.5, (Number(localStorage.getItem('logo-stempel-size')) || 100) / 100));
+      const stempelRotation = Number(localStorage.getItem('logo-stempel-rotation')) || 0;
+      const ketuaSigner = resolveKetuaSigner();
+      const kopOrg = escapePdfHtml(orgCfg.kopOrganisasi || 'PERSATUAN GURU REPUBLIK INDONESIA');
+      const kopRanting = escapePdfHtml(orgCfg.kopRanting || 'RANTING GELANG');
+      const kopWilayah = escapePdfHtml(orgCfg.kopWilayah || 'KECAMATAN SUMBERBARU - KABUPATEN JEMBER');
+      const kopSekretariat = escapePdfHtml(orgCfg.kopSekretariat || 'Sekretariat : Jl. PTPN XII Gunung Gambir Desa Gelang, Kecamatan Sumberbaru - Kabupaten Jember 68156');
+      const todayFormatted = new Date().toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' });
+
       const rows = filteredItems
         .map(
           (p, idx) => `
         <tr>
           <td style="text-align:center;">${idx + 1}</td>
-          <td><strong>${p.title}</strong><br/><span style="font-size:11px;color:#475569;">${p.description || ''}</span></td>
-          <td>${p.seksi}</td>
-          <td>${p.penanggungJawab || '-'}</td>
-          <td style="text-align:center;">${p.targetDate || '-'}</td>
+          <td><strong>${escapePdfHtml(p.title)}</strong>${p.description ? `<br/><span style="font-size:10px;color:#475569;">${escapePdfHtml(p.description)}</span>` : ''}</td>
+          <td>${escapePdfHtml(p.seksi)}</td>
+          <td>${escapePdfHtml(p.penanggungJawab || '-')}</td>
+          <td style="text-align:center;">${escapePdfHtml(p.targetDate || '-')}</td>
           <td style="text-align:right;">Rp ${(p.budget || 0).toLocaleString('id-ID')}</td>
-          <td style="text-align:center;">${p.status} (${p.progress}%)</td>
+          <td style="text-align:center;">${escapePdfHtml(p.status)} (${p.progress}%)</td>
         </tr>`
         )
         .join('');
 
       const bodyHtml = `
-        <h2>MATRIKS PROGRAM KERJA & REALISASI</h2>
-        <h3>PGRI RANTING GELANG — KECAMATAN SUMBERBARU</h3>
-        <p class="sub">Dicetak pada ${new Date().toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' })} | Total Anggaran Rencana: Rp ${stats.totalBudget.toLocaleString('id-ID')}</p>
+        <div class="kop-container">
+          <div class="kop-logo-wrapper">
+            ${logoPgri
+              ? `<img src="${logoPgri}" alt="Logo PGRI" class="kop-logo" />`
+              : `<div style="width: 86px; height: 86px; border: 1.5px dashed #94a3b8; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 9pt; color: #64748b; text-align: center;">Logo<br/>PGRI</div>`}
+          </div>
+          <div class="kop-text-container">
+            <div class="kop-org">${kopOrg}</div>
+            <div class="kop-sub-org">(Teachers Association Of Republic Indonesia)</div>
+            <div class="kop-ranting">${kopRanting}</div>
+            <div class="kop-wilayah">${kopWilayah}</div>
+            <div class="kop-sekretariat">${kopSekretariat}</div>
+          </div>
+          <div style="width: 90px; flex-shrink: 0;"></div>
+        </div>
+        <div class="kop-divider"></div>
+        <h2>MATRIKS PROGRAM KERJA &amp; REALISASI</h2>
+        <p class="sub">Dicetak pada ${escapePdfHtml(todayFormatted)} | Total Anggaran Rencana: Rp ${stats.totalBudget.toLocaleString('id-ID')}</p>
         <table>
           <thead>
             <tr>
@@ -434,6 +450,19 @@ export const ProkerView: React.FC<ProkerViewProps> = ({
           </thead>
           <tbody>${rows}</tbody>
         </table>
+        <div class="signature-container">
+          <div class="signature-box">
+            <p style="margin: 0;">Sumberbaru, ${escapePdfHtml(todayFormatted)}</p>
+            <p style="margin: 0;">${escapePdfHtml(ketuaSigner.jabatan)}</p>
+            <p style="margin: 0;">Kecamatan Sumberbaru</p>
+            <div class="signature-space">
+              ${stempel ? `<img src="${stempel}" alt="Stempel" style="position: absolute; top: 50%; right: 50%; transform: translateY(-50%) rotate(${stempelRotation}deg); width: ${Math.round(112 * stempelScale)}px; height: ${Math.round(112 * stempelScale)}px; object-fit: contain; opacity: 0.9; z-index: 0; pointer-events: none;" />` : ''}
+              ${ttdKetua ? `<img src="${ttdKetua}" alt="TTD Ketua" class="signature-img" />` : ''}
+            </div>
+            <p style="margin: 0;" class="signature-name">${escapePdfHtml(ketuaSigner.name)}</p>
+            <p style="margin: 0;">${escapePdfHtml(ketuaSigner.npaLabel)}</p>
+          </div>
+        </div>
       `;
 
       const fullHtml = `
@@ -443,12 +472,28 @@ export const ProkerView: React.FC<ProkerViewProps> = ({
             <meta charset="utf-8" />
             <title>Rekap Program Kerja PGRI Ranting Gelang</title>
             <style>
-              body { font-family: Arial, sans-serif; padding: 28px; color: #0f172a; background: #ffffff; }
-              h2, h3 { margin: 0; text-align: center; }
-              .sub { text-align: center; font-size: 12px; color: #475569; margin: 4px 0 18px; }
-              table { width: 100%; border-collapse: collapse; font-size: 12px; }
-              th, td { border: 1px solid #cbd5e1; padding: 8px; vertical-align: top; }
-              th { background: #f1f5f9; }
+              @page { size: A4 landscape; margin: 12mm 14mm; }
+              body { font-family: 'Times New Roman', Times, serif; padding: 16px; color: #000000; background: #ffffff; }
+              .kop-container { display: flex; align-items: center; gap: 12px; padding-bottom: 6px; }
+              .kop-logo-wrapper { width: 90px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; }
+              .kop-logo { width: 86px; height: 86px; object-fit: contain; display: block; }
+              .kop-text-container { flex: 1; text-align: center; line-height: 1.18; color: #000000; }
+              .kop-org { font-size: 13pt; font-weight: bold; text-transform: uppercase; letter-spacing: 0.3px; }
+              .kop-sub-org { font-size: 10pt; font-weight: bold; font-style: italic; margin-top: 1px; }
+              .kop-ranting { font-size: 16pt; font-weight: bold; text-transform: uppercase; letter-spacing: 0.5px; margin-top: 1px; }
+              .kop-wilayah { font-size: 11.5pt; font-weight: bold; text-transform: uppercase; letter-spacing: 0.3px; margin-top: 1px; }
+              .kop-sekretariat { font-size: 8.5pt; font-style: italic; margin-top: 2px; }
+              .kop-divider { border-top: 2px solid #000000; border-bottom: 1px solid #000000; height: 2px; margin-bottom: 14px; }
+              h2 { margin: 0; text-align: center; font-size: 13.5pt; text-decoration: underline; text-underline-offset: 4px; }
+              .sub { text-align: center; font-size: 10pt; color: #334155; margin: 6px 0 14px; }
+              table { width: 100%; border-collapse: collapse; font-size: 10pt; }
+              th, td { border: 1px solid #000000; padding: 6px 8px; vertical-align: top; }
+              th { background: #f1f5f9; text-align: center; }
+              .signature-container { margin-top: 22px; display: flex; justify-content: flex-end; page-break-inside: avoid; break-inside: avoid; }
+              .signature-box { width: 250px; text-align: center; font-size: 10pt; line-height: 1.3; }
+              .signature-space { height: 65px; position: relative; display: flex; align-items: center; justify-content: center; overflow: visible; }
+              .signature-img { height: ${Math.round(62 * ttdKetuaScale)}px; width: auto; max-width: ${Math.round(160 * ttdKetuaScale)}px; object-fit: contain; position: relative; z-index: 1; }
+              .signature-name { font-weight: bold; text-decoration: underline; }
             </style>
           </head>
           <body>
@@ -468,19 +513,34 @@ export const ProkerView: React.FC<ProkerViewProps> = ({
       // Fallback otomatis ke unduhan langsung PDF lokal jika di ponsel atau pop-up diblokir
       try {
         container = document.createElement('div');
-        container.style.width = '900px';
+        container.style.width = '1050px';
         container.style.backgroundColor = '#ffffff';
-        container.style.color = '#0f172a';
-        container.style.fontFamily = 'Arial, sans-serif';
-        container.style.padding = '24px';
+        container.style.color = '#000000';
+        container.style.fontFamily = "'Times New Roman', Times, serif";
+        container.style.padding = '16px';
         container.innerHTML = `
           <style data-pdf-style="true">
-            * { box-sizing: border-box; font-family: Arial, sans-serif; }
-            h2, h3 { margin: 0; text-align: center; }
-            .sub { text-align: center; font-size: 12px; color: #475569; margin: 4px 0 18px; }
-            table { width: 100%; border-collapse: collapse; font-size: 12px; }
-            th, td { border: 1px solid #cbd5e1; padding: 8px; vertical-align: top; }
-            th { background: #f1f5f9; }
+            * { box-sizing: border-box; font-family: 'Times New Roman', Times, serif; }
+            .kop-container { display: flex; align-items: center; gap: 12px; padding-bottom: 6px; }
+            .kop-logo-wrapper { width: 90px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; }
+            .kop-logo { width: 86px; height: 86px; object-fit: contain; display: block; }
+            .kop-text-container { flex: 1; text-align: center; line-height: 1.18; color: #000000; }
+            .kop-org { font-size: 13pt; font-weight: bold; text-transform: uppercase; letter-spacing: 0.3px; }
+            .kop-sub-org { font-size: 10pt; font-weight: bold; font-style: italic; margin-top: 1px; }
+            .kop-ranting { font-size: 16pt; font-weight: bold; text-transform: uppercase; letter-spacing: 0.5px; margin-top: 1px; }
+            .kop-wilayah { font-size: 11.5pt; font-weight: bold; text-transform: uppercase; letter-spacing: 0.3px; margin-top: 1px; }
+            .kop-sekretariat { font-size: 8.5pt; font-style: italic; margin-top: 2px; }
+            .kop-divider { border-top: 2px solid #000000; border-bottom: 1px solid #000000; height: 2px; margin-bottom: 14px; }
+            h2 { margin: 0; text-align: center; font-size: 13.5pt; text-decoration: underline; text-underline-offset: 4px; }
+            .sub { text-align: center; font-size: 10pt; color: #334155; margin: 6px 0 14px; }
+            table { width: 100%; border-collapse: collapse; font-size: 10pt; }
+            th, td { border: 1px solid #000000; padding: 6px 8px; vertical-align: top; }
+            th { background: #f1f5f9; text-align: center; }
+            .signature-container { margin-top: 22px; display: flex; justify-content: flex-end; page-break-inside: avoid; break-inside: avoid; }
+            .signature-box { width: 250px; text-align: center; font-size: 10pt; line-height: 1.3; }
+            .signature-space { height: 65px; position: relative; display: flex; align-items: center; justify-content: center; overflow: visible; }
+            .signature-img { height: ${Math.round(62 * ttdKetuaScale)}px; width: auto; max-width: ${Math.round(160 * ttdKetuaScale)}px; object-fit: contain; position: relative; z-index: 1; }
+            .signature-name { font-weight: bold; text-decoration: underline; }
           </style>
           ${bodyHtml}
         `;

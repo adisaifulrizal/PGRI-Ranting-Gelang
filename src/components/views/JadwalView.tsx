@@ -1,4 +1,3 @@
-import { syncToFirebase, mutateCloudCollection } from '../../lib/sync';
 import React, { useState, useEffect, useRef } from 'react';
 import {
   Calendar as CalendarIcon,
@@ -27,27 +26,84 @@ import {
   School,
   Loader2
 } from 'lucide-react';
+import { doc, getDoc, getDocFromServer } from 'firebase/firestore';
 import { ActivityEvent, AttendanceRecord, Teacher } from '../../types';
-import { openWhatsAppShare, getOrgConfig } from '../../lib/orgConfig';
+import { auth, db } from '../../lib/firebase';
+import {
+  syncFromFirebase,
+  fetchCloudVersions,
+  shouldFetchByVersion,
+  markLocalVersionSynced,
+  mergePendingAttendanceSubmissions
+} from '../../lib/sync';
+import { openWhatsAppShare, getOrgConfig, DEFAULT_PENGURUS_MEMBERS } from '../../lib/orgConfig';
 import { isMobileDevice, downloadContainerAsPdf, resolveKetuaSigner, escapePdfHtml } from '../../lib/pdfExport';
-import { BrowserMultiFormatReader } from '@zxing/browser';
-import { DecodeHintType, BarcodeFormat } from '@zxing/library';
 
 const GAS_WEB_APP_URL = 'https://script.google.com/macros/s/AKfycbw_DBWKRMkn0IP5vdSpoUjtTd8nc6RrOxUdaCv2bmVl2ZL1viMT_2Hd7nFiqJCcRvM/exec';
 
-export interface TaskSubmission {
-  id: string;
-  eventId?: string;
-  teacherId?: string;
-  teacherName?: string;
-  school?: string;
-  title?: string;
-  fileUrl?: string;
-  link?: string;
-  submittedAt?: string;
-  status?: string;
-  [key: string]: any;
-}
+const parseDeadlineDateStr = (deadlineStr: string): Date | null => {
+  if (!deadlineStr) return null;
+  const cleanStr = deadlineStr.trim();
+  if (cleanStr.includes('/')) {
+    const parts = cleanStr.split('/');
+    if (parts.length === 3) {
+      const day = parts[0].padStart(2, '0');
+      const month = parts[1].padStart(2, '0');
+      const year = parts[2];
+      const d = new Date(`${year}-${month}-${day}T23:59:59`);
+      return isNaN(d.getTime()) ? null : d;
+    }
+  } else if (cleanStr.includes('-')) {
+    const parts = cleanStr.split('-');
+    if (parts.length === 3) {
+      let year = parts[0], month = parts[1], day = parts[2];
+      if (parts[0].length === 2 && parts[2].length === 4) {
+        day = parts[0];
+        month = parts[1];
+        year = parts[2];
+      }
+      const d = new Date(`${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}T23:59:59`);
+      return isNaN(d.getTime()) ? null : d;
+    }
+  }
+  const fallbackDate = new Date(cleanStr + 'T23:59:59');
+  return isNaN(fallbackDate.getTime()) ? null : fallbackDate;
+};
+
+const formatCountdownRemaining = (deadlineDate: Date | null, nowMs: number): string => {
+  if (!deadlineDate) return '00.00.00';
+  const diff = deadlineDate.getTime() - nowMs;
+  if (isNaN(diff) || diff <= 0) return '00.00.00';
+  const totalSeconds = Math.floor(diff / 1000);
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  const pad = (num: number) => String(num).padStart(2, '0');
+  return `${pad(hours)}.${pad(minutes)}.${pad(seconds)}`;
+};
+
+const DeadlineCountdownText: React.FC<{ deadlineStr: string }> = React.memo(({ deadlineStr }) => {
+  const deadlineDate = React.useMemo(() => parseDeadlineDateStr(deadlineStr), [deadlineStr]);
+  const [text, setText] = useState<string>(() => formatCountdownRemaining(deadlineDate, Date.now()));
+
+  useEffect(() => {
+    const update = () => {
+      const next = formatCountdownRemaining(deadlineDate, Date.now());
+      setText(next);
+      return next !== '00.00.00';
+    };
+    const isActive = update();
+    if (!isActive) return;
+    const timer = setInterval(() => {
+      if (!update()) {
+        clearInterval(timer);
+      }
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [deadlineDate]);
+
+  return <>{text}</>;
+});
 
 interface JadwalViewProps {
   events?: ActivityEvent[];
@@ -65,8 +121,6 @@ interface JadwalViewProps {
   currentUser?: { name: string; school: string; role: string };
   activeRole?: 'guru' | 'admin';
   selectedEventForAbsensi?: ActivityEvent | null;
-  taskSubmissions?: TaskSubmission[];
-  onUpdateTaskSubmissions?: React.Dispatch<React.SetStateAction<TaskSubmission[]>>;
 }
 
 // Helper untuk memvalidasi status aktif anggota
@@ -109,7 +163,7 @@ export const JadwalView: React.FC<JadwalViewProps> = ({
   useEffect(() => {
     const timer = setInterval(() => {
       setCurrentTime(new Date());
-    }, 1000);
+    }, 30000);
     return () => clearInterval(timer);
   }, []);
   
@@ -318,34 +372,7 @@ export const JadwalView: React.FC<JadwalViewProps> = ({
   };
 
   // Helper konversi string format tanggal/bulan/tahun (DD/MM/YYYY) ke objek Date
-  const parseDeadlineDate = (deadlineStr: string): Date | null => {
-    if (!deadlineStr) return null;
-    const cleanStr = deadlineStr.trim();
-    if (cleanStr.includes('/')) {
-      const parts = cleanStr.split('/');
-      if (parts.length === 3) {
-        const day = parts[0].padStart(2, '0');
-        const month = parts[1].padStart(2, '0');
-        const year = parts[2];
-        const d = new Date(`${year}-${month}-${day}T23:59:59`);
-        return isNaN(d.getTime()) ? null : d;
-      }
-    } else if (cleanStr.includes('-')) {
-      const parts = cleanStr.split('-');
-      if (parts.length === 3) {
-        let year = parts[0], month = parts[1], day = parts[2];
-        if (parts[0].length === 2 && parts[2].length === 4) {
-          day = parts[0];
-          month = parts[1];
-          year = parts[2];
-        }
-        const d = new Date(`${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}T23:59:59`);
-        return isNaN(d.getTime()) ? null : d;
-      }
-    }
-    const fallbackDate = new Date(cleanStr + 'T23:59:59');
-    return isNaN(fallbackDate.getTime()) ? null : fallbackDate;
-  };
+  const parseDeadlineDate = parseDeadlineDateStr;
 
   // Helper memastikan format tampilan selalu tanggal/bulan/tahun
   const formatToDDMMYYYY = (str: string): string => {
@@ -357,28 +384,6 @@ export const JadwalView: React.FC<JadwalViewProps> = ({
       return `${d}/${m}/${y}`;
     }
     return clean;
-  };
-
-  // Helper countdown menuju batas deadline (Format: 00.00.00)
-  const getCountdownText = (deadlineStr: string) => {
-    if (!deadlineStr) return '00.00.00';
-
-    const deadlineDate = parseDeadlineDate(deadlineStr);
-    if (!deadlineDate) return '00.00.00';
-
-    const diff = deadlineDate.getTime() - currentTime.getTime();
-
-    if (isNaN(diff) || diff <= 0) {
-      return '00.00.00';
-    }
-
-    const totalSeconds = Math.floor(diff / 1000);
-    const hours = Math.floor(totalSeconds / 3600);
-    const minutes = Math.floor((totalSeconds % 3600) / 60);
-    const seconds = totalSeconds % 60;
-
-    const pad = (num: number) => String(num).padStart(2, '0');
-    return `${pad(hours)}.${pad(minutes)}.${pad(seconds)}`;
   };
 
   // Helper status urgensi deadline untuk visual countdown adaptif
@@ -666,18 +671,13 @@ export const JadwalView: React.FC<JadwalViewProps> = ({
       }
     } catch (e) {}
 
-    let pengurusData = [
-      { role: 'Penasehat', name: 'Semua Kepala Sekolah', nip: '-', school: '-', phone: '-' },
-      { role: 'Ketua PGRI Ranting Gelang', name: 'Umar Ali Kusuma', nip: '198912092025211092', school: 'SDN GELANG 03', phone: '6288235537431' },
-      { role: 'Wakil Ketua', name: 'Hartatik, S.Pd', nip: '198301072022212001', school: 'SDN KALIGLAGAH 02', phone: '6282245380232' },
-      { role: 'Sekretaris', name: 'Adi Saiful Rizal, S.Pd', nip: '199401162025211089', school: 'SDN GELANG 03', phone: '6282292232649' },
-      { role: 'Bendahara', name: 'Atik Andriyati, S.Pd', nip: '197701142014122002', school: 'SDN GELANG 06', phone: '6281515786365' },
-      { role: 'Seksi Pembinaan Olahraga', name: 'Saiful Arif, S.Pd', nip: '198604122022211003', school: 'SDN GELANG 07', phone: '62881026888955' },
-      { role: 'Seksi Pemberdayaan Perempuan', name: 'Siti Oktavia, S.Pd', nip: '197910072022212001', school: 'SDN GELANG 04', phone: '6285697890959' },
-      { role: 'Seksi Pengembangan Profesi & Karir', name: 'Rohman, S.Pd', nip: '198904202022211002', school: 'SDN KALIGLAGAH 02', phone: '6282332910923' },
-      { role: 'Seksi Humas', name: 'Jasuri Budianto, S.Pd', nip: '196918082022211001', school: 'SDN GELANG 01', phone: '6285314904015' },
-      { role: 'Seksi Keagamaan', name: 'Muhammad Jupri, S.Pd.I', nip: '-', school: 'SD NU 21 MIFTAHUL ULUM', phone: '628817159553' }
-    ];
+    let pengurusData = DEFAULT_PENGURUS_MEMBERS.map((p) => ({
+      role: p.role,
+      name: p.name,
+      nip: p.nip,
+      school: p.instansi,
+      phone: p.wa
+    }));
     try {
       const saved = localStorage.getItem('kombel-pengurus');
       if (saved) {
@@ -849,7 +849,6 @@ export const JadwalView: React.FC<JadwalViewProps> = ({
 
   // Modal Upload Undangan
   const [showUploadUndanganModal, setShowUploadUndanganModal] = useState<boolean>(false);
-  const [isClosingUploadUndanganModal, setIsClosingUploadUndanganModal] = useState<boolean>(false);
   const [selectedEventForUndangan, setSelectedEventForUndangan] = useState<ActivityEvent | null>(null);
   const [undanganFile, setUndanganFile] = useState<File | null>(null);
   const [isUploadingUndangan, setIsUploadingUndangan] = useState<boolean>(false);
@@ -919,7 +918,6 @@ export const JadwalView: React.FC<JadwalViewProps> = ({
       } catch (e) {}
 
       try {
-        const { syncFromFirebase, fetchCloudVersions, shouldFetchByVersion, markLocalVersionSynced } = await import('../../lib/sync');
         const cloudVersions = await fetchCloudVersions(45000);
         if (!isMounted) return;
 
@@ -935,10 +933,6 @@ export const JadwalView: React.FC<JadwalViewProps> = ({
         }
 
         const fetchSettingsDoc = async () => {
-          const [{ doc, getDoc, getDocFromServer }, { db }] = await Promise.all([
-            import('firebase/firestore'),
-            import('../../lib/firebase')
-          ]);
           const docRef = doc(db, 'settings', 'global');
           try {
             return await getDocFromServer(docRef);
@@ -1011,7 +1005,6 @@ export const JadwalView: React.FC<JadwalViewProps> = ({
           const cloudAtt = cloudAttRes.value;
           try {
             localStorage.setItem('kombel-attendance', JSON.stringify(cloudAtt));
-            localStorage.setItem('kombel-attendance-list', JSON.stringify(cloudAtt));
           } catch (e) {}
           if (onAttendanceListChange) {
             onAttendanceListChange(cloudAtt);
@@ -1036,10 +1029,6 @@ export const JadwalView: React.FC<JadwalViewProps> = ({
     let isMounted = true;
     const mergeGuruAttendance = async () => {
       try {
-        const [{ auth }, { mergePendingAttendanceSubmissions }] = await Promise.all([
-          import('../../lib/firebase'),
-          import('../../lib/sync')
-        ]);
         if (!auth.currentUser || !auth.currentUser.emailVerified) return;
         const merged = await mergePendingAttendanceSubmissions<AttendanceRecord>(attendanceList);
         if (isMounted && Array.isArray(merged) && onAttendanceListChange) {
@@ -1063,7 +1052,6 @@ export const JadwalView: React.FC<JadwalViewProps> = ({
 
   // Attendance Form Modal
   const [showAbsensiModal, setShowAbsensiModal] = useState<boolean>(!!selectedEventForAbsensi);
-  const [isClosingAbsensiModal, setIsClosingAbsensiModal] = useState<boolean>(false);
   const [selectedEvent, setSelectedEvent] = useState<ActivityEvent | null>(selectedEventForAbsensi || (events && events[0]) || null);
 
   // State Scanner Barcode Absensi
@@ -1086,21 +1074,6 @@ export const JadwalView: React.FC<JadwalViewProps> = ({
     }, 250);
   };
 
-  const handleCloseAbsensiModal = () => {
-    setIsClosingAbsensiModal(true);
-    setTimeout(() => {
-      setShowAbsensiModal(false);
-      setIsClosingAbsensiModal(false);
-    }, 250);
-  };
-  
-  const handleCloseUploadUndanganModal = () => {
-    setIsClosingUploadUndanganModal(true);
-    setTimeout(() => {
-      setShowUploadUndanganModal(false);
-      setIsClosingUploadUndanganModal(false);
-    }, 250);
-  };
   const [cameraRetryCount, setCameraRetryCount] = useState<number>(0);
   const [facingMode, setFacingMode] = useState<'environment' | 'user'>('environment');
 
@@ -1115,22 +1088,11 @@ export const JadwalView: React.FC<JadwalViewProps> = ({
   const isProcessingScanRef = useRef<boolean>(false);
   const lastScanTimestampRef = useRef<number>(0);
   const barcodeDetectorInstanceRef = useRef<any>(null);
-  const zxingReaderRef = useRef<BrowserMultiFormatReader | null>(null);
+  const zxingReaderRef = useRef<any>(null);
   const recentlyScannedTeacherIdsRef = useRef<Set<string>>(new Set());
 
   // Inisialisasi satu kali BarcodeDetector native API
   useEffect(() => {
-    if (!zxingReaderRef.current) {
-      const hints = new Map();
-      hints.set(DecodeHintType.TRY_HARDER, true);
-      hints.set(DecodeHintType.POSSIBLE_FORMATS, [
-        BarcodeFormat.QR_CODE, 
-        BarcodeFormat.DATA_MATRIX, 
-        BarcodeFormat.CODE_128,
-        BarcodeFormat.EAN_13
-      ]);
-      zxingReaderRef.current = new BrowserMultiFormatReader(hints);
-    }
     if (typeof window !== 'undefined' && 'BarcodeDetector' in window) {
       try {
         barcodeDetectorInstanceRef.current = new (window as any).BarcodeDetector({
@@ -1232,7 +1194,6 @@ export const JadwalView: React.FC<JadwalViewProps> = ({
     let parsedId = '';
     let parsedNip = '';
     let parsedName = '';
-    let parsedSchool = '';
 
     try {
       if (cleanRaw.startsWith('{') && cleanRaw.endsWith('}')) {
@@ -1240,7 +1201,6 @@ export const JadwalView: React.FC<JadwalViewProps> = ({
         parsedId = String(parsed.id || parsed.teacherId || '').trim();
         parsedNip = String(parsed.nip || '').trim();
         parsedName = String(parsed.name || parsed.teacherName || '').trim().toLowerCase();
-        parsedSchool = String(parsed.school || '').trim().toLowerCase();
       }
     } catch (e) {}
 
@@ -1416,6 +1376,27 @@ export const JadwalView: React.FC<JadwalViewProps> = ({
           videoRef.current.setAttribute('playsinline', 'true');
           videoRef.current.muted = true;
           await videoRef.current.play();
+        }
+
+        if (!zxingReaderRef.current) {
+          try {
+            const [{ BrowserMultiFormatReader }, { DecodeHintType, BarcodeFormat }] = await Promise.all([
+              import('@zxing/browser'),
+              import('@zxing/library')
+            ]);
+            if (!isActive) return;
+            const hints = new Map();
+            hints.set(DecodeHintType.TRY_HARDER, true);
+            hints.set(DecodeHintType.POSSIBLE_FORMATS, [
+              BarcodeFormat.QR_CODE,
+              BarcodeFormat.DATA_MATRIX,
+              BarcodeFormat.CODE_128,
+              BarcodeFormat.EAN_13
+            ]);
+            zxingReaderRef.current = new BrowserMultiFormatReader(hints);
+          } catch (zxingErr) {
+            console.warn('Gagal memuat modul scanner ZXing:', zxingErr);
+          }
         }
 
         const scanFrame = async (timestamp: number) => {
@@ -1905,7 +1886,7 @@ export const JadwalView: React.FC<JadwalViewProps> = ({
       
       const formatTitleCaseSchool = (str: string) => {
         if (!str || str === '-') return '-';
-        const acronyms = new Set(['SDN', 'SDI', 'SDS', 'SMPN', 'SMAN', 'SMKN', 'MIN', 'MTSN', 'MAN', 'TK', 'KB', 'PAUD', 'KKG', 'K3S', 'PGRI', 'UPTD', 'KORWIL']);
+        const acronyms = new Set(['SD', 'NU', 'SDN', 'SDI', 'SDS', 'SMPN', 'SMAN', 'SMKN', 'MIN', 'MTSN', 'MAN', 'TK', 'KB', 'PAUD', 'KKG', 'K3S', 'PGRI', 'UPTD', 'KORWIL']);
         return str
           .trim()
           .split(/\s+/)
@@ -1917,12 +1898,26 @@ export const JadwalView: React.FC<JadwalViewProps> = ({
           .join(' ');
       };
 
+      const formatPhoneZeroPrefix = (rawPhone?: string) => {
+        if (!rawPhone || String(rawPhone).trim() === '' || String(rawPhone).trim() === '-') return '-';
+        let cleaned = String(rawPhone).trim().replace(/^'+/, '').replace(/[^\d+]/g, '');
+        if (!cleaned) return '-';
+        if (cleaned.startsWith('+62')) {
+          cleaned = '0' + cleaned.slice(3);
+        } else if (cleaned.startsWith('62')) {
+          cleaned = '0' + cleaned.slice(2);
+        } else if (!cleaned.startsWith('0')) {
+          cleaned = '0' + cleaned;
+        }
+        return cleaned;
+      };
+
       const teacherData = {
         name: t.name,
         nip: t.nip || '-',
         gender: getGender(t),
         school: formatTitleCaseSchool(t.school || '-'),
-        phone: t.phone || '-'
+        phone: formatPhoneZeroPrefix(t.phone)
       };
 
       if (record) {
@@ -1968,11 +1963,11 @@ export const JadwalView: React.FC<JadwalViewProps> = ({
       return items.map((item, idx) => `
         <tr>
           <td style="text-align: center; border: 1px solid #000; padding: 5px;">${idx + 1}</td>
-          <td style="border: 1px solid #000; padding: 5px; font-weight: bold;">${item.name}</td>
-          <td style="text-align: center; border: 1px solid #000; padding: 5px;">${item.nip}</td>
-          <td style="text-align: center; border: 1px solid #000; padding: 5px;">${item.gender}</td>
-          <td style="text-align: center; border: 1px solid #000; padding: 5px;">${item.school}</td>
-          <td style="text-align: center; border: 1px solid #000; padding: 5px;">${item.phone}</td>
+          <td style="border: 1px solid #000; padding: 5px; font-weight: bold;">${escapePdfHtml(item.name)}</td>
+          <td style="text-align: center; border: 1px solid #000; padding: 5px;">${escapePdfHtml(item.nip)}</td>
+          <td style="text-align: center; border: 1px solid #000; padding: 5px;">${escapePdfHtml(item.gender)}</td>
+          <td style="text-align: center; border: 1px solid #000; padding: 5px;">${escapePdfHtml(item.school)}</td>
+          <td style="text-align: center; border: 1px solid #000; padding: 5px;">${escapePdfHtml(item.phone)}</td>
         </tr>
       `).join('');
     };
@@ -2001,7 +1996,7 @@ export const JadwalView: React.FC<JadwalViewProps> = ({
             .kop-ranting { font-size: 16.5pt; font-weight: bold; text-transform: uppercase; letter-spacing: 0.5px; margin-top: 1px; }
             .kop-wilayah { font-size: 12pt; font-weight: bold; text-transform: uppercase; letter-spacing: 0.3px; margin-top: 1px; }
             .kop-sekretariat { font-size: 8.5pt; font-style: italic; margin-top: 2px; }
-            .kop-divider { border-top: 2px solid #000000; border-bottom: 1px solid #000000; height: 4px; margin-bottom: 12px; position: relative; z-index: 2; }
+            .kop-divider { border-top: 2px solid #000000; border-bottom: 1px solid #000000; height: 2px; margin-bottom: 12px; position: relative; z-index: 2; }
             .title-container { text-align: center; margin-top: 16px; margin-bottom: 20px; position: relative; z-index: 2; }
             .title-box { display: inline-block; border-bottom: 1px solid #000; padding-bottom: 3px; margin-bottom: 4px; }
             .title-box h2 { font-size: 14pt; font-weight: bold; margin: 0; }
@@ -2038,7 +2033,7 @@ export const JadwalView: React.FC<JadwalViewProps> = ({
                 <h2>REKAPITULASI KEHADIRAN PESERTA</h2>
               </div>
               <div class="event-info">
-                <strong>Kegiatan:</strong> ${targetEvt.title} &nbsp;|&nbsp; <strong>Tanggal:</strong> ${targetEvt.fullDate || targetEvt.date}
+                <strong>Kegiatan:</strong> ${escapePdfHtml(targetEvt.title)} &nbsp;|&nbsp; <strong>Tanggal:</strong> ${escapePdfHtml(targetEvt.fullDate || targetEvt.date)}
               </div>
             </div>
 
@@ -2124,7 +2119,7 @@ export const JadwalView: React.FC<JadwalViewProps> = ({
 
             <div class="signature-container">
               <div class="signature-box">
-                <p style="margin: 0;">Jember, ${todayFormatted}</p>
+                <p style="margin: 0;">Sumberbaru, ${todayFormatted}</p>
                 <p style="margin: 0;">${ketuaJabatan}</p>
                 <p style="margin: 0;">Kecamatan Sumberbaru</p>
                 <div class="signature-space">
@@ -2166,7 +2161,7 @@ export const JadwalView: React.FC<JadwalViewProps> = ({
       <html lang="id">
       <head>
         <meta charset="UTF-8">
-        <title>Rekapitulasi Kehadiran - ${targetEvt.title}</title>
+        <title>Rekapitulasi Kehadiran - ${escapePdfHtml(targetEvt.title)}</title>
         <style>
           @page { size: A4 landscape; margin: 12mm 15mm; }
           body, table, th, td, div, p, h1, h2, h3, span { font-family: 'Times New Roman', Times, serif; }
@@ -2180,7 +2175,7 @@ export const JadwalView: React.FC<JadwalViewProps> = ({
           .kop-ranting { font-size: 16.5pt; font-weight: bold; text-transform: uppercase; letter-spacing: 0.5px; margin-top: 1px; }
           .kop-wilayah { font-size: 12pt; font-weight: bold; text-transform: uppercase; letter-spacing: 0.3px; margin-top: 1px; }
           .kop-sekretariat { font-size: 8.5pt; font-style: italic; margin-top: 2px; }
-          .kop-divider { border-top: 2px solid #000000; border-bottom: 1px solid #000000; height: 4px; margin-bottom: 12px; position: relative; z-index: 2; }
+          .kop-divider { border-top: 2px solid #000000; border-bottom: 1px solid #000000; height: 2px; margin-bottom: 12px; position: relative; z-index: 2; }
           .title-container { text-align: center; margin-top: 20px; margin-bottom: 24px; position: relative; z-index: 2; }
           .title-box { display: inline-block; border-bottom: 1px solid #000; padding-bottom: 3px; margin-bottom: 4px; }
           .title-box h2 { font-size: 14pt; font-weight: bold; margin: 0; }
@@ -2216,7 +2211,7 @@ export const JadwalView: React.FC<JadwalViewProps> = ({
             <h2>REKAPITULASI KEHADIRAN PESERTA</h2>
           </div>
           <div class="event-info">
-            <strong>Kegiatan:</strong> ${targetEvt.title} &nbsp;|&nbsp; <strong>Tanggal:</strong> ${targetEvt.fullDate || targetEvt.date}
+            <strong>Kegiatan:</strong> ${escapePdfHtml(targetEvt.title)} &nbsp;|&nbsp; <strong>Tanggal:</strong> ${escapePdfHtml(targetEvt.fullDate || targetEvt.date)}
           </div>
         </div>
 
@@ -2302,7 +2297,7 @@ export const JadwalView: React.FC<JadwalViewProps> = ({
 
         <div class="signature-container">
           <div class="signature-box">
-            <p style="margin: 0;">Jember, ${todayFormatted}</p>
+            <p style="margin: 0;">Sumberbaru, ${todayFormatted}</p>
             <p style="margin: 0;">${ketuaJabatan}</p>
             <p style="margin: 0;">Kecamatan Sumberbaru</p>
             <div class="signature-space">
@@ -2790,7 +2785,7 @@ export const JadwalView: React.FC<JadwalViewProps> = ({
                         <div className="flex flex-col items-center sm:flex-row sm:justify-end gap-2 w-full">
                           {/* Kotak Countdown */}
                           <div className={`px-3 py-1.5 rounded-xl border font-mono font-black text-xs sm:text-sm tracking-wider shadow-sm text-center transition-colors duration-300 order-1 sm:order-2 ${urgencyStyles[urgency]}`}>
-                            {getCountdownText(currentDeadline)}
+                            <DeadlineCountdownText deadlineStr={currentDeadline} />
                           </div>
 
                           {/* Baris Tombol Undangan & Pilih Anggota di Ponsel */}
@@ -3403,8 +3398,8 @@ export const JadwalView: React.FC<JadwalViewProps> = ({
       
       {/* MODAL UPLOAD UNDANGAN KEGIATAN */}
       {showUploadUndanganModal && selectedEventForUndangan && (
-        <div className={`fixed inset-0 z-[65] bg-black/75 backdrop-blur-md flex items-center justify-center p-4 overflow-y-auto custom-scrollbar ${isClosingUploadUndanganModal ? 'modal-backdrop-exit' : 'animate-backdrop-fade'}`}>
-          <div className={`${isDark ? 'bg-stone-900 border-stone-800' : 'bg-white border-stone-200/90'} rounded-2xl max-w-lg w-full p-6 shadow-2xl border my-8 ${isClosingUploadUndanganModal ? 'modal-content-exit' : 'animate-modal-pop'}`}>
+        <div className="fixed inset-0 z-[65] bg-black/75 backdrop-blur-md flex items-center justify-center p-4 overflow-y-auto custom-scrollbar animate-backdrop-fade">
+          <div className={`${isDark ? 'bg-stone-900 border-stone-800' : 'bg-white border-stone-200/90'} rounded-2xl max-w-lg w-full p-6 shadow-2xl border my-8 animate-modal-pop`}>
             <div className={`flex items-center justify-between pb-3 border-b ${isDark ? 'border-stone-800' : 'border-stone-200/80'}`}>
               <div className="flex items-center gap-2">
                 <div className={`p-2 rounded-xl border ${isDark ? 'bg-red-950/70 border-red-800/60 text-amber-400' : 'bg-red-50 border-red-200 text-red-800'}`}>
@@ -3636,8 +3631,8 @@ export const JadwalView: React.FC<JadwalViewProps> = ({
       
       {/* MODAL FILL ATTENDANCE */}
       {showAbsensiModal && selectedEvent && (
-        <div className={`fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto custom-scrollbar ${isClosingAbsensiModal ? 'modal-backdrop-exit' : 'animate-backdrop-fade'}`}>
-          <div className={`${isDark ? 'bg-stone-900 border-stone-800' : 'bg-white border-stone-200/90'} rounded-2xl max-w-lg w-full p-6 shadow-2xl border my-8 ${isClosingAbsensiModal ? 'modal-content-exit' : 'animate-modal-pop'}`}>
+        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto custom-scrollbar animate-backdrop-fade">
+          <div className={`${isDark ? 'bg-stone-900 border-stone-800' : 'bg-white border-stone-200/90'} rounded-2xl max-w-lg w-full p-6 shadow-2xl border my-8 animate-modal-pop`}>
             <div className={`flex items-center justify-between pb-3 border-b ${isDark ? 'border-stone-800' : 'border-stone-200/80'}`}>
               <div className="flex items-center gap-2">
                 <div className={`p-2 rounded-xl border ${isDark ? 'bg-red-950/70 border-red-800/60 text-amber-400' : 'bg-red-50 border-red-200 text-red-800'}`}>
@@ -4793,44 +4788,53 @@ export const JadwalView: React.FC<JadwalViewProps> = ({
                 }
               });
 
-              const schoolStats = Object.values(schoolStatsMap).sort((a, b) =>
-                a.school.localeCompare(b.school, 'id')
-              );
+              const schoolStats = Object.values(schoolStatsMap).sort((a, b) => {
+                const aIsSdNu = a.school.startsWith('SD NU');
+                const bIsSdNu = b.school.startsWith('SD NU');
+                if (aIsSdNu !== bIsSdNu) return aIsSdNu ? 1 : -1;
+                return a.school.localeCompare(b.school, 'id');
+              });
               const totalAll = schoolStats.reduce((s, x) => s + x.total, 0);
               const totalHadir = schoolStats.reduce((s, x) => s + x.hadir, 0);
               const totalIzin = schoolStats.reduce((s, x) => s + x.izinSakit, 0);
               const totalBelum = schoolStats.reduce((s, x) => s + x.belum, 0);
 
+              const eventEnd = getEventEndDateTime(activeEvent);
+              const isEventFinished = Boolean(eventEnd && currentTime.getTime() > eventEnd.getTime());
+              const missingLabel = isEventFinished ? 'Alpha' : 'Belum Absen';
+
               return (
                 <>
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                    <div className="flex-1">
-                      <label className={`block text-[11px] font-bold uppercase tracking-wider mb-1 ${isDark ? 'text-stone-400' : 'text-stone-600'}`}>
-                        Pilih Agenda Kegiatan
-                      </label>
-                      <select
-                        value={String(activeEvent.id)}
-                        onChange={(e) => setSelectedSchoolStatsEventId(e.target.value)}
-                        className={`w-full px-3.5 py-2.5 rounded-xl border text-xs font-bold focus:outline-none focus:border-red-700 cursor-pointer ${isDark ? 'bg-stone-800 border-stone-700 text-stone-100' : 'bg-[#faf8f5] border-stone-200 text-stone-800'}`}
-                      >
-                        {sortedEvents.map((ev) => (
-                          <option key={ev.id} value={String(ev.id)} className={isDark ? 'bg-stone-800 text-stone-100' : 'bg-white text-stone-800'}>
-                            {ev.title} ({ev.fullDate || ev.date})
-                          </option>
-                        ))}
-                      </select>
-                    </div>
+                  <div className="space-y-1">
+                    <label className={`block text-[11px] font-bold uppercase tracking-wider ${isDark ? 'text-stone-400' : 'text-stone-600'}`}>
+                      Pilih Agenda Kegiatan
+                    </label>
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                      <div className="flex-1">
+                        <select
+                          value={String(activeEvent.id)}
+                          onChange={(e) => setSelectedSchoolStatsEventId(e.target.value)}
+                          className={`w-full px-3.5 py-2.5 rounded-xl border text-xs font-bold focus:outline-none focus:border-red-700 cursor-pointer ${isDark ? 'bg-stone-800 border-stone-700 text-stone-100' : 'bg-[#faf8f5] border-stone-200 text-stone-800'}`}
+                        >
+                          {sortedEvents.map((ev) => (
+                            <option key={ev.id} value={String(ev.id)} className={isDark ? 'bg-stone-800 text-stone-100' : 'bg-white text-stone-800'}>
+                              {ev.title} ({ev.fullDate || ev.date})
+                            </option>
+                          ))}
+                        </select>
+                      </div>
 
-                    <div className="flex flex-wrap items-center gap-1.5 text-[11px] font-bold">
-                      <span className={`px-2.5 py-1 rounded-md border ${isDark ? 'bg-emerald-950/60 border-emerald-800/50 text-emerald-300' : 'bg-emerald-50 border-emerald-200 text-emerald-800'}`}>
-                        Hadir: {totalHadir}
-                      </span>
-                      <span className={`px-2.5 py-1 rounded-md border ${isDark ? 'bg-amber-950/60 border-amber-800/50 text-amber-300' : 'bg-amber-50 border-amber-200 text-amber-800'}`}>
-                        Izin/Sakit: {totalIzin}
-                      </span>
-                      <span className={`px-2.5 py-1 rounded-md border ${isDark ? 'bg-red-950/60 border-red-800/50 text-red-300' : 'bg-red-50 border-red-200 text-red-800'}`}>
-                        Belum: {totalBelum} / {totalAll}
-                      </span>
+                      <div className="flex flex-wrap items-center gap-1.5 text-[11px] font-bold shrink-0">
+                        <span className={`px-2.5 py-2 rounded-xl border ${isDark ? 'bg-emerald-950/60 border-emerald-800/50 text-emerald-300' : 'bg-emerald-50 border-emerald-200 text-emerald-800'}`}>
+                          Hadir: {totalHadir}
+                        </span>
+                        <span className={`px-2.5 py-2 rounded-xl border ${isDark ? 'bg-amber-950/60 border-amber-800/50 text-amber-300' : 'bg-amber-50 border-amber-200 text-amber-800'}`}>
+                          Izin/Sakit: {totalIzin}
+                        </span>
+                        <span className={`px-2.5 py-2 rounded-xl border ${isDark ? 'bg-red-950/60 border-red-800/50 text-red-300' : 'bg-red-50 border-red-200 text-red-800'}`}>
+                          {isEventFinished ? 'Alpha' : 'Belum'}: {totalBelum} / {totalAll}
+                        </span>
+                      </div>
                     </div>
                   </div>
 
@@ -4859,7 +4863,7 @@ export const JadwalView: React.FC<JadwalViewProps> = ({
                                 </span>
                               </div>
                               <p className={`text-xs ${isDark ? 'text-stone-400' : 'text-stone-600'}`}>
-                                Hadir: <strong className="text-emerald-600 dark:text-emerald-400">{grp.hadir}</strong> • Izin/Sakit: <strong className="text-amber-600 dark:text-amber-400">{grp.izinSakit}</strong> • Belum Absen: <strong className="text-red-600 dark:text-red-400">{grp.belum}</strong> dari {grp.total} peserta
+                                Hadir: <strong className="text-emerald-600 dark:text-emerald-400">{grp.hadir}</strong> • Izin/Sakit: <strong className="text-amber-600 dark:text-amber-400">{grp.izinSakit}</strong> • {missingLabel}: <strong className="text-red-600 dark:text-red-400">{grp.belum}</strong> dari {grp.total} peserta
                               </p>
                             </div>
 
@@ -4875,8 +4879,8 @@ export const JadwalView: React.FC<JadwalViewProps> = ({
                                   `Kegiatan: *${activeEvent.title}*\n` +
                                   `Tanggal: ${activeEvent.fullDate || activeEvent.date}\n` +
                                   `Unit Sekolah: *${grp.school}*\n` +
-                                  `Partisipasi: *${grp.hadir}/${grp.total} Hadir (${pct}%)* | Izin/Sakit: ${grp.izinSakit} | Belum: ${grp.belum}\n\n` +
-                                  `${grp.missingNames.length > 0 ? `*Belum mengisi daftar hadir (${grp.missingNames.length} orang):*\n${missingText}\n\n` : `${missingText}\n\n`}` +
+                                  `Partisipasi: *${grp.hadir}/${grp.total} Hadir (${pct}%)* | Izin/Sakit: ${grp.izinSakit} | ${isEventFinished ? 'Alpha' : 'Belum'}: ${grp.belum}\n\n` +
+                                  `${grp.missingNames.length > 0 ? `*${isEventFinished ? 'Alpha / tidak hadir tanpa keterangan' : 'Belum mengisi daftar hadir'} (${grp.missingNames.length} orang):*\n${missingText}\n\n` : `${missingText}\n\n`}` +
                                   `_Mohon bantuannya untuk pengingat kehadiran rekan guru di sekolah. Terima kasih._`;
                                 openWhatsAppShare(msg);
                               }}
@@ -4889,7 +4893,7 @@ export const JadwalView: React.FC<JadwalViewProps> = ({
 
                           {grp.missingNames.length > 0 && (
                             <p className={`text-[11px] leading-relaxed ${isDark ? 'text-red-400/90' : 'text-red-700/90'}`}>
-                              Belum absen: {grp.missingNames.join(', ')}
+                              {isEventFinished ? 'Alpha' : 'Belum absen'}: {grp.missingNames.join(', ')}
                             </p>
                           )}
                         </div>

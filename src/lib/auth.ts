@@ -20,10 +20,6 @@ export function emailToDocKey(email: string): string {
   return email.trim().toLowerCase().replace(/[^a-z0-9]/g, '_');
 }
 
-export function isSuperAdminEmail(email?: string | null): boolean {
-  return Boolean(email && email.trim().toLowerCase() === SUPER_ADMIN_EMAIL);
-}
-
 export function isPengurusRole(role: PengurusRole): boolean {
   return role === 'ketua' || role === 'sekretaris' || role === 'bendahara' || role === 'seksi';
 }

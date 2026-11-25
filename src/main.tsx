@@ -51,8 +51,21 @@ window.addEventListener('unhandledrejection', (e) => {
 import App from './App.tsx';
 import './index.css';
 
-// Security checks to prevent F12 and Context Menu
-window.addEventListener('contextmenu', (e) => e.preventDefault());
+// Security checks to prevent F12 and Context Menu (tetap izinkan klik kanan pada kolom input/textarea agar bisa Copy-Paste)
+window.addEventListener('contextmenu', (e) => {
+  const target = e.target as HTMLElement | null;
+  if (
+    target &&
+    (target.tagName === 'INPUT' ||
+      target.tagName === 'TEXTAREA' ||
+      target.tagName === 'SELECT' ||
+      target.isContentEditable ||
+      Boolean(target.closest('input, textarea, select, [contenteditable="true"]')))
+  ) {
+    return;
+  }
+  e.preventDefault();
+});
 window.addEventListener('keydown', (e) => {
   if (
     e.key === 'F12' ||

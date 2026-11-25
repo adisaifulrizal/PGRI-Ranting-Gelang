@@ -1,6 +1,11 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Info, Target, Award, CheckCircle2, MessageCircle, Building2, Contact2, Pencil, X, Check, Plus, Trash2 } from 'lucide-react';
 import { syncSettingsToCloud } from '../../lib/sync';
+import {
+  DEFAULT_PEMBINA_MEMBER,
+  DEFAULT_PENANGGUNG_JAWAB_MEMBERS,
+  DEFAULT_PENGURUS_MEMBERS
+} from '../../lib/orgConfig';
 
 // Subkomponen Kartu Interaktif dengan Efek Spotlight Mouse Berbasis CSS Variables
 const SpotlightCard: React.FC<{
@@ -152,30 +157,9 @@ export const ProfilKBView: React.FC<{ activeRole?: 'guru' | 'admin' }> = ({ acti
     'Menyelenggarakan tata kelola administrasi, keuangan, dan kegiatan organisasi yang transparan, akuntabel, dan berbasis digital.'
   ];
 
-  const defaultPembina = {
-    role: 'Pengawas Bina',
-    name: 'Hanifatul Susmiyah, S.Pd',
-    nip: '197306022002122005',
-    instansi: 'Pengawas Bina Kecamatan Sumberbaru',
-    wa: '6285859083645'
-  };
+  const defaultPembina = DEFAULT_PEMBINA_MEMBER;
 
-  const defaultPenanggungJawab = [
-    {
-      role: 'Ketua K3S',
-      name: 'Ghufron Atok Urrohman, S.Pd',
-      nip: '197805192014121003',
-      instansi: 'Ketua Kelompok Kerja Kepala Sekolah',
-      wa: '6285859342500'
-    },
-    {
-      role: 'Ketua PGRI Cabang',
-      name: 'Christian Dri Firman Widodo, S.Pd',
-      nip: '198012262014121002',
-      instansi: 'Ketua PGRI Cabang Kecamatan Sumberbaru',
-      wa: '6281217910263'
-    }
-  ];
+  const defaultPenanggungJawab = DEFAULT_PENANGGUNG_JAWAB_MEMBERS;
 
   const getPengurusStyle = (idx: number) => {
     const styles = [
@@ -223,78 +207,7 @@ export const ProfilKBView: React.FC<{ activeRole?: 'guru' | 'admin' }> = ({ acti
     return styles[idx % styles.length];
   };
 
-  const defaultPengurusBase = [
-    {
-      role: 'Penasehat',
-      name: 'Semua Kepala Sekolah',
-      nip: '-',
-      instansi: '-',
-      wa: '-'
-    },
-    {
-      role: 'Ketua PGRI Ranting Gelang',
-      name: 'Umar Ali Kusuma',
-      nip: '198912092025211092',
-      instansi: 'SDN GELANG 03',
-      wa: '6288235537431'
-    },
-    {
-      role: 'Wakil Ketua',
-      name: 'Hartatik, S.Pd',
-      nip: '198301072022212001',
-      instansi: 'SDN KALIGLAGAH 02',
-      wa: '6282245380232'
-    },
-    {
-      role: 'Sekretaris',
-      name: 'Adi Saiful Rizal, S.Pd',
-      nip: '199401162025211089',
-      instansi: 'SDN GELANG 03',
-      wa: '6282292232649'
-    },
-    {
-      role: 'Bendahara',
-      name: 'Atik Andriyati, S.Pd',
-      nip: '197701142014122002',
-      instansi: 'SDN GELANG 06',
-      wa: '6281515786365'
-    },
-    {
-      role: 'Seksi Pembinaan Olahraga',
-      name: 'Saiful Arif, S.Pd',
-      nip: '198604122022211003',
-      instansi: 'SDN GELANG 07',
-      wa: '62881026888955'
-    },
-    {
-      role: 'Seksi Pemberdayaan Perempuan',
-      name: 'Siti Oktavia, S.Pd',
-      nip: '197910072022212001',
-      instansi: 'SDN GELANG 04',
-      wa: '6285697890959'
-    },
-    {
-      role: 'Seksi Pengembangan Profesi & Karir',
-      name: 'Rohman, S.Pd',
-      nip: '198904202022211002',
-      instansi: 'SDN KALIGLAGAH 02',
-      wa: '6282332910923'
-    },
-    {
-      role: 'Seksi Humas',
-      name: 'Jasuri Budianto, S.Pd',
-      nip: '196918082022211001',
-      instansi: 'SDN GELANG 01',
-      wa: '6285314904015'
-    },
-    {
-      role: 'Seksi Keagamaan',
-      name: 'Muhammad Jupri, S.Pd.I',
-      nip: '-',
-      instansi: 'SD NU 21 MIFTAHUL ULUM',
-      wa: '628817159553'
-    }
-  ];
+  const defaultPengurusBase = DEFAULT_PENGURUS_MEMBERS;
 
   const attachPengurusStyles = (list: any[]) =>
     list.map((item, idx) => ({

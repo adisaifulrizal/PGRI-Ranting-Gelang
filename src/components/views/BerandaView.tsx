@@ -1,10 +1,7 @@
 import React, { useRef, useState, useEffect, useMemo } from 'react';
 import { 
   Users, 
-  BookOpen, 
   Calendar, 
-  MessageSquare, 
-  ChevronRight, 
   Star, 
   Clock, 
   Sparkles, 
@@ -21,40 +18,22 @@ import {
   Building2,
   ShieldCheck
 } from 'lucide-react';
-import { ActiveTab, ActivityEvent, Teacher, Material, CashPayment, AttendanceRecord } from '../../types';
-import { getOrgConfig } from '../../lib/orgConfig';
+import { ActiveTab, ActivityEvent, Teacher, CashPayment, AttendanceRecord } from '../../types';
+import { buildDefaultProfilCandidates, DEFAULT_PENGURUS_MEMBERS, getOrgConfig } from '../../lib/orgConfig';
 
 interface BerandaViewProps {
   onNavigate: (tab: ActiveTab) => void;
   events: ActivityEvent[];
-  announcements?: any[];
   onOpenAttendance: (event: ActivityEvent) => void;
   theme?: 'light' | 'dark';
   teachers?: Teacher[];
-  materials?: Material[];
-  forumPosts?: any[];
-  discussions?: any[];
-  totalDiscussionCount?: number;
   cashPayments?: CashPayment[];
   attendanceList?: AttendanceRecord[];
-  activeRole?: 'guru' | 'admin';
   isEntryReady?: boolean;
 }
 
-// Data sampel cadangan jika props dari App.tsx belum terhubung
-const DEFAULT_TEACHERS_SAMPLE: Partial<Teacher>[] = [
-  { id: 't1', name: 'Adi Saiful Rizal, S.Pd', nip: '198905202022211005', gender: 'L', school: 'SDN GELANG 03', role: 'Anggota Aktif' },
-  { id: 't2', name: 'Siti Nurul, S.Pd', nip: '199104122023212008', gender: 'P', school: 'SDN GELANG 01', role: 'Anggota Aktif' },
-  { id: 't3', name: 'Dwi Rahayu, S.Pd', nip: '198703152020122004', gender: 'P', school: 'SDN GELANG 02', role: 'Anggota Aktif' },
-  { id: 't4', name: 'Budi Santoso, S.Pd', nip: '198506102019031002', gender: 'L', school: 'SDN JAMBESARI 01', role: 'Anggota Aktif' },
-  { id: 't5', name: 'Ahmad Fauzi, S.Pd', nip: '199308252024211003', gender: 'L', school: 'SDN JATIROTO 01', role: 'Anggota Aktif' },
-];
-
-const DEFAULT_MATERIALS_SAMPLE: Partial<Material>[] = [
-  { id: 'm1', title: 'Panduan Organisasi PGRI Ranting' },
-  { id: 'm2', title: 'Agenda Kerja PGRI Ranting Gelang' },
-  { id: 'm3', title: 'Tata Tertib Rapat Anggota' },
-];
+// Fallback kosong jika data anggota belum tersedia (menghindari tampilan sekolah fiktif di luar Ranting Gelang)
+const DEFAULT_TEACHERS_SAMPLE: Teacher[] = [];
 
 const useCountUp = (target: number, duration = 500, isActive = true): number => {
   const [count, setCount] = useState(0);
@@ -93,10 +72,6 @@ export const BerandaView: React.FC<BerandaViewProps> = ({
   onOpenAttendance,
   theme = 'light',
   teachers,
-  materials,
-  forumPosts,
-  discussions,
-  totalDiscussionCount,
   cashPayments,
   attendanceList,
   isEntryReady = true
@@ -465,22 +440,21 @@ export const BerandaView: React.FC<BerandaViewProps> = ({
   // FILTER GLOBAL UNTUK MENGAMBIL ANGGOTA AKTIF SAJA
   const activeTeachersList = effectiveTeachers.filter(isMemberActive);
 
+  // Pantau pembaruan data Pengaturan/Kepengurusan secara real-time tanpa perlu refresh halaman
+  const [settingsVersion, setSettingsVersion] = useState(0);
+  useEffect(() => {
+    const bumpSettings = () => setSettingsVersion(v => v + 1);
+    window.addEventListener('kombel-settings-updated', bumpSettings);
+    window.addEventListener('storage', bumpSettings);
+    return () => {
+      window.removeEventListener('kombel-settings-updated', bumpSettings);
+      window.removeEventListener('storage', bumpSettings);
+    };
+  }, []);
+
   // Daftar Gabungan Anggota Aktif + Pengurus Wajib Kontribusi (Sinkron 100% dengan KeuanganView)
   const cashContributionMembersList = useMemo(() => {
-    const fallbackPengurus = [
-      { id: 'pengurus-1', name: 'Umar Ali Kusuma', nip: '198912092025211092', school: 'SDN GELANG 03', gender: 'L', kategoriProfil: 'Pengurus Ranting' },
-      { id: 'pengurus-2', name: 'Hartatik, S.Pd', nip: '198301072022212001', school: 'SDN KALIGLAGAH 02', gender: 'P', kategoriProfil: 'Pengurus Ranting' },
-      { id: 'pengurus-3', name: 'Adi Saiful Rizal, S.Pd', nip: '199401162025211089', school: 'SDN GELANG 03', gender: 'L', kategoriProfil: 'Pengurus Ranting' },
-      { id: 'pengurus-4', name: 'Atik Andriyati, S.Pd', nip: '197701142014122002', school: 'SDN GELANG 06', gender: 'P', kategoriProfil: 'Pengurus Ranting' },
-      { id: 'pengurus-5', name: 'Saiful Arif, S.Pd', nip: '198604122022211003', school: 'SDN GELANG 07', gender: 'L', kategoriProfil: 'Pengurus Ranting' },
-      { id: 'pengurus-6', name: 'Siti Oktavia, S.Pd', nip: '197910072022212001', school: 'SDN GELANG 04', gender: 'P', kategoriProfil: 'Pengurus Ranting' },
-      { id: 'pengurus-7', name: 'Rohman, S.Pd', nip: '198904202022211002', school: 'SDN KALIGLAGAH 02', gender: 'L', kategoriProfil: 'Pengurus Ranting' },
-      { id: 'pengurus-8', name: 'Jasuri Budianto, S.Pd', nip: '196918082022211001', school: 'SDN GELANG 01', gender: 'L', kategoriProfil: 'Pengurus Ranting' },
-      { id: 'pengurus-9', name: 'Muhammad Jupri, S.Pd.I', nip: '', school: 'SD NU 21 MIFTAHUL ULUM', gender: 'L', kategoriProfil: 'Pengurus Ranting' },
-      { id: 'pj-1', name: 'Ghufron Atok Urrohman, S.Pd', nip: '197805192014121003', school: 'Ketua Kelompok Kerja Kepala Sekolah', gender: 'L', kategoriProfil: 'Penanggung Jawab' },
-      { id: 'pj-2', name: 'Christian Dri Firman Widodo, S.Pd', nip: '198012262014121002', school: 'Ketua PGRI Cabang Kecamatan Sumberbaru', gender: 'L', kategoriProfil: 'Penanggung Jawab' },
-      { id: 'pembina-1', name: 'Hanifatul Susmiyah, S.Pd', nip: '197306022002122005', school: 'Pengawas Bina Kecamatan Sumberbaru', gender: 'P', kategoriProfil: 'Pembina' },
-    ];
+    const fallbackPengurus = buildDefaultProfilCandidates();
 
     let candidates: any[] = [];
     let selectedNames: string[] = fallbackPengurus
@@ -489,71 +463,79 @@ export const BerandaView: React.FC<BerandaViewProps> = ({
 
     if (typeof window !== 'undefined') {
       try {
+        // 1. Struktur Kepengurusan (kombel-pengurus) - fallback hanya jika belum ada di Pengaturan
         const savedPengurus = localStorage.getItem('kombel-pengurus');
-        if (savedPengurus) {
-          const parsed = JSON.parse(savedPengurus);
-          if (Array.isArray(parsed)) {
-            parsed.forEach((p: any, idx: number) => {
-              const nm = String(p?.name || '').trim();
-              if (!nm || nm === '-' || nm.toLowerCase().startsWith('semua ')) return;
-              candidates.push({
-                id: p.id || `pengurus-${idx + 1}`,
-                name: nm,
-                nip: p.nip && p.nip !== '-' ? p.nip : '',
-                school: p.instansi && p.instansi !== '-' ? p.instansi : 'PGRI Ranting Gelang',
-                gender: p.gender
-              });
+        const parsedPengurus = savedPengurus ? JSON.parse(savedPengurus) : null;
+        if (Array.isArray(parsedPengurus) && parsedPengurus.length > 0) {
+          parsedPengurus.forEach((p: any, idx: number) => {
+            const nm = String(p?.name || '').trim();
+            if (!nm || nm === '-' || nm.toLowerCase().startsWith('semua ')) return;
+            candidates.push({
+              id: p.id || `pengurus-${idx + 1}`,
+              name: nm,
+              nip: p.nip && p.nip !== '-' ? p.nip : '',
+              school: p.instansi && p.instansi !== '-' ? p.instansi : 'PGRI Ranting Gelang',
+              gender: p.gender
             });
-          }
+          });
+        } else {
+          fallbackPengurus
+            .filter(f => f.kategoriProfil === 'Pengurus Ranting')
+            .forEach(f => candidates.push(f));
         }
+
+        // 2. Penanggung Jawab (kombel-penanggungjawab)
         const savedPj = localStorage.getItem('kombel-penanggungjawab');
-        if (savedPj) {
-          const parsed = JSON.parse(savedPj);
-          if (Array.isArray(parsed)) {
-            parsed.forEach((p: any, idx: number) => {
-              const nm = String(p?.name || '').trim();
-              if (!nm || nm === '-' || nm.toLowerCase().startsWith('semua ')) return;
-              if (!candidates.some(c => c.name.trim().toLowerCase() === nm.toLowerCase())) {
-                candidates.push({
-                  id: `pj-${idx + 1}`,
-                  name: nm,
-                  nip: p.nip && p.nip !== '-' ? p.nip : '',
-                  school: p.instansi && p.instansi !== '-' ? p.instansi : 'Penanggung Jawab',
-                  gender: p.gender
-                });
-              }
-            });
-          }
-        }
-        const savedPembina = localStorage.getItem('kombel-pembina');
-        if (savedPembina) {
-          const parsed = JSON.parse(savedPembina);
-          const nm = String(parsed?.name || '').trim();
-          if (nm && nm !== '-' && !nm.toLowerCase().startsWith('semua ')) {
+        const parsedPj = savedPj ? JSON.parse(savedPj) : null;
+        if (Array.isArray(parsedPj) && parsedPj.length > 0) {
+          parsedPj.forEach((p: any, idx: number) => {
+            const nm = String(p?.name || '').trim();
+            if (!nm || nm === '-' || nm.toLowerCase().startsWith('semua ')) return;
             if (!candidates.some(c => c.name.trim().toLowerCase() === nm.toLowerCase())) {
               candidates.push({
-                id: 'pembina-1',
+                id: `pj-${idx + 1}`,
                 name: nm,
-                nip: parsed.nip && parsed.nip !== '-' ? parsed.nip : '',
-                school: parsed.instansi && parsed.instansi !== '-' ? parsed.instansi : 'Pembina',
-                gender: parsed.gender
+                nip: p.nip && p.nip !== '-' ? p.nip : '',
+                school: p.instansi && p.instansi !== '-' ? p.instansi : 'Penanggung Jawab',
+                gender: p.gender
               });
             }
-          }
+          });
+        } else {
+          fallbackPengurus
+            .filter(f => f.kategoriProfil === 'Penanggung Jawab')
+            .forEach(f => candidates.push(f));
         }
+
+        // 3. Pembina (kombel-pembina)
+        const savedPembina = localStorage.getItem('kombel-pembina');
+        const parsedPembina = savedPembina ? JSON.parse(savedPembina) : null;
+        const pembinaName = String(parsedPembina?.name || '').trim();
+        if (pembinaName && pembinaName !== '-' && !pembinaName.toLowerCase().startsWith('semua ')) {
+          if (!candidates.some(c => c.name.trim().toLowerCase() === pembinaName.toLowerCase())) {
+            candidates.push({
+              id: 'pembina-1',
+              name: pembinaName,
+              nip: parsedPembina.nip && parsedPembina.nip !== '-' ? parsedPembina.nip : '',
+              school: parsedPembina.instansi && parsedPembina.instansi !== '-' ? parsedPembina.instansi : 'Pembina',
+              gender: parsedPembina.gender
+            });
+          }
+        } else {
+          fallbackPengurus
+            .filter(f => f.kategoriProfil === 'Pembina')
+            .forEach(f => candidates.push(f));
+        }
+
         const savedSelected = localStorage.getItem('pgri-verified-pengurus-names');
         if (savedSelected) {
           const parsedSel = JSON.parse(savedSelected);
           if (Array.isArray(parsedSel)) selectedNames = parsedSel;
         }
       } catch {}
+    } else {
+      candidates = [...fallbackPengurus];
     }
-
-    fallbackPengurus.forEach(f => {
-      if (!candidates.some(c => c.name.trim().toLowerCase() === f.name.trim().toLowerCase())) {
-        candidates.push(f);
-      }
-    });
 
     const activePengurus = candidates.filter(c => selectedNames.includes(c.name.trim().toLowerCase()));
     const normalizeName = (name?: string) =>
@@ -574,7 +556,7 @@ export const BerandaView: React.FC<BerandaViewProps> = ({
     });
 
     return combined.sort((a, b) => (a.name || '').localeCompare(b.name || '', 'id', { sensitivity: 'base' }));
-  }, [activeTeachersList, localCashPayments, cashPayments]);
+  }, [activeTeachersList, localCashPayments, cashPayments, settingsVersion]);
 
   // 1. Hitung jumlah anggota aktif
   const activeTeachersCount = activeTeachersList.length;
@@ -855,71 +837,15 @@ export const BerandaView: React.FC<BerandaViewProps> = ({
       }
     } catch {}
 
-    let pengurusData = [
-      {
-        name: 'Umar Ali Kusuma',
-        nip: '198912092025211092',
-        school: 'SDN Gelang 03',
-        role: 'Ketua PGRI Ranting Gelang',
-        phone: '-'
-      },
-      {
-        name: 'Hartatik, S.Pd',
-        nip: '-',
-        school: 'SDN Gelang 01',
-        role: 'Wakil Ketua',
-        phone: '-'
-      },
-      {
-        name: 'Adi Saiful Rizal, S.Pd',
-        nip: '199401162025211089',
-        school: 'SDN Gelang 03',
-        role: 'Sekretaris',
-        phone: '6282292232649'
-      },
-      {
-        name: 'Atik Andriyati, S.Pd',
-        nip: '-',
-        school: 'SDN Gelang 04',
-        role: 'Bendahara',
-        phone: '-'
-      },
-      {
-        name: 'Saiful Arif, S.Pd',
-        nip: '-',
-        school: 'SDN Gelang 05',
-        role: 'Seksi Pembinaan Olahraga',
-        phone: '-'
-      },
-      {
-        name: 'Siti Oktavia, S.Pd',
-        nip: '-',
-        school: 'SDN Gelang 06',
-        role: 'Seksi Pemberdayaan Perempuan',
-        phone: '-'
-      },
-      {
-        name: 'Rohman, S.Pd',
-        nip: '-',
-        school: 'SDN Gelang 07',
-        role: 'Seksi Pengembangan Profesi & Karir',
-        phone: '-'
-      },
-      {
-        name: 'Jasuri Budianto, S.Pd',
-        nip: '-',
-        school: 'SDN Kaliglagah 02',
-        role: 'Seksi Humas',
-        phone: '-'
-      },
-      {
-        name: 'Muhammad Jupri, S.Pd.I',
-        nip: '-',
-        school: 'SD NU 21 Miftahul Ulum',
-        role: 'Seksi Keagamaan',
-        phone: '-'
-      }
-    ];
+    let pengurusData = DEFAULT_PENGURUS_MEMBERS
+      .filter((p) => p.name !== '-' && !p.name.toLowerCase().startsWith('semua '))
+      .map((p) => ({
+        name: p.name,
+        nip: p.nip,
+        school: p.instansi,
+        role: p.role,
+        phone: p.wa
+      }));
     try {
       const saved = localStorage.getItem('kombel-pengurus');
       if (saved) {
@@ -972,7 +898,7 @@ export const BerandaView: React.FC<BerandaViewProps> = ({
     });
 
     return [...profilMembers, ...regularMembers];
-  }, [effectiveTeachers]);
+  }, [effectiveTeachers, settingsVersion]);
 
   // Event terpilih untuk kehadiran
   const currentSelectedAttendanceEvent = useMemo(() => {
@@ -1138,10 +1064,6 @@ export const BerandaView: React.FC<BerandaViewProps> = ({
   const itemBgClass = isLight 
     ? 'bg-[#faf8f5] hover:bg-red-50/50 border-stone-200/80' 
     : 'bg-stone-800/60 hover:bg-stone-800 border-stone-700/60';
-
-  const buttonSubtleClass = isLight 
-    ? 'bg-stone-100 hover:bg-red-50 text-red-900' 
-    : 'bg-stone-800 hover:bg-stone-700 text-amber-300';
 
   return (
     <div className={`font-sans space-y-6 ${isEntryReady ? 'beranda-entry-ready animate-in fade-in duration-300' : 'beranda-entry-waiting'}`}>
@@ -1499,19 +1421,31 @@ export const BerandaView: React.FC<BerandaViewProps> = ({
         
         {/* Chart: Kehadiran Anggota (Kiri) */}
         <div className={`${cardBgClass} rounded-2xl p-6 border flex flex-col justify-between hover:-translate-y-0.5 transition-all duration-200`}>
-          <div className="flex items-center justify-between gap-2 mb-2">
-            <div className="flex items-center gap-2 shrink-0">
-              <UserCheck className={`w-4 h-4 ${isLight ? 'text-red-800' : 'text-amber-400'}`} />
-              <h3 className={`text-base font-extrabold ${isLight ? 'text-stone-900' : 'text-stone-100'}`}>
-                Kehadiran
-              </h3>
+          <div className="grid grid-cols-1 sm:grid-cols-2 items-center gap-2 sm:gap-4 mb-2">
+            <div className="flex items-center justify-between sm:justify-start gap-2 shrink-0">
+              <div className="flex items-center gap-2">
+                <UserCheck className={`w-4 h-4 ${isLight ? 'text-red-800' : 'text-amber-400'}`} />
+                <h3 className={`text-base font-extrabold ${isLight ? 'text-stone-900' : 'text-stone-100'}`}>
+                  Kehadiran
+                </h3>
+              </div>
+              <button 
+                onClick={() => onNavigate('jadwal')}
+                className={`sm:hidden text-[10px] font-extrabold uppercase px-2.5 py-1 rounded-lg border transition-colors cursor-pointer shrink-0 ${
+                  isLight
+                    ? 'bg-red-50 text-red-800 border-red-200 hover:bg-red-100'
+                    : 'bg-red-950/70 text-amber-300 border-red-800/60 hover:bg-red-900/60'
+                }`}
+              >
+                Detail
+              </button>
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center justify-between gap-2 w-full">
               {sortedEvents.length > 0 && (
                 <select
                   value={selectedAttendanceEventId}
                   onChange={(e) => setSelectedAttendanceEventId(e.target.value)}
-                  className={`w-32 sm:w-44 px-2.5 py-1 rounded-xl border text-[10px] font-bold focus:outline-none focus:ring-2 focus:ring-red-800/20 focus:border-red-700 truncate transition-all cursor-pointer ${
+                  className={`flex-1 min-w-0 px-2.5 py-1 rounded-xl border text-[10px] font-bold focus:outline-none focus:ring-2 focus:ring-red-800/20 focus:border-red-700 truncate transition-all cursor-pointer ${
                     isLight 
                       ? 'bg-[#faf8f5] border-stone-200 text-stone-800' 
                       : 'bg-stone-800 border-stone-700 text-stone-200'
@@ -1526,7 +1460,7 @@ export const BerandaView: React.FC<BerandaViewProps> = ({
               )}
               <button 
                 onClick={() => onNavigate('jadwal')}
-                className={`text-[10px] font-extrabold uppercase px-2.5 py-1 rounded-lg border transition-colors cursor-pointer shrink-0 ${
+                className={`hidden sm:inline-flex text-[10px] font-extrabold uppercase px-2.5 py-1 rounded-lg border transition-colors cursor-pointer shrink-0 ${
                   isLight
                     ? 'bg-red-50 text-red-800 border-red-200 hover:bg-red-100'
                     : 'bg-red-950/70 text-amber-300 border-red-800/60 hover:bg-red-900/60'
@@ -1550,8 +1484,8 @@ export const BerandaView: React.FC<BerandaViewProps> = ({
 
             {/* Kanan: 4 Kartu Mini Rincian Status */}
             <div className="grid grid-cols-2 gap-2.5">
-              <div className={`p-3 rounded-xl border text-center sm:text-left ${isLight ? 'bg-emerald-50/70 border-emerald-200/80' : 'bg-emerald-950/40 border-emerald-800/50'}`}>
-                <div className="flex items-center justify-center sm:justify-start gap-1.5 mb-1">
+              <div className={`p-3 rounded-xl border text-center ${isLight ? 'bg-emerald-50/70 border-emerald-200/80' : 'bg-emerald-950/40 border-emerald-800/50'}`}>
+                <div className="flex items-center justify-center gap-1.5 mb-1">
                   <span className="w-2 h-2 rounded-full bg-emerald-500" />
                   <span className={`text-[10px] font-extrabold uppercase tracking-wider ${isLight ? 'text-emerald-800' : 'text-emerald-300'}`}>Hadir</span>
                 </div>
@@ -1559,8 +1493,8 @@ export const BerandaView: React.FC<BerandaViewProps> = ({
                 <p className="text-[10px] text-stone-400 font-medium">Peserta</p>
               </div>
 
-              <div className={`p-3 rounded-xl border text-center sm:text-left ${isLight ? 'bg-amber-50/70 border-amber-200/80' : 'bg-amber-950/40 border-amber-800/50'}`}>
-                <div className="flex items-center justify-center sm:justify-start gap-1.5 mb-1">
+              <div className={`p-3 rounded-xl border text-center ${isLight ? 'bg-amber-50/70 border-amber-200/80' : 'bg-amber-950/40 border-amber-800/50'}`}>
+                <div className="flex items-center justify-center gap-1.5 mb-1">
                   <span className="w-2 h-2 rounded-full bg-amber-500" />
                   <span className={`text-[10px] font-extrabold uppercase tracking-wider ${isLight ? 'text-amber-800' : 'text-amber-300'}`}>Sakit</span>
                 </div>
@@ -1568,8 +1502,8 @@ export const BerandaView: React.FC<BerandaViewProps> = ({
                 <p className="text-[10px] text-stone-400 font-medium">Peserta</p>
               </div>
 
-              <div className={`p-3 rounded-xl border text-center sm:text-left ${isLight ? 'bg-blue-50/70 border-blue-200/80' : 'bg-blue-950/40 border-blue-800/50'}`}>
-                <div className="flex items-center justify-center sm:justify-start gap-1.5 mb-1">
+              <div className={`p-3 rounded-xl border text-center ${isLight ? 'bg-blue-50/70 border-blue-200/80' : 'bg-blue-950/40 border-blue-800/50'}`}>
+                <div className="flex items-center justify-center gap-1.5 mb-1">
                   <span className="w-2 h-2 rounded-full bg-blue-500" />
                   <span className={`text-[10px] font-extrabold uppercase tracking-wider ${isLight ? 'text-blue-800' : 'text-blue-300'}`}>Izin</span>
                 </div>
@@ -1577,8 +1511,8 @@ export const BerandaView: React.FC<BerandaViewProps> = ({
                 <p className="text-[10px] text-stone-400 font-medium">Peserta</p>
               </div>
 
-              <div className={`p-3 rounded-xl border text-center sm:text-left ${isLight ? 'bg-red-50/70 border-red-200/80' : 'bg-red-950/40 border-red-800/50'}`}>
-                <div className="flex items-center justify-center sm:justify-start gap-1.5 mb-1">
+              <div className={`p-3 rounded-xl border text-center ${isLight ? 'bg-red-50/70 border-red-200/80' : 'bg-red-950/40 border-red-800/50'}`}>
+                <div className="flex items-center justify-center gap-1.5 mb-1">
                   <span className="w-2 h-2 rounded-full bg-red-700" />
                   <span className={`text-[10px] font-extrabold uppercase tracking-wider ${isLight ? 'text-red-800' : 'text-red-300'}`}>Alpha</span>
                 </div>
@@ -1613,7 +1547,7 @@ export const BerandaView: React.FC<BerandaViewProps> = ({
             </div>
           </div>
 
-          <div className="space-y-3 max-h-[340px] overflow-y-auto pr-1 custom-scrollbar">
+          <div className="space-y-3 max-h-[256px] overflow-y-auto pr-1 custom-scrollbar">
             {sortedEvents.map((event) => {
               const categoryBadgeMap: Record<string, string> = {
                 'Pertemuan Rutin': isLight ? 'bg-red-50 text-red-800 border border-red-200/80' : 'bg-red-950/70 text-amber-300 border border-red-800/60',
@@ -1868,7 +1802,7 @@ export const BerandaView: React.FC<BerandaViewProps> = ({
                       const endMonthName = CASH_MONTH_OPTIONS.find(m => m.id === selectedCashMonth)?.name || selectedCashMonth;
                       return (
                         <>
-                          <span className="block sm:inline">Progres Kelunasan</span>{' '}
+                          <span className="block sm:inline">Progres Pelunasan : </span>{' '}
                           <span className="block sm:inline">({startMonthName} {startY} - {endMonthName} {selectedCashYear})</span>
                         </>
                       );

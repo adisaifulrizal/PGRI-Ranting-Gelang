@@ -10,7 +10,9 @@ import {
   Share2,
   X,
   MessageSquareHeart,
-  LogIn
+  LogIn,
+  Printer,
+  Loader2
 } from 'lucide-react';
 import { AspirasiItem, DanaSosialItem, PengurusRole } from '../../types';
 import { auth } from '../../lib/firebase';
@@ -25,7 +27,9 @@ import {
   markLocalVersionSynced
 } from '../../lib/sync';
 import { canManageConfidentialAspirasi, formatGoogleAuthError, logAuditEvent, signInPengurusWithGoogle } from '../../lib/auth';
-import { openWhatsAppShare } from '../../lib/orgConfig';
+import { getOrgConfig, openWhatsAppShare } from '../../lib/orgConfig';
+import { isMobileDevice, downloadContainerAsPdf, resolveKetuaSigner, escapePdfHtml } from '../../lib/pdfExport';
+import { safeDownloadBlob } from '../../lib/download';
 import { collection, getDocs, query, where } from 'firebase/firestore';
 import { db } from '../../lib/firebase';
 
@@ -63,6 +67,7 @@ export const SosialAspirasiView: React.FC<SosialAspirasiViewProps> = ({
     return [];
   });
   const [showDanaModal, setShowDanaModal] = useState(false);
+  const [isPrintingDana, setIsPrintingDana] = useState(false);
   const [danaForm, setDanaForm] = useState<Omit<DanaSosialItem, 'id'>>({
     type: 'Penyaluran',
     category: 'Sakit / Rawat Inap',
@@ -219,6 +224,188 @@ export const SosialAspirasiView: React.FC<SosialAspirasiViewProps> = ({
     return { masuk, keluar, saldo: masuk - keluar };
   }, [danaList]);
 
+  const handlePrintDanaSosial = async () => {
+    if (isPrintingDana) return;
+    setIsPrintingDana(true);
+    let container: HTMLDivElement | null = null;
+    try {
+      const orgCfg = getOrgConfig();
+      const logoPgri = localStorage.getItem('logo-pgri') || localStorage.getItem('logo-kombel') || '';
+      const ttdKetua = localStorage.getItem('ttd-ketua') || '';
+      const ttdKetuaScale = Math.max(0.3, Math.min(2.5, (Number(localStorage.getItem('ttd-ketua-size')) || 100) / 100));
+      const stempel = localStorage.getItem('logo-stempel') || '';
+      const stempelScale = Math.max(0.3, Math.min(2.5, (Number(localStorage.getItem('logo-stempel-size')) || 100) / 100));
+      const stempelRotation = Number(localStorage.getItem('logo-stempel-rotation')) || 0;
+      const ketuaSigner = resolveKetuaSigner();
+      const kopOrg = escapePdfHtml(orgCfg.kopOrganisasi || 'PERSATUAN GURU REPUBLIK INDONESIA');
+      const kopRanting = escapePdfHtml(orgCfg.kopRanting || 'RANTING GELANG');
+      const kopWilayah = escapePdfHtml(orgCfg.kopWilayah || 'KECAMATAN SUMBERBARU - KABUPATEN JEMBER');
+      const kopSekretariat = escapePdfHtml(orgCfg.kopSekretariat || 'Sekretariat : Jl. PTPN XII Gunung Gambir Desa Gelang, Kecamatan Sumberbaru - Kabupaten Jember 68156');
+      const todayFormatted = new Date().toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' });
+
+      const rows = danaList.length === 0
+        ? `<tr><td colspan="7" style="text-align:center;font-style:italic;color:#64748b;padding:12px;">Belum ada catatan dana sosial / tali asih.</td></tr>`
+        : danaList
+            .map(
+              (item, idx) => `
+          <tr>
+            <td style="text-align:center;">${idx + 1}</td>
+            <td style="text-align:center;">${escapePdfHtml(item.date || '-')}</td>
+            <td style="text-align:center;font-weight:bold;color:${item.type === 'Penggalangan' ? '#047857' : '#b91c1c'};">${escapePdfHtml(item.type)}</td>
+            <td>${escapePdfHtml(item.category)}</td>
+            <td><strong>${escapePdfHtml(item.recipientName)}</strong>${item.recipientSchool ? `<br/><span style="font-size:9pt;color:#475569;">${escapePdfHtml(item.recipientSchool)}</span>` : ''}</td>
+            <td style="text-align:right;font-weight:bold;">Rp ${(Number(item.amount) || 0).toLocaleString('id-ID')}</td>
+            <td>${escapePdfHtml(item.notes || '-')}</td>
+          </tr>`
+            )
+            .join('');
+
+      const bodyHtml = `
+        <div class="kop-container">
+          <div class="kop-logo-wrapper">
+            ${logoPgri
+              ? `<img src="${logoPgri}" alt="Logo PGRI" class="kop-logo" />`
+              : `<div style="width: 86px; height: 86px; border: 1.5px dashed #94a3b8; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 9pt; color: #64748b; text-align: center;">Logo<br/>PGRI</div>`}
+          </div>
+          <div class="kop-text-container">
+            <div class="kop-org">${kopOrg}</div>
+            <div class="kop-sub-org">(Teachers Association Of Republic Indonesia)</div>
+            <div class="kop-ranting">${kopRanting}</div>
+            <div class="kop-wilayah">${kopWilayah}</div>
+            <div class="kop-sekretariat">${kopSekretariat}</div>
+          </div>
+          <div style="width: 90px; flex-shrink: 0;"></div>
+        </div>
+        <div class="kop-divider"></div>
+        <h2>LAPORAN DANA SOSIAL &amp; TALI ASIH</h2>
+        <p class="sub">Dicetak pada ${escapePdfHtml(todayFormatted)}</p>
+        <div class="summary-grid">
+          <div class="summary-box">
+            <div class="summary-label">Total Penggalangan</div>
+            <div class="summary-val" style="color:#047857;">Rp ${danaStats.masuk.toLocaleString('id-ID')}</div>
+          </div>
+          <div class="summary-box">
+            <div class="summary-label">Total Tersalurkan</div>
+            <div class="summary-val" style="color:#b91c1c;">Rp ${danaStats.keluar.toLocaleString('id-ID')}</div>
+          </div>
+          <div class="summary-box">
+            <div class="summary-label">Saldo Dana Sosial</div>
+            <div class="summary-val" style="color:#b45309;">Rp ${danaStats.saldo.toLocaleString('id-ID')}</div>
+          </div>
+        </div>
+        <table>
+          <thead>
+            <tr>
+              <th style="width:36px;">No</th>
+              <th style="width:92px;">Tanggal</th>
+              <th style="width:98px;">Jenis</th>
+              <th style="width:140px;">Kategori</th>
+              <th>Penerima / Keterangan Sumber</th>
+              <th style="width:120px;">Nominal</th>
+              <th>Catatan</th>
+            </tr>
+          </thead>
+          <tbody>${rows}</tbody>
+        </table>
+        <div class="signature-container">
+          <div class="signature-box">
+            <p style="margin: 0;">Sumberbaru, ${escapePdfHtml(todayFormatted)}</p>
+            <p style="margin: 0;">${escapePdfHtml(ketuaSigner.jabatan)}</p>
+            <p style="margin: 0;">Kecamatan Sumberbaru</p>
+            <div class="signature-space">
+              ${stempel ? `<img src="${stempel}" alt="Stempel" style="position: absolute; top: 50%; right: 50%; transform: translateY(-50%) rotate(${stempelRotation}deg); width: ${Math.round(112 * stempelScale)}px; height: ${Math.round(112 * stempelScale)}px; object-fit: contain; opacity: 0.9; z-index: 0; pointer-events: none;" />` : ''}
+              ${ttdKetua ? `<img src="${ttdKetua}" alt="TTD Ketua" class="signature-img" />` : ''}
+            </div>
+            <p style="margin: 0;" class="signature-name">${escapePdfHtml(ketuaSigner.name)}</p>
+            <p style="margin: 0;">${escapePdfHtml(ketuaSigner.npaLabel)}</p>
+          </div>
+        </div>
+      `;
+
+      const sharedCss = `
+        * { box-sizing: border-box; font-family: 'Times New Roman', Times, serif; }
+        .kop-container { display: flex; align-items: center; gap: 12px; padding-bottom: 6px; }
+        .kop-logo-wrapper { width: 90px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; }
+        .kop-logo { width: 86px; height: 86px; object-fit: contain; display: block; }
+        .kop-text-container { flex: 1; text-align: center; line-height: 1.18; color: #000000; }
+        .kop-org { font-size: 13pt; font-weight: bold; text-transform: uppercase; letter-spacing: 0.3px; }
+        .kop-sub-org { font-size: 10pt; font-weight: bold; font-style: italic; margin-top: 1px; }
+        .kop-ranting { font-size: 16pt; font-weight: bold; text-transform: uppercase; letter-spacing: 0.5px; margin-top: 1px; }
+        .kop-wilayah { font-size: 11.5pt; font-weight: bold; text-transform: uppercase; letter-spacing: 0.3px; margin-top: 1px; }
+        .kop-sekretariat { font-size: 8.5pt; font-style: italic; margin-top: 2px; }
+        .kop-divider { border-top: 2px solid #000000; border-bottom: 1px solid #000000; height: 2px; margin-bottom: 14px; }
+        h2 { margin: 0; text-align: center; font-size: 13.5pt; text-decoration: underline; text-underline-offset: 4px; }
+        .sub { text-align: center; font-size: 10pt; color: #334155; margin: 6px 0 12px; }
+        .summary-grid { display: flex; gap: 10px; margin-bottom: 14px; }
+        .summary-box { flex: 1; border: 1px solid #000000; padding: 8px 10px; text-align: center; background: #f8fafc; }
+        .summary-label { font-size: 9pt; text-transform: uppercase; color: #334155; font-weight: bold; }
+        .summary-val { font-size: 11.5pt; font-weight: bold; margin-top: 2px; }
+        table { width: 100%; border-collapse: collapse; font-size: 10pt; }
+        th, td { border: 1px solid #000000; padding: 6px 8px; vertical-align: top; }
+        th { background: #f1f5f9; text-align: center; }
+        .signature-container { margin-top: 22px; display: flex; justify-content: flex-end; page-break-inside: avoid; break-inside: avoid; }
+        .signature-box { width: 250px; text-align: center; font-size: 10pt; line-height: 1.3; }
+        .signature-space { height: 65px; position: relative; display: flex; align-items: center; justify-content: center; overflow: visible; }
+        .signature-img { height: ${Math.round(62 * ttdKetuaScale)}px; width: auto; max-width: ${Math.round(160 * ttdKetuaScale)}px; object-fit: contain; position: relative; z-index: 1; }
+        .signature-name { font-weight: bold; text-decoration: underline; }
+      `;
+
+      const fullHtml = `
+        <!doctype html>
+        <html lang="id">
+          <head>
+            <meta charset="utf-8" />
+            <title>Laporan Dana Sosial PGRI Ranting Gelang</title>
+            <style>
+              @page { size: A4 landscape; margin: 12mm 14mm; }
+              body { font-family: 'Times New Roman', Times, serif; padding: 16px; color: #000000; background: #ffffff; }
+              ${sharedCss}
+            </style>
+          </head>
+          <body>
+            ${bodyHtml}
+            <script>window.onload = function() { window.print(); }</script>
+          </body>
+        </html>
+      `;
+
+      const printWin = !isMobileDevice() ? window.open('', '_blank', 'width=960,height=720') : null;
+      if (printWin) {
+        printWin.document.write(fullHtml);
+        printWin.document.close();
+        return;
+      }
+
+      try {
+        container = document.createElement('div');
+        container.style.width = '1050px';
+        container.style.backgroundColor = '#ffffff';
+        container.style.color = '#000000';
+        container.style.fontFamily = "'Times New Roman', Times, serif";
+        container.style.padding = '16px';
+        container.innerHTML = `<style data-pdf-style="true">${sharedCss}</style>${bodyHtml}`;
+        const filename = `Laporan_Dana_Sosial_PGRI_${new Date().toISOString().split('T')[0]}.pdf`;
+        await downloadContainerAsPdf(container, {
+          filename,
+          orientation: 'landscape',
+          margin: [10, 12, 10, 12],
+          quality: 0.96,
+          scale: 2
+        });
+      } catch {
+        const htmlBlob = new Blob([fullHtml.replace('<script>window.onload = function() { window.print(); }</script>', '')], {
+          type: 'text/html;charset=utf-8'
+        });
+        await safeDownloadBlob(htmlBlob, `Laporan_Dana_Sosial_PGRI_${new Date().toISOString().split('T')[0]}.html`);
+      }
+    } finally {
+      if (container && document.body.contains(container)) {
+        document.body.removeChild(container);
+      }
+      setIsPrintingDana(false);
+    }
+  };
+
   const handleSaveDana = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!danaForm.recipientName.trim()) return;
@@ -281,6 +468,11 @@ export const SosialAspirasiView: React.FC<SosialAspirasiViewProps> = ({
       (latest) => latest.filter((d) => d.id !== item.id),
       next,
       'Dana Sosial & Tali Asih'
+    );
+    void logAuditEvent(
+      'Dana Sosial',
+      'Hapus Catatan',
+      `Menghapus ${item.type} ${item.category} a.n. ${item.recipientName} (Rp ${(Number(item.amount) || 0).toLocaleString('id-ID')}).`
     );
   };
 
@@ -447,7 +639,26 @@ export const SosialAspirasiView: React.FC<SosialAspirasiViewProps> = ({
 
           <div className="flex flex-wrap items-center justify-between gap-2">
             <h2 className="font-display font-bold text-base">Riwayat Dana Sosial & Tali Asih</h2>
-            <div className="flex gap-2">
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={handlePrintDanaSosial}
+                disabled={isPrintingDana}
+                className={`px-3.5 py-2 rounded-xl border text-xs font-bold flex items-center gap-1.5 transition-colors ${
+                  isPrintingDana ? 'opacity-60 cursor-wait' : 'cursor-pointer'
+                } ${
+                  isDark
+                    ? 'bg-stone-800 hover:bg-stone-700 border-stone-700 text-stone-100'
+                    : 'bg-white hover:bg-stone-50 border-stone-300 text-stone-800'
+                }`}
+              >
+                {isPrintingDana ? (
+                  <Loader2 className="w-3.5 h-3.5 animate-spin text-red-700 dark:text-amber-400" />
+                ) : (
+                  <Printer className="w-3.5 h-3.5 text-red-700 dark:text-amber-400" />
+                )}
+                {isPrintingDana ? 'Menyiapkan...' : 'Cetak / PDF'}
+              </button>
               <button
                 type="button"
                 onClick={() => {

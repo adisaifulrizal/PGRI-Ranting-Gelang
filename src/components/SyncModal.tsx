@@ -11,7 +11,8 @@ import {
   ShieldCheck,
   ClipboardList,
   HeartHandshake,
-  FileText
+  FileText,
+  Phone
 } from 'lucide-react';
 
 export interface SyncModuleOption {
@@ -37,7 +38,7 @@ export const SYNC_MODULES: SyncModuleOption[] = [
   {
     id: 'jadwal',
     label: 'Jadwal Kegiatan & Presensi',
-    description: 'Daftar pertemuan, presensi kehadiran, & status tugas/verifikasi peserta',
+    description: 'Daftar pertemuan, jadwal, & presensi kehadiran peserta',
     icon: Calendar,
     color: 'text-red-500 bg-red-500/10 border-red-500/20',
     hoverBorder: 'hover:border-red-500/50 hover:bg-red-500/5',
@@ -87,6 +88,15 @@ export const SYNC_MODULES: SyncModuleOption[] = [
     color: 'text-amber-500 bg-amber-500/10 border-amber-500/20',
     hoverBorder: 'hover:border-amber-500/50 hover:bg-amber-500/5',
     associatedTabs: ['undangan']
+  },
+  {
+    id: 'kontak',
+    label: 'Layanan Informasi & Masukan',
+    description: 'Pesan, saran, pertanyaan anggota & penggabungan kiriman masuk',
+    icon: Phone,
+    color: 'text-emerald-500 bg-emerald-500/10 border-emerald-500/20',
+    hoverBorder: 'hover:border-emerald-500/50 hover:bg-emerald-500/5',
+    associatedTabs: ['kontak']
   },
   {
     id: 'pengaturan',

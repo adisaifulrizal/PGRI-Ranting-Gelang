@@ -31,7 +31,7 @@ import {
 import { ActiveTab, PengaturanSubTab, PengurusRole } from '../types';
 import { doc, getDoc, getDocFromServer, setDoc } from 'firebase/firestore';
 import { db } from '../lib/firebase';
-import { emitSyncStatus } from '../lib/sync';
+import { emitSyncStatus, syncFromFirebase } from '../lib/sync';
 import {
   canAccessAdminForTab,
   formatGoogleAuthError,
@@ -157,7 +157,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     };
   }, [showUserMenu]);
 
-  const isAdminActive = currentRole === 'admin';
+  const isAdminActive = currentRole === 'admin' && Boolean(authEmail) && isPengurusRole(pengurusRole);
   const isGuruActive = !isAdminActive;
   const canAccessPengaturan =
     isAdminActive &&
@@ -182,7 +182,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
   // Helper tarik data anggota terbaru dari Cloud saat login Admin tanpa menimpa balik data yang sudah dihapus
   const performSmartSync = async () => {
     try {
-      const { syncFromFirebase } = await import('../lib/sync');
       const cloudTeachers = await syncFromFirebase('teachers');
       if (Array.isArray(cloudTeachers)) {
         localStorage.setItem('kombel-teachers', JSON.stringify(cloudTeachers));
@@ -231,7 +230,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
       setShowUserMenu(false);
       setError('');
       setIsLoggingIn(false);
-      window.location.reload();
     } catch (err: any) {
       setError(formatGoogleAuthError(err));
       setIsShaking(true);
@@ -263,7 +261,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
       onChangeRole('guru');
     }
     setShowConfirmGuruModal(false);
-    window.location.reload();
   };
 
 
@@ -304,6 +301,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
     fetchLockedMenus();
 
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        fetchLockedMenus();
+      }
+    };
+
     const syncFromLocalLocked = () => {
       try {
         const saved = localStorage.getItem('kombel-locked-menus');
@@ -311,10 +314,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
       } catch (e) {}
     };
 
+    document.addEventListener('visibilitychange', handleVisibilityChange);
     window.addEventListener('storage', syncFromLocalLocked);
     window.addEventListener('kombel-locked-menus-updated', syncFromLocalLocked);
     return () => {
       isMounted = false;
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
       window.removeEventListener('storage', syncFromLocalLocked);
       window.removeEventListener('kombel-locked-menus-updated', syncFromLocalLocked);
     };
@@ -467,18 +472,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
           40%, 80% { transform: translateX(6px); }
         }
 
-        /* Keyframes untuk Pop-up / Modal Entrance */
-        @keyframes popUp {
-          0% {
-            opacity: 0;
-            transform: scale(0.95) translateY(6px);
-          }
-          100% {
-            opacity: 1;
-            transform: scale(1) translateY(0);
-          }
-        }
-
+        /* Keyframes untuk Modal Entrance */
         @keyframes modalEnter {
           0% {
             opacity: 0;
@@ -504,11 +498,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
             opacity: 1;
             transform: translateY(0);
           }
-        }
-
-        .animate-pop-up {
-          animation: popUp 0.2s cubic-bezier(0.16, 1, 0.3, 1) forwards;
-          transform-origin: bottom center;
         }
 
         .animate-modal-enter {
@@ -540,7 +529,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         />
       )}
 
-      {/* Tombol Tampilkan Kembali Sidebar di Desktop saat Tersembunyi */}
+      {/* Tombol Tampilkan Kembali Sidebar di Desktop saat Tersembunyikan */}
       {isCollapsedDesktop && (
         <button
           type="button"
@@ -897,11 +886,18 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 )}
               </div>
               <div className="flex-1 min-w-0">
-                <p className="font-bold text-xs truncate text-stone-100">
-                  {currentUser.name}
-                </p>
+                <div className="flex items-center gap-1.5 min-w-0">
+                  <p className="font-bold text-xs truncate text-stone-100">
+                    {currentUser.name}
+                  </p>
+                  {isAdminActive && (
+                    <span className="shrink-0 px-1.5 py-0.5 rounded-md text-[9px] font-bold uppercase tracking-wider bg-amber-400/20 text-amber-300 border border-amber-400/30">
+                      {PENGURUS_ROLE_LABELS[pengurusRole]}
+                    </span>
+                  )}
+                </div>
                 <p className="text-[11px] truncate text-stone-400">
-                  {currentUser.school}
+                  {isAdminActive && authEmail ? authEmail : 'PGRI Ranting Gelang'}
                 </p>
               </div>
             </div>
@@ -929,7 +925,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   >
                     <Users className="w-3.5 h-3.5" />
                   </div>
-                  <span>Akses Semua Guru</span>
+                  <span>Semua Guru</span>
                 </div>
                 {isGuruActive && <Check className="w-4 h-4 text-amber-300 animate-fade-in" />}
               </div>
@@ -966,6 +962,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
           {/* Trigger Button di Bagian Bawah Sidebar */}
           <div role="button" tabIndex={0}
             onClick={() => setShowUserMenu(!showUserMenu)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                setShowUserMenu((prev) => !prev);
+              }
+            }}
             className={`group/trigger w-full flex cursor-pointer items-center justify-between px-3 py-2.5 rounded-xl border transition-all duration-200 active:scale-[0.99] ${isGuruActive
                 ? 'bg-white/[0.04] border-white/[0.08] text-stone-200 hover:bg-white/[0.08]'
                 : 'bg-white/[0.04] border-white/[0.10] text-stone-100 hover:bg-white/[0.08] hover:border-amber-400/25'
@@ -1172,10 +1174,27 @@ export const Sidebar: React.FC<SidebarProps> = ({
             <p className="mt-4 text-sm text-stone-500 dark:text-stone-300 leading-relaxed">
               Maaf, menu <strong className="text-red-700 dark:text-amber-400">{lockedMenuName}</strong> sedang dikunci. Anda tidak memiliki akses untuk membuka menu ini.
             </p>
-            <div className="mt-6 flex justify-end">
+            <div className="mt-6 flex items-center justify-end gap-2.5">
+              {!isAdminActive && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowLockedModal(false);
+                    setShowAdminModal(true);
+                  }}
+                  className={`py-2.5 px-4 rounded-xl text-xs sm:text-sm font-semibold border transition-colors active:scale-95 cursor-pointer flex items-center gap-1.5 ${isDark
+                      ? 'border-stone-700 hover:bg-stone-800 text-amber-300'
+                      : 'border-stone-200 hover:bg-stone-100 text-red-800'
+                    }`}
+                >
+                  <ShieldCheck className="w-4 h-4 shrink-0" />
+                  <span>Login Pengurus</span>
+                </button>
+              )}
               <button
+                type="button"
                 onClick={() => setShowLockedModal(false)}
-                className="py-2.5 px-6 rounded-xl text-sm font-bold text-white bg-red-800 hover:bg-red-700 shadow-sm transition-colors active:scale-95 cursor-pointer"
+                className="py-2.5 px-5 rounded-xl text-xs sm:text-sm font-bold text-white bg-red-800 hover:bg-red-700 shadow-sm transition-colors active:scale-95 cursor-pointer"
               >
                 Mengerti
               </button>

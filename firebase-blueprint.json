@@ -25,7 +25,8 @@
         "ttd-pengawas": { "type": "string", "maxLength": 700000 },
         "org-config": { "type": "string", "maxLength": 20000 },
         "pgri-verified-pengurus-names": { "type": "string", "maxLength": 20000 },
-        "kombel-undangan-npa": { "type": "string", "maxLength": 2000 }
+        "kombel-undangan-npa": { "type": "string", "maxLength": 2000 },
+        "pgri-dues-start-period": { "type": "string", "maxLength": 32 }
       }
     },
     "SyncVersions": {

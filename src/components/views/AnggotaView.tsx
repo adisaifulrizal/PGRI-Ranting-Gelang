@@ -15,13 +15,10 @@ import {
   UserCheck, 
   ChevronDown, 
   Plus, 
-  Award,
   X, 
   Check, 
   User, 
   Download, 
-  ChevronLeft, 
-  ChevronRight, 
   UserX, 
   Phone, 
   ShieldCheck, 
@@ -30,21 +27,21 @@ import {
   QrCode,
   Archive,
   Loader2,
-  CheckCircle2,
   AlertCircle,
   CreditCard,
   Upload,
   FileSpreadsheet
 } from 'lucide-react';
 import { Teacher, ActivityEvent, AttendanceRecord } from '../../types';
-import { getOrgConfig } from '../../lib/orgConfig';
+import { getOrgConfig, openWhatsAppShare } from '../../lib/orgConfig';
 import { logAuditEvent } from '../../lib/auth';
 import { isMobileDevice, downloadContainerAsPdf, resolveKetuaSigner, escapePdfHtml } from '../../lib/pdfExport';
+import { generateQrSvgDataUrl, generateQrPngDataUrl, generateQrPngBlob } from '../../lib/qrGenerator';
 
-// Daftar lengkap 45 Sekolah Dasar
+// Daftar lengkap Sekolah Dasar bawaan (fallback jika konfigurasi sekolah kosong)
 const MASTER_SCHOOLS_LIST = [
   'SDN GELANG 01', 'SDN GELANG 03', 'SDN GELANG 04', 'SDN GELANG 05', 'SDN GELANG 06',
-  'SDN KALIGLAGAH 02', 'SD NU 21 MIFTAHUL ULUM'
+  'SDN GELANG 07', 'SDN KALIGLAGAH 02', 'SD NU 21 MIFTAHUL ULUM'
 ];
 
 interface AnggotaViewProps {
@@ -200,18 +197,10 @@ export const AnggotaView: React.FC<AnggotaViewProps> = ({
   } | null>(null);
   const [isClosingImportConfirmModal, setIsClosingImportConfirmModal] = useState(false);
 
-  // Helper memuat library SheetJS (XLSX) secara dinamis
+  // Helper memuat library SheetJS (XLSX) secara dinamis dari paket lokal (siap offline/PWA)
   const getXLSX = async (): Promise<any> => {
-    if (typeof window !== 'undefined' && (window as any).XLSX) {
-      return (window as any).XLSX;
-    }
-    return new Promise((resolve, reject) => {
-      const script = document.createElement('script');
-      script.src = 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';
-      script.onload = () => resolve((window as any).XLSX);
-      script.onerror = () => reject(new Error('Gagal memuat library XLSX.'));
-      document.head.appendChild(script);
-    });
+    const mod = await import('xlsx');
+    return (mod as any).default || mod;
   };
 
   // Handler Unduh Template Excel (.xlsx)
@@ -433,18 +422,10 @@ export const AnggotaView: React.FC<AnggotaViewProps> = ({
     }
   };
 
-  // Helper memuat library JSZip secara dinamis
+  // Helper memuat library JSZip secara dinamis dari paket lokal (siap offline/PWA)
   const getJSZip = async (): Promise<any> => {
-    if (typeof window !== 'undefined' && (window as any).JSZip) {
-      return (window as any).JSZip;
-    }
-    return new Promise((resolve, reject) => {
-      const script = document.createElement('script');
-      script.src = 'https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js';
-      script.onload = () => resolve((window as any).JSZip);
-      script.onerror = () => reject(new Error('Gagal memuat library JSZip.'));
-      document.head.appendChild(script);
-    });
+    const mod = await import('jszip');
+    return (mod as any).default || mod;
   };
 
   // Helper internal untuk memicu direct download file tanpa memanggil dialog Share OS
@@ -464,35 +445,10 @@ export const AnggotaView: React.FC<AnggotaViewProps> = ({
     }, 1000);
   };
 
-  // Helper konversi URL QR code ke Base64 PNG murni menggunakan Fetch + Canvas
+  // Helper konversi QR code ke Base64 PNG murni secara lokal (tanpa server eksternal)
   const fetchQrBase64 = async (barcodeValue: string): Promise<string> => {
-    const qrApiUrl = `https://api.qrserver.com/v1/create-qr-code/?size=600x600&format=png&data=${encodeURIComponent(barcodeValue)}`;
-    const response = await fetch(qrApiUrl, { mode: 'cors' });
-    if (!response.ok) throw new Error('Gagal mengambil gambar barcode');
-    const rawBlob = await response.blob();
-    try {
-      const imageBitmap = await createImageBitmap(rawBlob);
-      const canvas = document.createElement('canvas');
-      canvas.width = 600;
-      canvas.height = 600;
-      const ctx = canvas.getContext('2d');
-      if (ctx) {
-        ctx.fillStyle = '#ffffff';
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
-        ctx.drawImage(imageBitmap, 0, 0, 600, 600);
-        const dataUrl = canvas.toDataURL('image/png');
-        return dataUrl.split(',')[1];
-      }
-    } catch {}
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        const res = String(reader.result || '');
-        resolve(res.includes(',') ? res.split(',')[1] : res);
-      };
-      reader.onerror = reject;
-      reader.readAsDataURL(rawBlob);
-    });
+    const dataUrl = await generateQrPngDataUrl(barcodeValue, 600);
+    return dataUrl.includes(',') ? dataUrl.split(',')[1] : dataUrl;
   };
 
   // Handler Download Semua Barcode ke Format ZIP
@@ -535,15 +491,17 @@ export const AnggotaView: React.FC<AnggotaViewProps> = ({
   // Filter Kehadiran di Popup Hadir
   const [presenceFilter, setPresenceFilter] = useState<'Semua' | 'Hadir' | 'Sakit' | 'Izin' | 'Alpha'>('Semua');
 
-  // Daftar sekolah dinamis dari Konfigurasi Organisasi PGRI
-  const [dynamicSchoolsList, setDynamicSchoolsList] = useState<string[]>(() =>
-    Array.from(new Set([...getOrgConfig().schools, ...MASTER_SCHOOLS_LIST]))
-  );
+  // Daftar sekolah dinamis dari Konfigurasi Organisasi PGRI (fallback hanya jika kosong)
+  const getConfiguredSchools = () => {
+    const configured = getOrgConfig().schools;
+    return Array.isArray(configured) && configured.length > 0 ? configured : MASTER_SCHOOLS_LIST;
+  };
+  const [dynamicSchoolsList, setDynamicSchoolsList] = useState<string[]>(() => getConfiguredSchools());
   const [isDownloadingEKTA, setIsDownloadingEKTA] = useState(false);
 
   useEffect(() => {
     const syncSchools = () => {
-      setDynamicSchoolsList(Array.from(new Set([...getOrgConfig().schools, ...MASTER_SCHOOLS_LIST])));
+      setDynamicSchoolsList(getConfiguredSchools());
     };
     window.addEventListener('storage', syncSchools);
     window.addEventListener('kombel-settings-updated', syncSchools);
@@ -853,6 +811,8 @@ export const AnggotaView: React.FC<AnggotaViewProps> = ({
   const confirmDelete = async () => {
     if (!deleteTarget) return;
     const targetId = deleteTarget.id;
+    const targetName = deleteTarget.name;
+    const targetTeacher = teachersList.find(t => t.id === targetId);
     const updated = teachersList.filter(t => t.id !== targetId);
     setTeachersList(updated);
     if (onTeachersChange) onTeachersChange(updated);
@@ -866,7 +826,10 @@ export const AnggotaView: React.FC<AnggotaViewProps> = ({
     );
     setTeachersList(res.items);
     if (onTeachersChange) onTeachersChange(res.items);
-    if (!res.success) {
+    if (res.success) {
+      const schoolInfo = targetTeacher?.school ? ` (${targetTeacher.school})` : '';
+      void logAuditEvent('Daftar Anggota', 'Hapus Anggota', `Menghapus data anggota ${targetName}${schoolInfo}.`);
+    } else {
       handleOpenWarning(
         res.error || 'Data anggota terhapus di perangkat ini, namun gagal sinkron ke Cloud. Periksa koneksi atau hak akses akun Anda.'
       );
@@ -883,56 +846,23 @@ export const AnggotaView: React.FC<AnggotaViewProps> = ({
     if (cleanedPhone.startsWith('0')) {
       cleanedPhone = '62' + cleanedPhone.slice(1);
     }
-    window.open(`https://wa.me/${cleanedPhone}`, '_blank');
+    openWhatsAppShare('', cleanedPhone);
   };
 
-  // Handler Download Barcode PNG (Langsung Download File PNG & Tutup Popup)
+  // Handler Download Barcode PNG (Langsung Download File PNG Lokal & Tutup Popup)
   const handleDownloadBarcodePNG = async () => {
     if (!selectedBarcodeTeacher) return;
     setIsDownloadingBarcode(true);
     try {
       const barcodeValue = getBarcodeValue(selectedBarcodeTeacher);
-      const qrApiUrl = `https://api.qrserver.com/v1/create-qr-code/?size=600x600&format=png&data=${encodeURIComponent(barcodeValue)}`;
       const safeFileName = (selectedBarcodeTeacher.name || 'guru').replace(/[^a-zA-Z0-9]/g, '_');
       const fileName = `Barcode_${safeFileName}.png`;
-
-      const response = await fetch(qrApiUrl, { mode: 'cors' });
-      if (!response.ok) throw new Error('Gagal mengambil gambar barcode');
-
-      const rawBlob = await response.blob();
-      const imageBitmap = await createImageBitmap(rawBlob);
-
-      const canvas = document.createElement('canvas');
-      canvas.width = 600;
-      canvas.height = 600;
-      const ctx = canvas.getContext('2d');
-      if (!ctx) throw new Error('Canvas tidak didukung');
-
-      // Background Putih Bersih
-      ctx.fillStyle = '#ffffff';
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
-      ctx.drawImage(imageBitmap, 0, 0, 600, 600);
-
-      const finalBlob = await new Promise<Blob>((resolve) => {
-        canvas.toBlob((b) => resolve(b || rawBlob), 'image/png');
-      });
-
+      const finalBlob = await generateQrPngBlob(barcodeValue, 600);
       triggerDirectFileDownload(finalBlob, fileName);
       handleCloseBarcode();
     } catch (error) {
-      console.warn('Gagal memproses canvas, mencoba unduhan langsung:', error);
-      try {
-        const barcodeValue = getBarcodeValue(selectedBarcodeTeacher);
-        const qrApiUrl = `https://api.qrserver.com/v1/create-qr-code/?size=600x600&format=png&data=${encodeURIComponent(barcodeValue)}`;
-        const safeFileName = (selectedBarcodeTeacher.name || 'guru').replace(/[^a-zA-Z0-9]/g, '_');
-        const response = await fetch(qrApiUrl);
-        const blob = await response.blob();
-        triggerDirectFileDownload(blob, `Barcode_${safeFileName}.png`);
-        handleCloseBarcode();
-      } catch (fallbackError) {
-        console.error('Gagal mengunduh barcode:', fallbackError);
-        handleOpenWarning('Gagal mengunduh file barcode PNG. Periksa koneksi internet Anda.');
-      }
+      console.error('Gagal mengunduh barcode:', error);
+      handleOpenWarning('Gagal mengunduh file barcode PNG.');
     } finally {
       setIsDownloadingBarcode(false);
     }
@@ -944,12 +874,9 @@ export const AnggotaView: React.FC<AnggotaViewProps> = ({
     setIsDownloadingEKTA(true);
     try {
       const barcodeValue = getBarcodeValue(selectedBarcodeTeacher);
-      const qrApiUrl = `https://api.qrserver.com/v1/create-qr-code/?size=360x360&format=png&data=${encodeURIComponent(barcodeValue)}`;
       const safeFileName = (selectedBarcodeTeacher.name || 'anggota').replace(/[^a-zA-Z0-9]/g, '_');
 
-      const response = await fetch(qrApiUrl, { mode: 'cors' });
-      if (!response.ok) throw new Error('Gagal memuat QR Code');
-      const qrBlob = await response.blob();
+      const qrBlob = await generateQrPngBlob(barcodeValue, 360);
       const qrBitmap = await createImageBitmap(qrBlob);
 
       const canvas = document.createElement('canvas');
@@ -1073,7 +1000,7 @@ export const AnggotaView: React.FC<AnggotaViewProps> = ({
       }
     } catch (error) {
       console.error('Gagal membuat E-KTA Digital:', error);
-      handleOpenWarning('Gagal mengunduh E-KTA Digital. Pastikan koneksi internet aktif untuk memuat QR Code.');
+      handleOpenWarning('Gagal mengunduh E-KTA Digital. Silakan coba kembali.');
     } finally {
       setIsDownloadingEKTA(false);
     }
@@ -1084,8 +1011,8 @@ export const AnggotaView: React.FC<AnggotaViewProps> = ({
     if (!formData.name) return;
 
     const cleanNpa = (formData.npa || '').trim();
-    if (cleanNpa.length !== 11 || !/^\d{11}$/.test(cleanNpa)) {
-      handleOpenWarning('NPA wajib diisi tepat 11 digit angka (tidak boleh kurang atau lebih).');
+    if (cleanNpa !== '' && (cleanNpa.length !== 11 || !/^\d{11}$/.test(cleanNpa))) {
+      handleOpenWarning('Jika diisi, NPA harus terdiri dari tepat 11 digit angka (tidak boleh kurang atau lebih).');
       return;
     }
 
@@ -1094,14 +1021,16 @@ export const AnggotaView: React.FC<AnggotaViewProps> = ({
       const normalizedNewSchool = (formData.school || dynamicSchoolsList[0] || MASTER_SCHOOLS_LIST[0]).trim().toLowerCase();
       const duplicateTeacher = teachersList.find((t) => {
         const existingNpa = String((t as any).npa || '').trim();
-        if (existingNpa && existingNpa === cleanNpa) return true;
+        if (cleanNpa !== '' && existingNpa && existingNpa === cleanNpa) return true;
         const existingName = String(t.name || '').trim().toLowerCase();
         const existingSchool = String(t.school || '').trim().toLowerCase();
         return Boolean(normalizedNewName && normalizedNewSchool && existingName === normalizedNewName && existingSchool === normalizedNewSchool);
       });
       if (duplicateTeacher) {
         handleOpenWarning(
-          `Anggota dengan nama "${duplicateTeacher.name}" (${duplicateTeacher.school}) atau NPA ${cleanNpa} sudah terdaftar.`
+          cleanNpa !== ''
+            ? `Anggota dengan nama "${duplicateTeacher.name}" (${duplicateTeacher.school}) atau NPA ${cleanNpa} sudah terdaftar.`
+            : `Anggota dengan nama "${duplicateTeacher.name}" (${duplicateTeacher.school}) sudah terdaftar.`
         );
         return;
       }
@@ -1178,6 +1107,7 @@ export const AnggotaView: React.FC<AnggotaViewProps> = ({
         activeStatus: 'Tidak Aktif',
         createdAt: new Date().toISOString()
       };
+      if (!cleanNpa) delete regPayload.npa;
       if (newTeacher.nickname) regPayload.nickname = String(newTeacher.nickname).slice(0, 80);
       if (newTeacher.gender === 'L' || newTeacher.gender === 'P') regPayload.gender = newTeacher.gender;
       if (newTeacher.nip && String(newTeacher.nip).trim()) regPayload.nip = String(newTeacher.nip).trim().slice(0, 40);
@@ -1287,17 +1217,50 @@ export const AnggotaView: React.FC<AnggotaViewProps> = ({
     const activeCount = filteredTeachers.filter(t => isMemberActive(t)).length;
     const inactiveCount = filteredTeachers.filter(t => !isMemberActive(t)).length;
 
+    // Helper format nama sekolah (Title Case kecuali "SDN" dan "SD NU")
+    const formatSchoolPdfName = (school?: string) => {
+      if (!school) return '-';
+      return school
+        .trim()
+        .split(/\s+/)
+        .map((word, idx, arr) => {
+          const upper = word.toUpperCase();
+          if (upper === 'SDN') return 'SDN';
+          if (upper === 'SD' && arr[idx + 1]?.toUpperCase() === 'NU') return 'SD';
+          if (upper === 'NU' && arr[idx - 1]?.toUpperCase() === 'SD') return 'NU';
+          return word.charAt(0).toUpperCase() + word.slice(1).toLowerCase();
+        })
+        .join(' ');
+    };
+
+    const formatPhoneZeroPrefix = (rawPhone?: string) => {
+      if (!rawPhone || String(rawPhone).trim() === '' || String(rawPhone).trim() === '-') return '-';
+      let cleaned = String(rawPhone).trim().replace(/^'+/, '').replace(/[^\d+]/g, '');
+      if (!cleaned) return '-';
+      if (cleaned.startsWith('+62')) {
+        cleaned = '0' + cleaned.slice(3);
+      } else if (cleaned.startsWith('62')) {
+        cleaned = '0' + cleaned.slice(2);
+      } else if (!cleaned.startsWith('0')) {
+        cleaned = '0' + cleaned;
+      }
+      return cleaned;
+    };
+
+    const currentPeriodYear = new Date().getFullYear();
+    const activePeriodLabel = `${currentPeriodYear}-${currentPeriodYear + 1}`;
+
     // 5. Mapping Baris Data Tabel Guru
     const rows = filteredTeachers.map((t, index) => `
       <tr>
         <td style="text-align: center;">${index + 1}</td>
-        <td style="font-weight: bold; text-align: left;">${t.name}</td>
-        <td style="text-align: center;">${getNickname(t)}</td>
-        <td style="text-align: center; font-family: monospace;">${t.nip || '-'}</td>
-        <td style="text-align: center; font-family: monospace;">${(t as any).npa || '-'}</td>
-        <td style="text-align: center; font-weight: bold;">${getGender(t)}</td>
-        <td style="text-align: center; font-family: monospace;">${t.phone || '-'}</td>
-        <td style="text-align: left;">${t.school}</td>
+        <td style="font-weight: bold; text-align: left;">${escapePdfHtml(t.name)}</td>
+        <td style="text-align: center;">${escapePdfHtml(getNickname(t))}</td>
+        <td style="text-align: center; font-family: monospace;">${escapePdfHtml(t.nip || '-')}</td>
+        <td style="text-align: center; font-family: monospace;">${escapePdfHtml((t as any).npa || '-')}</td>
+        <td style="text-align: center; font-weight: bold;">${escapePdfHtml(getGender(t))}</td>
+        <td style="text-align: center; font-family: monospace;">${escapePdfHtml(formatPhoneZeroPrefix(t.phone))}</td>
+        <td style="text-align: left;">${escapePdfHtml(formatSchoolPdfName(t.school))}</td>
         <td style="text-align: center; font-weight: bold; color: ${isMemberActive(t) ? '#059669' : '#e11d48'};">
           ${isMemberActive(t) ? 'Aktif' : 'Tidak Aktif'}
         </td>
@@ -1381,7 +1344,7 @@ export const AnggotaView: React.FC<AnggotaViewProps> = ({
             .kop-divider {
               border-top: 2px solid #000000;
               border-bottom: 1px solid #000000;
-              height: 4px;
+              height: 2px;
               margin-bottom: 12px;
               position: relative;
               z-index: 2;
@@ -1574,9 +1537,9 @@ export const AnggotaView: React.FC<AnggotaViewProps> = ({
 
             <div class="document-title" style="margin-top: 16px; margin-bottom: 20px;">
               <div class="document-title-container">
-                <h3>DAFTAR ANGGOTA PGRI RANTING GELANG</h3>
+                <h3>DAFTAR ANGGOTA</h3>
                 <div class="title-divider"></div>
-                <p>Periode : 2026-2027</p>
+                <p>Periode : ${activePeriodLabel}</p>
               </div>
             </div>
 
@@ -1638,7 +1601,7 @@ export const AnggotaView: React.FC<AnggotaViewProps> = ({
                 <div class="spacer-col"></div>
 
                 <div class="ttd-col">
-                  <p>Jember, ${todayFormatted}</p>
+                  <p>Sumberbaru, ${todayFormatted}</p>
                   <p>${ketuaJabatan}</p>
                   <p>Kecamatan Sumberbaru</p>
                   
@@ -1762,7 +1725,7 @@ export const AnggotaView: React.FC<AnggotaViewProps> = ({
             .kop-divider {
               border-top: 2px solid #000000;
               border-bottom: 1px solid #000000;
-              height: 4px;
+              height: 2px;
               margin-bottom: 12px;
               position: relative;
               z-index: 2;
@@ -1982,9 +1945,9 @@ export const AnggotaView: React.FC<AnggotaViewProps> = ({
           <!-- Judul Dokumen -->
           <div class="document-title" style="margin-top: 20px; margin-bottom: 24px;">
             <div class="document-title-container">
-              <h3>DAFTAR ANGGOTA PGRI RANTING GELANG</h3>
+              <h3>DAFTAR ANGGOTA</h3>
               <div class="title-divider"></div>
-              <p>Periode : 2026-2027</p>
+              <p>Periode : ${activePeriodLabel}</p>
             </div>
           </div>
 
@@ -2054,7 +2017,7 @@ export const AnggotaView: React.FC<AnggotaViewProps> = ({
 
               <!-- Kotak Tanda Tangan Pojok Kanan Bawah -->
               <div class="ttd-col">
-                <p>Jember, ${todayFormatted}</p>
+                <p>Sumberbaru, ${todayFormatted}</p>
                 <p>${ketuaJabatan}</p>
                 <p>Kecamatan Sumberbaru</p>
                 
@@ -2742,7 +2705,7 @@ export const AnggotaView: React.FC<AnggotaViewProps> = ({
                 {/* Tampilan Gambar Barcode / QR Code */}
                 <div className="p-3 bg-white rounded-2xl border border-stone-200 shadow-sm inline-block">
                   <img 
-                    src={`https://api.qrserver.com/v1/create-qr-code/?size=240x240&data=${encodeURIComponent(getBarcodeValue(selectedBarcodeTeacher))}`}
+                    src={generateQrSvgDataUrl(getBarcodeValue(selectedBarcodeTeacher), 240)}
                     alt={`Barcode ${selectedBarcodeTeacher.name}`}
                     className="w-44 h-44 object-contain rounded-lg"
                   />
@@ -2818,7 +2781,7 @@ export const AnggotaView: React.FC<AnggotaViewProps> = ({
                       <div className="shrink-0 flex flex-col items-center gap-1">
                         <div className="p-1.5 bg-white rounded-xl border border-stone-200 shadow-sm">
                           <img
-                            src={`https://api.qrserver.com/v1/create-qr-code/?size=160x160&data=${encodeURIComponent(getBarcodeValue(selectedBarcodeTeacher))}`}
+                            src={generateQrSvgDataUrl(getBarcodeValue(selectedBarcodeTeacher), 160)}
                             alt={`QR ${selectedBarcodeTeacher.name}`}
                             className="w-20 h-20 object-contain"
                           />
@@ -3084,16 +3047,14 @@ export const AnggotaView: React.FC<AnggotaViewProps> = ({
                 </div>
                 <div>
                   <label className="block font-bold text-stone-700 [.dark_&]:text-stone-300 dark:text-stone-300 mb-1">
-                    NPA (11 Angka) *
+                    NPA (11 Angka - Opsional)
                   </label>
                   <input
                     type="text"
                     inputMode="numeric"
-                    required
-                    minLength={11}
                     maxLength={11}
-                    pattern="\d{11}"
-                    title="NPA harus terdiri dari tepat 11 digit angka"
+                    pattern="(\d{11})?"
+                    title="Kosongi jika belum ada, atau isi tepat 11 digit angka"
                     value={formData.npa || ''}
                     onChange={(e) => {
                       const onlyDigits = e.target.value.replace(/\D/g, '').slice(0, 11);

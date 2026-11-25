@@ -1,6 +1,11 @@
 import React, { useState, useEffect } from 'react';
-import { Bell, Megaphone, Plus, Edit, Copy, Trash2, X, AlertTriangle, Share2 } from 'lucide-react';
-import { openWhatsAppShare } from '../../lib/orgConfig';
+import { Bell, Megaphone, Plus, Edit, Copy, Trash2, X, Share2 } from 'lucide-react';
+import {
+  openWhatsAppShare,
+  DEFAULT_PEMBINA_MEMBER,
+  DEFAULT_PENANGGUNG_JAWAB_MEMBERS,
+  DEFAULT_PENGURUS_MEMBERS
+} from '../../lib/orgConfig';
 
 export interface AnnouncementItem {
   id: string | number;
@@ -55,32 +60,9 @@ export const PengumumanView: React.FC<PengumumanViewProps> = ({
 
   useEffect(() => {
     const loadAuthorsFromProfile = () => {
-      const defaultPembina = {
-        role: 'Pengawas Bina',
-        name: 'Hanifatul Susmiyah, S.Pd'
-      };
-
-      const defaultPenanggungJawab = [
-        { role: 'Ketua K3S', name: 'Ghufron Atok Urrohman, S.Pd' },
-        { role: 'Ketua PGRI Cabang', name: 'Christian Dri Firman Widodo, S.Pd' }
-      ];
-
-      const defaultPengurus = [
-        { role: 'Penasehat', name: 'Semua Kepala Sekolah' },
-        { role: 'Ketua PGRI Ranting Gelang', name: 'Umar Ali Kusuma' },
-        { role: 'Wakil Ketua', name: 'Hartatik, S.Pd' },
-        { role: 'Sekretaris', name: 'Adi Saiful Rizal, S.Pd' },
-        { role: 'Bendahara', name: 'Atik Andriyati, S.Pd' },
-        { role: 'Seksi Pembinaan Olahraga', name: 'Saiful Arif, S.Pd' },
-        { role: 'Seksi Pemberdayaan Perempuan', name: 'Siti Oktavia, S.Pd' },
-        { role: 'Seksi Pengembangan Profesi & Karir', name: 'Rohman, S.Pd' },
-        { role: 'Seksi Humas', name: 'Jasuri Budianto, S.Pd' },
-        { role: 'Seksi Keagamaan', name: 'Muhammad Jupri, S.Pd.I' }
-      ];
-
-      let pembinaData = defaultPembina;
-      let pjData = defaultPenanggungJawab;
-      let pengurusData = defaultPengurus;
+      let pembinaData: { name: string; role: string } = DEFAULT_PEMBINA_MEMBER;
+      let pjData: { name: string; role: string }[] = DEFAULT_PENANGGUNG_JAWAB_MEMBERS;
+      let pengurusData: { name: string; role: string }[] = DEFAULT_PENGURUS_MEMBERS;
 
       try {
         const sPembina = localStorage.getItem('kombel-pembina');
@@ -109,7 +91,11 @@ export const PengumumanView: React.FC<PengumumanViewProps> = ({
       } catch (e) {}
 
       const combined = [pembinaData, ...pjData, ...pengurusData]
-        .filter((item) => item && item.name && item.name.trim() !== '' && item.name !== '-')
+        .filter((item) => {
+          const cleanName = (item?.name || '').trim();
+          const lower = cleanName.toLowerCase();
+          return Boolean(cleanName) && cleanName !== '-' && !lower.startsWith('semua ');
+        })
         .map((item) => ({ name: item.name, role: item.role || '' }));
 
       setAuthorOptions(combined);

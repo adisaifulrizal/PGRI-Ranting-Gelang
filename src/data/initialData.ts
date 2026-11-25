@@ -1,41 +1,11 @@
 import { 
   Teacher, 
-  Material, 
   ActivityEvent, 
   AttendanceRecord, 
   Announcement, 
-  ForumPost, 
-  GalleryItem, 
-  DocumentItem,
   FinancialTransaction,
-  CashPayment,
-  Webinar
+  CashPayment
 } from '../types';
-
-export const INITIAL_WEBINARS: Webinar[] = [
-  {
-    id: 'w1',
-    title: 'Penguatan Kode Etik Guru & Perlindungan Profesi PGRI (LKBH)',
-    speaker: 'Pengurus PGRI Cabang Sumberbaru',
-    date: '2025-05-20',
-    time: '14.00 - 16.00 WIB',
-    platform: 'Zoom',
-    link: 'https://zoom.us/j/1234567890',
-    description: 'Sosialisasi pemahaman kode etik guru Indonesia serta mekanisme pendampingan hukum dan profesi melalui LKBH PGRI.',
-    status: 'Akan Datang'
-  },
-  {
-    id: 'w2',
-    title: 'Sosialisasi Kebijakan Kesejahteraan Guru PNS, PPPK, dan Honorer',
-    speaker: 'Tim Advokasi PGRI Jember',
-    date: '2025-05-25',
-    time: '19.00 - 21.00 WIB',
-    platform: 'Google Meet',
-    link: 'https://meet.google.com/abc-defg-hij',
-    description: 'Pembahasan regulasi terbaru tunjangan profesi, pengembangan karier, serta pendataan KTA Digital PGRI.',
-    status: 'Akan Datang'
-  }
-];
 
 export const INITIAL_FINANCIAL_TRANSACTIONS: FinancialTransaction[] = [
   { id: 'tx-1', date: '2026-08-15', type: 'Pemasukan', amount: 1540000, description: 'Dana Masuk Pada Pertemuan Bulan Agustus' },
@@ -87,65 +57,6 @@ export const INITIAL_TEACHERS: Teacher[] = [
   { id: 't26', name: 'Aris Munandar, S.Pd.', nip: '19891201 201401 1 008', school: 'SDN Gelang 03', role: 'Anggota Aktif', avatar: '', phone: '0812-3355-7799', email: 'aris.m@guru.sd.belajar.id', subjectSpecialty: 'PJOK' },
   { id: 't27', name: 'Ratna Dewi, S.Pd.', nip: '19930717 201901 2 013', school: 'SDN Gelang 03', role: 'Anggota Aktif', avatar: '', phone: '0813-4466-8800', email: 'ratna.dewi@guru.sd.belajar.id', subjectSpecialty: 'Guru Kelas' },
   { id: 't28', name: 'Surya Pratama, S.Pd.', nip: '19870428 201103 1 005', school: 'SDN Gelang 05', role: 'Anggota Aktif', avatar: '', phone: '0857-5577-9911', email: 'surya.p@guru.sd.belajar.id', subjectSpecialty: 'Guru Kelas' },
-];
-
-export const INITIAL_MATERIALS: Material[] = [
-  {
-    id: 'm1',
-    title: 'Pedoman AD/ART Persatuan Guru Republik Indonesia (PGRI)',
-    subject: 'AD/ART & Organisasi PGRI',
-    category: 'Pedoman PGRI',
-    description: 'Dokumen resmi Anggaran Dasar dan Anggaran Rumah Tangga PGRI sebagai acuan tata kelola pengurus ranting dan cabang.',
-    author: 'Pengurus PGRI Ranting Gelang',
-    school: 'SDN Gelang 01',
-    date: '10 Mei 2025',
-    fileSize: '3.4 MB',
-    fileType: 'pdf',
-    downloadCount: 142,
-    driveUrl: 'https://drive.google.com'
-  },
-  {
-    id: 'm2',
-    title: 'Surat Edaran Pendataan KTA Digital PGRI Kecamatan Sumberbaru',
-    subject: 'Edaran Cabang/Kabupaten',
-    category: 'SK & Edaran Resmi',
-    description: 'Panduan pemutakhiran data NPA, NIP, dan status kepegawaian anggota PGRI pada portal KTA Digital.',
-    author: 'Sekretariat PGRI Gelang',
-    school: 'SDN Gelang 03',
-    date: '8 Mei 2025',
-    fileSize: '1.8 MB',
-    fileType: 'pdf',
-    downloadCount: 98,
-    driveUrl: 'https://drive.google.com'
-  },
-  {
-    id: 'm3',
-    title: 'Materi Sosialisasi Perlindungan Hukum & Kode Etik Guru (LKBH PGRI)',
-    subject: 'Advokasi & LKBH',
-    category: 'Materi Pembinaan',
-    description: 'Paparan mekanisme pendampingan profesi, pencegahan sengketa pembelajaran, serta layanan bantuan hukum guru.',
-    author: 'Bidang Advokasi PGRI',
-    school: 'SDN Gelang 04',
-    date: '5 Mei 2025',
-    fileSize: '5.2 MB',
-    fileType: 'ppt',
-    downloadCount: 115,
-    driveUrl: 'https://drive.google.com'
-  },
-  {
-    id: 'm4',
-    title: 'Panduan Pengusulan Kenaikan Pangkat & Kinerja Guru ASN/PPPK',
-    subject: 'Pengembangan Profesi',
-    category: 'Materi Pembinaan',
-    description: 'Alur pemberkasan usulan kenaikan pangkat, SKP tahunan, serta dokumen penunjang karier guru di Kecamatan Sumberbaru.',
-    author: 'Tim Pengembangan Profesi',
-    school: 'SDN Gelang 05',
-    date: '3 Mei 2025',
-    fileSize: '2.9 MB',
-    fileType: 'doc',
-    downloadCount: 87,
-    driveUrl: 'https://drive.google.com'
-  }
 ];
 
 export const INITIAL_EVENTS: ActivityEvent[] = [
@@ -270,107 +181,3 @@ export const INITIAL_ANNOUNCEMENTS: Announcement[] = [
   }
 ];
 
-export const INITIAL_FORUM_POSTS: ForumPost[] = [
-  {
-    id: 'fp1',
-    title: 'Mekanisme Pengajuan Pembaruan Data KTA PGRI bagi Guru PPPK',
-    content: 'Bapak/Ibu rekan pengurus, bagi guru PPPK yang baru menerima SK penempatan di wilayah Gelang, dokumen apa saja yang perlu disiapkan untuk sinkronisasi KTA Digital PGRI?',
-    author: 'Siti Aminah, S.Pd.',
-    school: 'SDN Gelang 01',
-    avatar: '',
-    date: '9 Mei 2025',
-    tag: 'PPPK & Kepegawaian',
-    likes: 12,
-    isSolved: true,
-    replies: [
-      {
-        id: 'fr1',
-        author: 'Budi Santoso, S.Pd.',
-        school: 'SDN Gelang 03',
-        avatar: '',
-        content: 'Cukup menyiapkan SK Pengangkatan PPPK, pas foto berseragam batik PGRI, dan surat keterangan aktif dari kepala sekolah untuk diverifikasi sekretariat ranting.',
-        date: '9 Mei 2025',
-        likes: 8
-      }
-    ]
-  },
-  {
-    id: 'fp2',
-    title: 'Persiapan Peringatan Hari Guru Nasional (HGN) & HUT PGRI Tingkat Cabang',
-    content: 'Mari kita koordinasikan perwakilan kontingen lomba olahraga, seni, serta upacara HGN untuk PGRI Ranting Gelang tahun ini.',
-    author: 'Ahmad Fauzi, S.Pd.',
-    school: 'SDN Gelang 04',
-    avatar: '',
-    date: '8 Mei 2025',
-    tag: 'Organisasi PGRI',
-    likes: 9,
-    replies: [
-      {
-        id: 'fr3',
-        author: 'Dewi Kartika, S.Pd.',
-        school: 'SDN Gelang 05',
-        avatar: '',
-        content: 'Siap mendukung, rincian cabang lomba dan jadwal latihan bersama dapat kita matangkan pada rapat ranting berikutnya.',
-        date: '8 Mei 2025',
-        likes: 6
-      }
-    ]
-  }
-];
-
-export const INITIAL_GALLERY: GalleryItem[] = [
-  {
-    id: 'g1',
-    title: 'Rapat Koordinasi Pengurus PGRI Ranting Gelang',
-    category: 'Kegiatan',
-    date: '28 April 2025',
-    imageUrl: '',
-    description: 'Koordinasi program kerja tahunan serta konsolidasi pengurus PGRI Ranting Gelang Kecamatan Sumberbaru.'
-  },
-  {
-    id: 'g2',
-    title: 'Penyerahan Tali Asih Purna Tugas & Anggota Sakit',
-    category: 'Pendampingan',
-    date: '15 April 2025',
-    imageUrl: '',
-    description: 'Wujud solidaritas dan kepedulian sosial keluarga besar PGRI Ranting Gelang.'
-  },
-  {
-    id: 'g3',
-    title: 'Semarak HUT PGRI & Hari Guru Nasional Sumberbaru',
-    category: 'Lomba',
-    date: '25 November 2025',
-    imageUrl: '',
-    description: 'Partisipasi aktif anggota PGRI Ranting Gelang dalam kegiatan peringatan HUT PGRI.'
-  }
-];
-
-export const INITIAL_DOCUMENTS: DocumentItem[] = [
-  {
-    id: 'd1',
-    title: 'SK Pengurus PGRI Ranting Gelang Kecamatan Sumberbaru Masa Bakti 2025-2030',
-    category: 'SK Kombel',
-    fileSize: '1.4 MB',
-    fileType: 'PDF',
-    date: '15 Jan 2025',
-    downloadUrl: '#'
-  },
-  {
-    id: 'd2',
-    title: 'Format Rekapitulasi Kehadiran & Notulen Rapat Organisasi PGRI',
-    category: 'Jurnal Kegiatan',
-    fileSize: '850 KB',
-    fileType: 'DOCX',
-    date: '2 Feb 2025',
-    downloadUrl: '#'
-  },
-  {
-    id: 'd3',
-    title: 'Materi Pembinaan Kode Etik Guru & Perlindungan Profesi PGRI',
-    category: 'Materi Workshop',
-    fileSize: '4.2 MB',
-    fileType: 'PDF',
-    date: '24 Apr 2025',
-    downloadUrl: '#'
-  }
-];

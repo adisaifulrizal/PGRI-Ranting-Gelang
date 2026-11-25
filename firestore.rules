@@ -85,7 +85,7 @@ service cloud.firestore {
         'logo-stempel', 'logo-stempel-size', 'logo-stempel-rotation',
         'logo-watermark', 'logo-watermark-size', 'logo-watermark-opacity',
         'kombel-visi', 'kombel-misi', 'kombel-pembina', 'kombel-penanggungjawab', 'kombel-pengurus',
-        'org-config', 'pgri-verified-pengurus-names', 'kombel-undangan-npa'
+        'org-config', 'pgri-verified-pengurus-names', 'kombel-undangan-npa', 'pgri-dues-start-period'
       ]);
     }
 
@@ -315,17 +315,17 @@ service cloud.firestore {
     // Existing synchronized collections (hardened: pengurus-only writes, verified member access)
     match /kombel_data/{collectionId} {
       allow get: if isValidId(collectionId) && (
-        collectionId in ['teachers', 'events', 'attendanceList', 'financialTransactions', 'cashPayments', 'taskSubmissions', 'materials', 'announcements', 'forumPosts', 'webinars', 'proker', 'danaSosial', 'notulen', 'kontakFeedback'] ||
+        collectionId in ['teachers', 'events', 'attendanceList', 'financialTransactions', 'cashPayments', 'announcements', 'proker', 'danaSosial', 'notulen', 'kontakFeedback'] ||
         isPengurus() ||
         isVerifiedUser()
       );
       allow list: if isPengurus();
       allow create, update: if isValidId(collectionId) && isValidKombelData(incoming()) && (
         isKetua() ||
-        (isSekretaris() && collectionId in ['teachers', 'events', 'attendanceList', 'materials', 'announcements', 'forumPosts', 'taskSubmissions', 'webinars', 'invitations', 'proker', 'danaSosial', 'suratAgenda', 'notulen', 'kontakFeedback']) ||
+        (isSekretaris() && collectionId in ['teachers', 'events', 'attendanceList', 'announcements', 'invitations', 'proker', 'danaSosial', 'suratAgenda', 'notulen', 'kontakFeedback']) ||
         (isBendahara() && collectionId in ['financialTransactions', 'cashPayments', 'danaSosial']) ||
-        (isSeksi() && collectionId in ['events', 'announcements', 'materials', 'webinars', 'proker']) ||
-        (isVerifiedUser() && collectionId in ['attendanceList', 'forumPosts', 'taskSubmissions', 'kontakFeedback'])
+        (isSeksi() && collectionId in ['events', 'announcements', 'proker']) ||
+        (isVerifiedUser() && collectionId in ['attendanceList', 'kontakFeedback'])
       );
       allow delete: if isValidId(collectionId) && isKetua();
     }
@@ -340,8 +340,8 @@ service cloud.firestore {
           (docId == 'locked-menus' && isValidLockedMenus(incoming()))
         )) ||
         (docId == 'global' && isBendahara() && isValidGlobalSettings(incoming()) && (
-          (resource == null && incoming().keys().hasOnly(['org-config', 'pgri-verified-pengurus-names'])) ||
-          (resource != null && incoming().diff(existing()).affectedKeys().hasOnly(['org-config', 'pgri-verified-pengurus-names']))
+          (resource == null && incoming().keys().hasOnly(['org-config', 'pgri-verified-pengurus-names', 'pgri-dues-start-period'])) ||
+          (resource != null && incoming().diff(existing()).affectedKeys().hasOnly(['org-config', 'pgri-verified-pengurus-names', 'pgri-dues-start-period']))
         )) ||
         (docId == 'versions' && (isVerifiedUser() || isPengurus()) && isValidSyncVersions(incoming()))
       );

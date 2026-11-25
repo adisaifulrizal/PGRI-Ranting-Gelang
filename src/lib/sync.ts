@@ -467,6 +467,7 @@ export async function backupAllFirebaseData() {
       'kombel-penanggungjawab',
       'kombel-pengurus',
       'pgri-verified-pengurus-names',
+      'pgri-dues-start-period',
       'kombel-undangan-npa'
     ];
     if (!backupData.settings.global) backupData.settings.global = {};
@@ -495,6 +496,7 @@ export async function backupAllFirebaseData() {
       'kombel-event-invitations',
       'kombel-event-deadlines',
       'pgri-verified-pengurus-names',
+      'pgri-dues-start-period',
       'pgri-kontak-feedback',
       'pgri-proker-items',
       'pgri-dana-sosial',
@@ -601,14 +603,10 @@ export async function restoreAllFirebaseData(backupData: Record<string, any>): P
     const localKeysMap: Record<string, string[]> = {
       teachers: ['kombel-teachers'],
       events: ['kombel-events'],
-      attendanceList: ['kombel-attendance', 'kombel-attendance-list'],
-      materials: ['kombel-materials', 'kombel_materi_list'],
-      financialTransactions: ['kombel-financialTransactions', 'kombel-transactions'],
-      cashPayments: ['kombel-cashPayments', 'kombel-cash-payments'],
+      attendanceList: ['kombel-attendance'],
+      financialTransactions: ['kombel-financialTransactions'],
+      cashPayments: ['kombel-cashPayments'],
       announcements: ['kombel-announcements'],
-      forumPosts: ['kombel-forumPosts'],
-      taskSubmissions: ['kombel-task-submissions'],
-      webinars: ['kombel-webinars'],
       invitations: ['kombel-invitations'],
       suratAgenda: ['pgri-surat-agenda'],
       notulen: ['pgri-notulen-rapat'],
@@ -997,6 +995,7 @@ export async function restoreAllFirebaseData(backupData: Record<string, any>): P
 // ============================================================================
 
 const OFFLINE_QUEUE_KEY = 'pgri-offline-sync-queue';
+const MAX_OFFLINE_RETRIES = 3;
 
 export interface OfflineQueueItem {
   id: string;
@@ -1004,7 +1003,23 @@ export interface OfflineQueueItem {
   docId: string;
   payload: Record<string, any>;
   createdAt: string;
+  retryCount?: number;
+  lastError?: string;
+  permanentlyFailed?: boolean;
 }
+
+const isPermanentOfflineError = (error: any): boolean => {
+  const code = String(error?.code || '').toLowerCase();
+  const msg = String(error?.message || '').toLowerCase();
+  return (
+    code.includes('permission-denied') ||
+    code.includes('unauthenticated') ||
+    code.includes('invalid-argument') ||
+    msg.includes('permission') ||
+    msg.includes('insufficient permissions') ||
+    msg.includes('exceeds the maximum allowed size')
+  );
+};
 
 export function getOfflineQueue(): OfflineQueueItem[] {
   if (typeof window === 'undefined') return [];
@@ -1018,6 +1033,54 @@ export function getOfflineQueue(): OfflineQueueItem[] {
 
 export function getOfflineQueueCount(): number {
   return getOfflineQueue().length;
+}
+
+export function getOfflineQueueSummary(): {
+  total: number;
+  retryable: number;
+  failed: number;
+  lastError: string | null;
+} {
+  const queue = getOfflineQueue();
+  let failed = 0;
+  let lastError: string | null = null;
+  queue.forEach((item) => {
+    const isFailed = Boolean(item.permanentlyFailed) || (item.retryCount || 0) >= MAX_OFFLINE_RETRIES;
+    if (isFailed) {
+      failed += 1;
+      if (item.lastError && !lastError) {
+        lastError = item.lastError;
+      }
+    }
+  });
+  return {
+    total: queue.length,
+    retryable: Math.max(0, queue.length - failed),
+    failed,
+    lastError,
+  };
+}
+
+export function clearOfflineQueue(): void {
+  if (typeof window === 'undefined') return;
+  try {
+    localStorage.setItem(OFFLINE_QUEUE_KEY, '[]');
+    window.dispatchEvent(new Event('pgri-offline-queue-updated'));
+  } catch {}
+}
+
+export function resetOfflineQueueRetries(): void {
+  if (typeof window === 'undefined') return;
+  try {
+    const queue = getOfflineQueue().map((item) => ({
+      ...item,
+      retryCount: 0,
+      permanentlyFailed: false,
+      lastError: undefined,
+    }));
+    localStorage.setItem(OFFLINE_QUEUE_KEY, JSON.stringify(queue));
+    window.dispatchEvent(new Event('pgri-offline-queue-updated'));
+  } catch {}
 }
 
 export function enqueueOfflineDoc(
@@ -1037,6 +1100,8 @@ export function enqueueOfflineDoc(
       docId,
       payload,
       createdAt: new Date().toISOString(),
+      retryCount: 0,
+      permanentlyFailed: false,
     });
     localStorage.setItem(OFFLINE_QUEUE_KEY, JSON.stringify(filtered.slice(-200)));
     window.dispatchEvent(new Event('pgri-offline-queue-updated'));
@@ -1210,7 +1275,7 @@ export async function fetchPerDocCollection<T>(collectionName: string): Promise<
   }
 }
 
-export async function flushOfflineQueue(): Promise<number> {
+export async function flushOfflineQueue(forceRetry = false): Promise<number> {
   if (typeof navigator !== 'undefined' && !navigator.onLine) return 0;
   const queue = getOfflineQueue();
   if (queue.length === 0) return 0;
@@ -1220,6 +1285,13 @@ export async function flushOfflineQueue(): Promise<number> {
   const flushedVersionKeys = new Set<SyncVersionKey>();
 
   for (const item of queue) {
+    const currentRetries = item.retryCount || 0;
+    const isExhausted = Boolean(item.permanentlyFailed) || currentRetries >= MAX_OFFLINE_RETRIES;
+    if (!forceRetry && isExhausted) {
+      remaining.push(item);
+      continue;
+    }
+
     try {
       await withTimeout(
         setDoc(doc(db, item.collectionName, item.docId), item.payload, { merge: true }),
@@ -1233,8 +1305,18 @@ export async function flushOfflineQueue(): Promise<number> {
       ) {
         flushedVersionKeys.add(item.collectionName);
       }
-    } catch {
-      remaining.push(item);
+    } catch (err: any) {
+      const permanent = isPermanentOfflineError(err);
+      const nextRetries = permanent ? MAX_OFFLINE_RETRIES : currentRetries + 1;
+      const errMessage = permanent
+        ? 'Akses ditolak / sesi pengurus berakhir'
+        : String(err?.message || 'Gagal menghubungi Cloud');
+      remaining.push({
+        ...item,
+        retryCount: nextRetries,
+        permanentlyFailed: permanent || nextRetries >= MAX_OFFLINE_RETRIES,
+        lastError: errMessage,
+      });
     }
   }
 
@@ -1462,11 +1544,7 @@ export type SyncVersionKey =
   | 'attendanceList'
   | 'financialTransactions'
   | 'cashPayments'
-  | 'taskSubmissions'
-  | 'materials'
   | 'announcements'
-  | 'forumPosts'
-  | 'webinars'
   | 'invitations'
   | 'suratAgenda'
   | 'notulen'
@@ -1482,11 +1560,7 @@ const SYNC_VERSION_KEYS: readonly SyncVersionKey[] = [
   'attendanceList',
   'financialTransactions',
   'cashPayments',
-  'taskSubmissions',
-  'materials',
   'announcements',
-  'forumPosts',
-  'webinars',
   'invitations',
   'suratAgenda',
   'notulen',

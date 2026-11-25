@@ -6,7 +6,6 @@ import {
   Plus,
   Trash2,
   Users,
-  Check,
   RefreshCw,
   Save,
   Copy,
@@ -16,7 +15,6 @@ import {
   Search,
   ChevronDown,
   ChevronUp,
-  Archive,
   CheckCircle2,
   AlertCircle,
   Loader2,
@@ -44,8 +42,14 @@ import {
 } from '../../lib/sync';
 import { logAuditEvent } from '../../lib/auth';
 import { ActivityEvent, AttendanceRecord, NotulenItem, SuratAgendaItem, Teacher } from '../../types';
-import { getOrgConfig, openWhatsAppShare } from '../../lib/orgConfig';
+import {
+  getOrgConfig,
+  openWhatsAppShare,
+  DEFAULT_KETUA_FALLBACK,
+  DEFAULT_SEKRETARIS_FALLBACK
+} from '../../lib/orgConfig';
 import { isMobileDevice, downloadContainerAsPdf, exportFullHtmlToPdfOrPrint } from '../../lib/pdfExport';
+import { generateQrSvgDataUrl } from '../../lib/qrGenerator';
 
 interface BuatUndanganProps {
   activeRole?: 'guru' | 'admin';
@@ -129,9 +133,9 @@ interface OrgAssets {
   stempelSize: number;
 }
 
-const DEFAULT_KETUA_NAMA = 'UMAR ALI KUSUMA';
+const DEFAULT_KETUA_NAMA = DEFAULT_KETUA_FALLBACK.name.toUpperCase();
 const DEFAULT_KETUA_NPA = '13301500431';
-const DEFAULT_SEKRETARIS_NAMA = 'ADI SAIFUL RIZAL, S.Pd';
+const DEFAULT_SEKRETARIS_NAMA = DEFAULT_SEKRETARIS_FALLBACK.name.replace(/^([^,]+)/, (m) => m.toUpperCase());
 const DEFAULT_SEKRETARIS_NPA = '13301500081';
 
 const NPA_STORAGE_KEY = 'kombel-undangan-npa';
@@ -183,6 +187,77 @@ const readSignersFromKepengurusan = (): {
     }
   } catch {}
   return { ketuaNama, sekretarisNama };
+};
+
+const resolveEOfficeSigners = (): {
+  namaKetua: string;
+  npaKetua: string;
+  namaSekretaris: string;
+  npaSekretaris: string;
+} => {
+  const savedNpa = loadSavedNpa();
+  let namaKetua = DEFAULT_KETUA_FALLBACK.name;
+  let npaKetua = savedNpa.ketuaNpa || DEFAULT_KETUA_NPA;
+  let namaSekretaris = DEFAULT_SEKRETARIS_FALLBACK.name;
+  let npaSekretaris = savedNpa.sekretarisNpa || DEFAULT_SEKRETARIS_NPA;
+
+  try {
+    let teachersList: any[] = [];
+    try {
+      const rawTeachers = localStorage.getItem('kombel-teachers');
+      if (rawTeachers) {
+        const parsedT = JSON.parse(rawTeachers);
+        if (Array.isArray(parsedT)) teachersList = parsedT;
+      }
+    } catch {}
+
+    const findTeacherNpa = (personName: string): string => {
+      const norm = (personName || '').trim().toLowerCase();
+      if (!norm) return '';
+      const match = teachersList.find((t: any) => String(t?.name || '').trim().toLowerCase() === norm);
+      return match && match.npa ? String(match.npa).trim() : '';
+    };
+
+    const rawPengurus = localStorage.getItem('kombel-pengurus');
+    if (rawPengurus) {
+      const list = JSON.parse(rawPengurus);
+      if (Array.isArray(list)) {
+        const ketuaObj = list.find((p: any) => {
+          const r = String(p?.role || '').toLowerCase();
+          return r.includes('ketua') && !r.includes('wakil');
+        });
+        if (ketuaObj?.name && ketuaObj.name !== '-') {
+          const resolvedName = String(ketuaObj.name).trim();
+          namaKetua = resolvedName;
+          const explicitNpa =
+            (ketuaObj.npa ? String(ketuaObj.npa).trim() : '') || findTeacherNpa(resolvedName);
+          if (explicitNpa) {
+            npaKetua = explicitNpa;
+          } else if (!resolvedName.toLowerCase().includes('umar ali kusuma')) {
+            npaKetua = ketuaObj.nip && ketuaObj.nip !== '-' ? String(ketuaObj.nip).trim() : '-';
+          }
+        }
+
+        const sekObj = list.find((p: any) => {
+          const r = String(p?.role || '').toLowerCase();
+          return r.includes('sekretaris');
+        });
+        if (sekObj?.name && sekObj.name !== '-') {
+          const resolvedName = String(sekObj.name).trim();
+          namaSekretaris = resolvedName;
+          const explicitNpa =
+            (sekObj.npa ? String(sekObj.npa).trim() : '') || findTeacherNpa(resolvedName);
+          if (explicitNpa) {
+            npaSekretaris = explicitNpa;
+          } else if (!resolvedName.toLowerCase().includes('adi saiful rizal')) {
+            npaSekretaris = sekObj.nip && sekObj.nip !== '-' ? String(sekObj.nip).trim() : '-';
+          }
+        }
+      }
+    }
+  } catch {}
+
+  return { namaKetua, npaKetua, namaSekretaris, npaSekretaris };
 };
 
 const readAssetsFromSettings = (): OrgAssets => {
@@ -254,7 +329,7 @@ const createInitialDraft = (teachers: Teacher[] = []): InvitationData => {
     nomorSurat: buildAutoLetterNumber('Und', 0),
     lampiranText: '-',
     perihal: 'Undangan',
-    tanggalSurat: `Jember, ${todayFormatted}`,
+    tanggalSurat: `Sumberbaru, ${todayFormatted}`,
     kepadaList: [
       'Kepala SD Negeri / Swasta',
       'Pengurus PGRI Ranting Gelang',
@@ -346,7 +421,7 @@ const buildKopSuratHtml = (data: InvitationData, assets: OrgAssets): string => {
         </div>
       </div>
     </div>
-    <div style="border-top: 2px solid #000000; border-bottom: 1px solid #000000; height: 4px; margin-bottom: 18px; position: relative; z-index: 2;"></div>
+    <div style="border-top: 2px solid #000000; border-bottom: 1px solid #000000; height: 2px; margin-bottom: 18px; position: relative; z-index: 2;"></div>
   `;
 };
 
@@ -518,7 +593,7 @@ const buildInvitationPdfHtml = (data: InvitationData, assets: OrgAssets): string
         }
         <div style="width: 96px; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; font-size: 8.5pt; color: #334155; flex-shrink: 0;">
           <img
-            src="https://api.qrserver.com/v1/create-qr-code/?size=140x140&data=${encodeURIComponent(`SURAT RESMI PGRI RANTING GELANG | No: ${data.nomorSurat} | Perihal: ${data.perihal} | Tgl: ${data.tanggalSurat}`)}"
+            src="${generateQrSvgDataUrl(`SURAT RESMI PGRI RANTING GELANG | No: ${data.nomorSurat} | Perihal: ${data.perihal} | Tgl: ${data.tanggalSurat}`, 140)}"
             alt="QR Verifikasi Surat"
             style="width: 58px; height: 58px; border: 1px solid #cbd5e1; padding: 3px; background: #fff; display: block; margin: 0 auto;"
           />
@@ -630,10 +705,7 @@ export const EOfficeSubPanels: React.FC<EOfficeProps> = ({
     const stempel = localStorage.getItem('logo-stempel') || '';
     const stempelScale = Math.max(0.3, Math.min(2.5, (Number(localStorage.getItem('logo-stempel-size')) || 100) / 100));
     const stempelRotation = Number(localStorage.getItem('logo-stempel-rotation')) || 0;
-    const namaKetua = (orgConfig as any).ketuaName || localStorage.getItem('pgri-ketua-name') || 'UMAR ALI KUSUMA';
-    const npaKetua = (orgConfig as any).ketuaNpa || localStorage.getItem('pgri-ketua-npa') || '13301500431';
-    const namaSekretaris = (orgConfig as any).sekretarisName || localStorage.getItem('pgri-sekretaris-name') || 'ADI SAIFUL RIZAL, S.Pd';
-    const npaSekretaris = (orgConfig as any).sekretarisNpa || localStorage.getItem('pgri-sekretaris-npa') || '13301500081';
+    const { namaKetua, npaKetua, namaSekretaris, npaSekretaris } = resolveEOfficeSigners();
     const todayStr = new Date().toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' });
     const rows = [
       ...selectedDelegates.map((t, i) => ({
@@ -662,7 +734,7 @@ export const EOfficeSubPanels: React.FC<EOfficeProps> = ({
       .join('');
 
     const verifyText = `SURAT TUGAS PGRI RANTING GELANG | No: ${stNomor} | Tgl: ${stHari}, ${stTanggal}`;
-    const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=140x140&data=${encodeURIComponent(verifyText)}`;
+    const qrUrl = generateQrSvgDataUrl(verifyText, 140);
 
     return `<!DOCTYPE html><html lang="id"><head><meta charset="UTF-8"><title>Surat Tugas ${escapeHtml(stNomor)}</title>
       <style>
@@ -693,7 +765,7 @@ export const EOfficeSubPanels: React.FC<EOfficeProps> = ({
         .kop-text .ranting-main { font-size: 16.5pt; font-weight: bold; text-transform: uppercase; letter-spacing: 0.5px; margin-top: 1px; }
         .kop-text .wilayah { font-size: 12pt; font-weight: bold; text-transform: uppercase; letter-spacing: 0.3px; margin-top: 1px; }
         .kop-text .sekretariat { font-size: 8.5pt; font-style: italic; margin-top: 2px; }
-        .kop-divider { border-top: 2px solid #000000; border-bottom: 1px solid #000000; height: 4px; margin-bottom: 18px; position: relative; z-index: 2; }
+        .kop-divider { border-top: 2px solid #000000; border-bottom: 1px solid #000000; height: 2px; margin-bottom: 18px; position: relative; z-index: 2; }
         .title { text-align: center; margin: 14px 0 16px; }
         .title h3 { margin: 0; font-size: 13pt; text-decoration: underline; letter-spacing: 1px; }
         table.delegates { width: 100%; border-collapse: collapse; margin: 10px 0 14px; font-size: 10.5pt; }
@@ -750,7 +822,7 @@ export const EOfficeSubPanels: React.FC<EOfficeProps> = ({
           <p>Demikian Surat Tugas ini diberikan untuk dilaksanakan dengan penuh tanggung jawab serta melaporkan hasilnya kepada Pengurus PGRI Ranting Gelang.</p>
         </div>
         <div class="footer-wrap">
-          <div style="text-align:right; margin-bottom:6px; padding-right:24px;">Gelang, ${escapeHtml(todayStr)}</div>
+          <div style="text-align:right; margin-bottom:6px; padding-right:24px;">Sumberbaru, ${escapeHtml(todayStr)}</div>
           <div class="ttd-grid">
             <div class="ttd-col">
               <div>Ketua</div>
@@ -887,8 +959,7 @@ export const EOfficeSubPanels: React.FC<EOfficeProps> = ({
     const stempel = localStorage.getItem('logo-stempel') || '';
     const stempelScale = Math.max(0.3, Math.min(2.5, (Number(localStorage.getItem('logo-stempel-size')) || 100) / 100));
     const stempelRotation = Number(localStorage.getItem('logo-stempel-rotation')) || 0;
-    const namaKetua = (orgConfig as any).ketuaName || localStorage.getItem('pgri-ketua-name') || 'UMAR ALI KUSUMA';
-    const npaKetua = (orgConfig as any).ketuaNpa || localStorage.getItem('pgri-ketua-npa') || '13301500431';
+    const { namaKetua, npaKetua } = resolveEOfficeSigners();
     const todayStr = new Date().toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' });
 
     const puTembusanItemsHtml = (puTembusanList || [])
@@ -897,7 +968,7 @@ export const EOfficeSubPanels: React.FC<EOfficeProps> = ({
       .join('');
 
     const verifyText = `SURAT TUGAS PENGAWAS UJIAN SILANG PGRI RANTING GELANG | No: ${puNomor} | Kegiatan: ${puNamaUjian}`;
-    const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=140x140&data=${encodeURIComponent(verifyText)}`;
+    const qrUrl = generateQrSvgDataUrl(verifyText, 140);
 
     return `<!DOCTYPE html><html lang="id"><head><meta charset="UTF-8"><title>Surat Tugas Pengawas Ujian ${escapeHtml(puNomor)}</title>
       <style>
@@ -928,7 +999,7 @@ export const EOfficeSubPanels: React.FC<EOfficeProps> = ({
         .kop-text .ranting-main { font-size: 16.5pt; font-weight: bold; text-transform: uppercase; letter-spacing: 0.5px; margin-top: 1px; }
         .kop-text .wilayah { font-size: 12pt; font-weight: bold; text-transform: uppercase; letter-spacing: 0.3px; margin-top: 1px; }
         .kop-text .sekretariat { font-size: 8.5pt; font-style: italic; margin-top: 2px; }
-        .kop-divider { border-top: 2px solid #000000; border-bottom: 1px solid #000000; height: 4px; margin-bottom: 16px; position: relative; z-index: 2; }
+        .kop-divider { border-top: 2px solid #000000; border-bottom: 1px solid #000000; height: 2px; margin-bottom: 16px; position: relative; z-index: 2; }
         .title { text-align: center; margin: 10px 0 14px; }
         .title h3 { margin: 0; font-size: 12.5pt; text-decoration: underline; letter-spacing: 0.8px; }
         table.pengawas { width: 100%; border-collapse: collapse; margin: 10px 0 12px; font-size: 9.8pt; }
@@ -1005,7 +1076,7 @@ export const EOfficeSubPanels: React.FC<EOfficeProps> = ({
         <div class="footer-wrap">
           <div class="ttd-single-wrap">
             <div class="ttd-col">
-              <div style="margin-bottom:4px;">Gelang, ${escapeHtml(todayStr)}</div>
+              <div style="margin-bottom:4px;">Sumberbaru, ${escapeHtml(todayStr)}</div>
               <div>Ketua</div>
               <div>PGRI Ranting Gelang</div>
               <div class="ttd-space">
@@ -1157,6 +1228,7 @@ export const EOfficeSubPanels: React.FC<EOfficeProps> = ({
 
   const handleDeleteAgenda = async (id: string) => {
     if (!isAdmin) return;
+    const deletedAgenda = agendaList.find((x) => x.id === id);
     const updated = agendaList.filter((x) => x.id !== id);
     setAgendaList(updated);
     const [res, perDocRes] = await Promise.all([
@@ -1171,6 +1243,13 @@ export const EOfficeSubPanels: React.FC<EOfficeProps> = ({
     ]);
     setAgendaList(res.items);
     if (res.success && perDocRes.success) {
+      if (deletedAgenda) {
+        void logAuditEvent(
+          'Buku Agenda Surat',
+          'Hapus Surat',
+          `Menghapus surat ${deletedAgenda.direction} No. ${deletedAgenda.nomorSurat} — ${deletedAgenda.perihal}.`
+        );
+      }
       onNotice('success', 'Catatan surat dihapus dari Buku Agenda.');
     } else {
       onNotice('error', res.error || perDocRes.error || 'Catatan terhapus lokal, namun gagal sinkron ke Cloud.');
@@ -1199,13 +1278,10 @@ export const EOfficeSubPanels: React.FC<EOfficeProps> = ({
     const stempel = localStorage.getItem('logo-stempel') || '';
     const stempelScale = Math.max(0.3, Math.min(2.5, (Number(localStorage.getItem('logo-stempel-size')) || 100) / 100));
     const stempelRotation = Number(localStorage.getItem('logo-stempel-rotation')) || 0;
-    const namaKetua = (orgConfig as any).ketuaName || localStorage.getItem('pgri-ketua-name') || 'UMAR ALI KUSUMA';
-    const npaKetua = (orgConfig as any).ketuaNpa || localStorage.getItem('pgri-ketua-npa') || '13301500431';
-    const namaSekretaris = (orgConfig as any).sekretarisName || localStorage.getItem('pgri-sekretaris-name') || 'ADI SAIFUL RIZAL, S.Pd';
-    const npaSekretaris = (orgConfig as any).sekretarisNpa || localStorage.getItem('pgri-sekretaris-npa') || '13301500081';
+    const { namaKetua, npaKetua, namaSekretaris, npaSekretaris } = resolveEOfficeSigners();
     const todayStr = new Date().toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' });
     const verifyText = `BUKU AGENDA SURAT PGRI RANTING GELANG | Filter: ${agendaFilter} | Total: ${filteredAgenda.length} | Cetak: ${todayStr}`;
-    const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=140x140&data=${encodeURIComponent(verifyText)}`;
+    const qrUrl = generateQrSvgDataUrl(verifyText, 140);
     return `<!DOCTYPE html><html lang="id"><head><meta charset="UTF-8"><title>Buku Agenda Surat</title>
       <style>
         @page { size: A4 portrait; margin: 0; }
@@ -1235,7 +1311,7 @@ export const EOfficeSubPanels: React.FC<EOfficeProps> = ({
         .kop-text .ranting-main { font-size: 16.5pt; font-weight: bold; text-transform: uppercase; letter-spacing: 0.5px; margin-top: 1px; }
         .kop-text .wilayah { font-size: 12pt; font-weight: bold; text-transform: uppercase; letter-spacing: 0.3px; margin-top: 1px; }
         .kop-text .sekretariat { font-size: 8.5pt; font-style: italic; margin-top: 2px; }
-        .kop-divider { border-top: 2px solid #000000; border-bottom: 1px solid #000000; height: 4px; margin-bottom: 18px; position: relative; z-index: 2; }
+        .kop-divider { border-top: 2px solid #000000; border-bottom: 1px solid #000000; height: 2px; margin-bottom: 18px; position: relative; z-index: 2; }
         h3 { text-align: center; text-decoration: underline; margin: 12px 0 4px; font-size: 12.5pt; }
         .sub { text-align: center; font-size: 10pt; margin-bottom: 14px; }
         table { width: 100%; border-collapse: collapse; font-size: 10pt; }
@@ -1293,7 +1369,7 @@ export const EOfficeSubPanels: React.FC<EOfficeProps> = ({
           </table>
         </div>
         <div>
-          <div style="text-align:right; margin-bottom:6px; padding-right:24px;">Gelang, ${escapeHtml(todayStr)}</div>
+          <div style="text-align:right; margin-bottom:6px; padding-right:24px;">Sumberbaru, ${escapeHtml(todayStr)}</div>
           <div class="ttd-grid">
             <div class="ttd-col">
               <div>Ketua</div>
@@ -1428,10 +1504,7 @@ export const EOfficeSubPanels: React.FC<EOfficeProps> = ({
     const stempel = localStorage.getItem('logo-stempel') || '';
     const stempelScale = Math.max(0.3, Math.min(2.5, (Number(localStorage.getItem('logo-stempel-size')) || 100) / 100));
     const stempelRotation = Number(localStorage.getItem('logo-stempel-rotation')) || 0;
-    const namaKetua = (orgConfig as any).ketuaName || localStorage.getItem('pgri-ketua-name') || 'UMAR ALI KUSUMA';
-    const npaKetua = (orgConfig as any).ketuaNpa || localStorage.getItem('pgri-ketua-npa') || '13301500431';
-    const namaSekretaris = (orgConfig as any).sekretarisName || localStorage.getItem('pgri-sekretaris-name') || 'ADI SAIFUL RIZAL, S.Pd';
-    const npaSekretaris = (orgConfig as any).sekretarisNpa || localStorage.getItem('pgri-sekretaris-npa') || '13301500081';
+    const { namaKetua, npaKetua, namaSekretaris, npaSekretaris } = resolveEOfficeSigners();
     const formattedTanggalId = (() => {
       if (!item.tanggal) return '';
       const parsed = new Date(`${item.tanggal}T00:00:00`);
@@ -1454,7 +1527,7 @@ export const EOfficeSubPanels: React.FC<EOfficeProps> = ({
       return item.tanggal;
     })();
     const verifyText = `NOTULEN RAPAT PGRI RANTING GELANG | ${item.eventTitle || 'Draft Rapat'} | Tgl: ${item.tanggal}`;
-    const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=140x140&data=${encodeURIComponent(verifyText)}`;
+    const qrUrl = generateQrSvgDataUrl(verifyText, 140);
     return `<!DOCTYPE html><html lang="id"><head><meta charset="UTF-8"><title>Notulen - ${escapeHtml(item.eventTitle || 'Draft Rapat')}</title>
       <style>
         @page { size: A4 portrait; margin: 0; }
@@ -1484,7 +1557,7 @@ export const EOfficeSubPanels: React.FC<EOfficeProps> = ({
         .kop-text .ranting-main { font-size: 16.5pt; font-weight: bold; text-transform: uppercase; letter-spacing: 0.5px; margin-top: 1px; }
         .kop-text .wilayah { font-size: 12pt; font-weight: bold; text-transform: uppercase; letter-spacing: 0.3px; margin-top: 1px; }
         .kop-text .sekretariat { font-size: 8.5pt; font-style: italic; margin-top: 2px; }
-        .kop-divider { border-top: 2px solid #000000; border-bottom: 1px solid #000000; height: 4px; margin-bottom: 18px; position: relative; z-index: 2; }
+        .kop-divider { border-top: 2px solid #000000; border-bottom: 1px solid #000000; height: 2px; margin-bottom: 18px; position: relative; z-index: 2; }
         h3 { text-align: center; text-decoration: underline; margin: 14px 0; }
         .box { border: 1px solid #000; padding: 10px 14px; margin: 8px 0 12px; min-height: 58px; white-space: pre-line; }
         .ttd-grid { display: flex; justify-content: space-between; align-items: flex-end; position: relative; margin-top: 20px; }
@@ -1527,7 +1600,7 @@ export const EOfficeSubPanels: React.FC<EOfficeProps> = ({
           <div class="box">${escapeHtml(item.tindakLanjut || '-')}</div>
         </div>
         <div>
-          <div style="text-align:right; margin-bottom:6px; padding-right:24px;">Gelang, ${escapeHtml(formattedTanggalId)}</div>
+          <div style="text-align:right; margin-bottom:6px; padding-right:24px;">Sumberbaru, ${escapeHtml(formattedTanggalId)}</div>
           <div class="ttd-grid">
             <div class="ttd-col">
               <div>Ketua</div>
@@ -2963,6 +3036,7 @@ export const BuatUndangan: React.FC<BuatUndanganProps> = ({
 
   const handleDeleteArchive = async (id: string) => {
     if (!isAdmin) return;
+    const deletedInv = savedInvitations.find((item) => item.id === id);
     const nextFallback = savedInvitations.filter((item) => item.id !== id);
     setSavedInvitations((prev) => {
       const updated = prev.filter((item) => item.id !== id);
@@ -2981,6 +3055,13 @@ export const BuatUndangan: React.FC<BuatUndanganProps> = ({
       );
       setSavedInvitations(res.items);
       if (res.success) {
+        if (deletedInv) {
+          void logAuditEvent(
+            'Arsip Undangan',
+            'Hapus Undangan',
+            `Menghapus arsip undangan "${deletedInv.title || deletedInv.perihal}" (${deletedInv.nomorSurat || '-'}).`
+          );
+        }
         showToast('success', 'Undangan dihapus dari arsip.');
       } else {
         showToast('error', res.error || 'Undangan terhapus lokal, namun gagal sinkron ke Cloud.');
@@ -3231,7 +3312,7 @@ export const BuatUndangan: React.FC<BuatUndanganProps> = ({
                           className={inputClass}
                           value={draft.tanggalSurat}
                           onChange={(e) => setDraft({ ...draft, tanggalSurat: e.target.value })}
-                          placeholder="Jember, 16 November 2026"
+                          placeholder="Sumberbaru, 16 November 2026"
                         />
                       </div>
                       <div>

@@ -4,7 +4,6 @@ export type ActiveTab =
   | 'anggota' 
   | 'jadwal' 
   | 'keuangan' 
-  | 'galeri' 
   | 'dokumen' 
   | 'undangan'
   | 'proker'
@@ -71,40 +70,6 @@ export interface Teacher {
   ktaStatus?: 'Aktif' | 'Proses' | 'Belum Punya';
 }
 
-export interface Material {
-  id: string;
-  title: string;
-  subject:
-    | 'IPAS'
-    | 'Bahasa Indonesia'
-    | 'Matematika'
-    | 'Seni Budaya'
-    | 'PJOK'
-    | 'Agama'
-    | 'Pancasila'
-    | 'AD/ART & Organisasi PGRI'
-    | 'Edaran Cabang/Kabupaten'
-    | 'Advokasi & LKBH'
-    | 'Pengembangan Profesi';
-  category:
-    | 'Modul Ajar'
-    | 'LKPD'
-    | 'RPP'
-    | 'Media Pembelajaran'
-    | 'Soal Evaluasi'
-    | 'Pedoman PGRI'
-    | 'SK & Edaran Resmi'
-    | 'Materi Pembinaan';
-  description: string;
-  author: string;
-  school: string;
-  date: string;
-  fileSize: string;
-  fileType: 'pdf' | 'doc' | 'ppt' | 'zip';
-  downloadCount: number;
-  driveUrl?: string;
-}
-
 export interface ActivityEvent {
   id: string;
   title: string;
@@ -144,57 +109,6 @@ export interface Announcement {
   isImportant?: boolean;
 }
 
-export interface ForumPost {
-  id: string;
-  title: string;
-  content: string;
-  author: string;
-  school: string;
-  avatar: string;
-  date: string;
-  tag:
-    | 'Kurikulum Merdeka'
-    | 'IPAS'
-    | 'Modul Ajar'
-    | 'Asesmen'
-    | 'Organisasi PGRI'
-    | 'PPPK & Kepegawaian'
-    | 'Advokasi & Kesejahteraan'
-    | 'Umum';
-  likes: number;
-  replies: ForumReply[];
-  isSolved?: boolean;
-}
-
-export interface ForumReply {
-  id: string;
-  author: string;
-  school: string;
-  avatar: string;
-  content: string;
-  date: string;
-  likes: number;
-}
-
-export interface GalleryItem {
-  id: string;
-  title: string;
-  category: 'Kegiatan' | 'Pendampingan' | 'Workshop' | 'Lomba';
-  date: string;
-  imageUrl: string;
-  description: string;
-}
-
-export interface DocumentItem {
-  id: string;
-  title: string;
-  category: 'Perangkat Ajar' | 'SK Kombel' | 'Jurnal Kegiatan' | 'Materi Workshop';
-  fileSize: string;
-  fileType: string;
-  date: string;
-  downloadUrl: string;
-}
-
 export interface FinancialTransaction {
   id: string;
   date: string;
@@ -203,18 +117,6 @@ export interface FinancialTransaction {
   description: string;
   category?: string;
   receiptImage?: string;
-}
-
-export interface Webinar {
-  id: string;
-  title: string;
-  speaker: string;
-  date: string;
-  time: string;
-  platform: 'Zoom' | 'Google Meet' | 'YouTube Live' | 'Lainnya';
-  link: string;
-  description: string;
-  status: 'Akan Datang' | 'Selesai';
 }
 
 export interface CashPayment {

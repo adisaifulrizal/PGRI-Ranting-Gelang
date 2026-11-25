@@ -17,7 +17,7 @@ import {
   Sparkles
 } from 'lucide-react';
 import { Teacher } from '../../types';
-import { getOrgConfig, openWhatsAppShare } from '../../lib/orgConfig';
+import { getOrgConfig, openWhatsAppShare, DEFAULT_KETUA_FALLBACK } from '../../lib/orgConfig';
 import {
   syncFromFirebase,
   mutateCloudCollection,
@@ -29,6 +29,7 @@ import {
   mergePendingKontakSubmissions
 } from '../../lib/sync';
 import { auth } from '../../lib/firebase';
+import { logAuditEvent } from '../../lib/auth';
 
 const KONTAK_FEEDBACK_KEY = 'pgri-kontak-feedback';
 
@@ -58,8 +59,8 @@ export const KontakView: React.FC<KontakViewProps> = ({
   // Data Sekretariat Dinamis dari Pengaturan & Kepengurusan
   const [sekretariatInfo, setSekretariatInfo] = useState(() => {
     const cfg = getOrgConfig();
-    let contactName = 'Umar Ali Kusuma';
-    let contactWa = '6288235537431';
+    let contactName = DEFAULT_KETUA_FALLBACK.name;
+    let contactWa = DEFAULT_KETUA_FALLBACK.wa;
     try {
       const savedPengurus = localStorage.getItem('kombel-pengurus');
       if (savedPengurus) {
@@ -89,8 +90,8 @@ export const KontakView: React.FC<KontakViewProps> = ({
   useEffect(() => {
     const refreshSekretariat = () => {
       const cfg = getOrgConfig();
-      let contactName = 'Umar Ali Kusuma';
-      let contactWa = '6288235537431';
+      let contactName = DEFAULT_KETUA_FALLBACK.name;
+      let contactWa = DEFAULT_KETUA_FALLBACK.wa;
       try {
         const savedPengurus = localStorage.getItem('kombel-pengurus');
         if (savedPengurus) {
@@ -336,6 +337,7 @@ export const KontakView: React.FC<KontakViewProps> = ({
     if (!editingFeedback) return;
 
     const targetId = editingFeedback.id;
+    const senderName = editingFeedback.name;
     const trimmed = editMessageText;
     const nextList = feedbackList.map(item => item.id === targetId ? { ...item, message: trimmed } : item);
     setFeedbackList(nextList);
@@ -351,6 +353,7 @@ export const KontakView: React.FC<KontakViewProps> = ({
     ).then((res) => {
       if (Array.isArray(res.items)) setFeedbackList(res.items);
     });
+    void logAuditEvent('Layanan Informasi', 'Edit Pesan', `Mengedit pesan masukan dari ${senderName}`);
     setEditingFeedback(null);
   };
 
@@ -358,6 +361,7 @@ export const KontakView: React.FC<KontakViewProps> = ({
   const handleConfirmDelete = () => {
     if (!deleteTarget || activeRole !== 'admin') return;
     const targetId = deleteTarget.id;
+    const senderName = deleteTarget.name;
     const nextList = feedbackList.filter(item => item.id !== targetId);
     setFeedbackList(nextList);
     try {
@@ -372,6 +376,7 @@ export const KontakView: React.FC<KontakViewProps> = ({
     ).then((res) => {
       if (Array.isArray(res.items)) setFeedbackList(res.items);
     });
+    void logAuditEvent('Layanan Informasi', 'Hapus Pesan', `Menghapus pesan masukan dari ${senderName}`);
     setDeleteTarget(null);
   };
 

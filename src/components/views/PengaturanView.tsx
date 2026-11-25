@@ -1,9 +1,16 @@
 import React, { useState, useEffect } from 'react';
-import { Settings, Upload, Image as ImageIcon, CheckCircle, Save, RotateCw, ZoomIn, Download, UploadCloud, Loader2, AlertTriangle, X, Building2, ShieldCheck, History, UserPlus, Trash2, RefreshCw, Users, Plus, ArrowUp, ArrowDown, Database, QrCode, Edit2 } from 'lucide-react';
+import { Settings, Upload, Image as ImageIcon, CheckCircle, Save, ZoomIn, Download, UploadCloud, Loader2, AlertTriangle, X, Building2, ShieldCheck, History, UserPlus, Trash2, RefreshCw, Users, Plus, ArrowUp, ArrowDown, Database, QrCode, Edit2 } from 'lucide-react';
 import { backupAllFirebaseData, restoreAllFirebaseData, syncSettingsToCloud } from '../../lib/sync';
 import { safeDownloadBlob } from '../../lib/download';
 import { PengurusRole, PengurusAssignment, AuditLogEntry, OrgConfig, PengaturanSubTab } from '../../types';
-import { getOrgConfig, saveOrgConfig } from '../../lib/orgConfig';
+import {
+  getOrgConfig,
+  saveOrgConfig,
+  KepengurusanMember,
+  DEFAULT_PEMBINA_MEMBER,
+  DEFAULT_PENANGGUNG_JAWAB_MEMBERS,
+  DEFAULT_PENGURUS_MEMBERS
+} from '../../lib/orgConfig';
 import {
   fetchPengurusAssignments,
   savePengurusAssignment,
@@ -15,51 +22,9 @@ import {
   SUPER_ADMIN_EMAIL
 } from '../../lib/auth';
 
-interface KepengurusanMember {
-  role: string;
-  name: string;
-  nip: string;
-  instansi: string;
-  wa: string;
-}
-
-const DEFAULT_PEMBINA: KepengurusanMember = {
-  role: 'Pengawas Bina',
-  name: 'Hanifatul Susmiyah, S.Pd',
-  nip: '197306022002122005',
-  instansi: 'Pengawas Bina Kecamatan Sumberbaru',
-  wa: '6285859083645'
-};
-
-const DEFAULT_PENANGGUNG_JAWAB: KepengurusanMember[] = [
-  {
-    role: 'Ketua K3S',
-    name: 'Ghufron Atok Urrohman, S.Pd',
-    nip: '197805192014121003',
-    instansi: 'Ketua Kelompok Kerja Kepala Sekolah',
-    wa: '6285859342500'
-  },
-  {
-    role: 'Ketua PGRI Cabang',
-    name: 'Christian Dri Firman Widodo, S.Pd',
-    nip: '198012262014121002',
-    instansi: 'Ketua PGRI Cabang Kecamatan Sumberbaru',
-    wa: '6281217910263'
-  }
-];
-
-const DEFAULT_PENGURUS: KepengurusanMember[] = [
-  { role: 'Penasehat', name: 'Semua Kepala Sekolah', nip: '-', instansi: '-', wa: '-' },
-  { role: 'Ketua PGRI Ranting Gelang', name: 'Umar Ali Kusuma', nip: '198912092025211092', instansi: 'SDN GELANG 03', wa: '6288235537431' },
-  { role: 'Wakil Ketua', name: 'Hartatik, S.Pd', nip: '198301072022212001', instansi: 'SDN KALIGLAGAH 02', wa: '6282245380232' },
-  { role: 'Sekretaris', name: 'Adi Saiful Rizal, S.Pd', nip: '199401162025211089', instansi: 'SDN GELANG 03', wa: '6282292232649' },
-  { role: 'Bendahara', name: 'Atik Andriyati, S.Pd', nip: '197701142014122002', instansi: 'SDN GELANG 06', wa: '6281515786365' },
-  { role: 'Seksi Pembinaan Olahraga', name: 'Saiful Arif, S.Pd', nip: '198604122022211003', instansi: 'SDN GELANG 07', wa: '62881026888955' },
-  { role: 'Seksi Pemberdayaan Perempuan', name: 'Siti Oktavia, S.Pd', nip: '197910072022212001', instansi: 'SDN GELANG 04', wa: '6285697890959' },
-  { role: 'Seksi Pengembangan Profesi & Karir', name: 'Rohman, S.Pd', nip: '198904202022211002', instansi: 'SDN KALIGLAGAH 02', wa: '6282332910923' },
-  { role: 'Seksi Humas', name: 'Jasuri Budianto, S.Pd', nip: '196918082022211001', instansi: 'SDN GELANG 01', wa: '6285314904015' },
-  { role: 'Seksi Keagamaan', name: 'Muhammad Jupri, S.Pd.I', nip: '-', instansi: 'SD NU 21 MIFTAHUL ULUM', wa: '628817159553' }
-];
+const DEFAULT_PEMBINA: KepengurusanMember = DEFAULT_PEMBINA_MEMBER;
+const DEFAULT_PENANGGUNG_JAWAB: KepengurusanMember[] = DEFAULT_PENANGGUNG_JAWAB_MEMBERS;
+const DEFAULT_PENGURUS: KepengurusanMember[] = DEFAULT_PENGURUS_MEMBERS;
 
 const readPembinaFromStorage = (): KepengurusanMember => {
   try {
@@ -397,7 +362,6 @@ export const PengaturanView: React.FC<{
   activeSubTab?: PengaturanSubTab;
 }> = ({ activeRole, pengurusRole = 'guru', activeSubTab = 'logo' }) => {
   const effectiveSubTab: PengaturanSubTab = pengurusRole === 'bendahara' ? 'organisasi' : (activeSubTab as PengaturanSubTab);
-  const [isSaved, setIsSaved] = useState(false);
   const [pendingChanges, setPendingChanges] = useState<Record<string, string>>({});
   const [firebaseSettings, setFirebaseSettings] = useState<Record<string, string>>(() => {
     const localInit: Record<string, string> = {};
@@ -601,7 +565,7 @@ export const PengaturanView: React.FC<{
         localStorage.setItem('pgri-dues-start-period', nextStartPeriod);
       } catch {}
       const [res, startSyncRes] = await Promise.all([
-        saveOrgConfig(nextConfig),
+        saveOrgConfig(nextConfig, nextStartPeriod),
         syncSettingsToCloud({ 'pgri-dues-start-period': nextStartPeriod }, 'Periode Mulai Kontribusi')
       ]);
       const updatedOrg = getOrgConfig();
@@ -846,13 +810,13 @@ export const PengaturanView: React.FC<{
 
   const handleSettingChange = (key: string, value: string) => {
     setPendingChanges(prev => ({ ...prev, [key]: value }));
-    setIsSaved(false);
   };
 
   const handleSaveAll = async () => {
     try {
       const fbData: Record<string, string> = {};
       let hasFbData = false;
+      const changedKeys = Object.keys(pendingChanges);
 
       Object.entries(pendingChanges).forEach(([key, value]) => {
         localStorage.setItem(key, value as string);
@@ -863,15 +827,26 @@ export const PengaturanView: React.FC<{
       });
 
       if (hasFbData) {
-        await syncSettingsToCloud(fbData, 'Pengaturan Aplikasi');
+        const result = await syncSettingsToCloud(fbData, 'Logo, Stempel & TTD Digital');
         setFirebaseSettings(prev => ({ ...prev, ...fbData }));
+        void logAuditEvent(
+          'Pengaturan Visual',
+          'Simpan Logo & TTD',
+          `Memperbarui ${changedKeys.length} aset/pengaturan visual (${changedKeys.join(', ')}).`
+        );
+        if (result.success) {
+          showSystemNotice('success', 'Perubahan logo, stempel, dan tanda tangan berhasil disimpan ke Cloud.');
+        } else {
+          showSystemNotice('warning', 'Perubahan tersimpan di perangkat ini. Sinkronisasi Cloud akan dilanjutkan saat koneksi tersedia.');
+        }
+      } else if (changedKeys.length > 0) {
+        showSystemNotice('success', 'Perubahan pengaturan visual berhasil disimpan.');
       }
 
       setPendingChanges({});
-      setIsSaved(true);
-      setTimeout(() => setIsSaved(false), 3000);
     } catch (error) {
       console.warn("Error saving settings:", error);
+      showSystemNotice('error', 'Gagal menyimpan pengaturan visual.');
     }
   };
 
@@ -910,6 +885,10 @@ export const PengaturanView: React.FC<{
   };
 
   const handleRestore = () => {
+    if (pengurusRole !== 'ketua') {
+      showSystemNotice('warning', 'Fitur Restore Data penuh hanya dapat dilakukan oleh Ketua / Super Admin.');
+      return;
+    }
     if (isBackingUp || isRestoring) return;
     const input = document.createElement('input');
     input.type = 'file';
@@ -949,12 +928,19 @@ export const PengaturanView: React.FC<{
   };
 
   const handleConfirmRestore = async () => {
-    if (!pendingRestoreData || isRestoring) return;
+    if (pengurusRole !== 'ketua' || !pendingRestoreData || isRestoring) return;
     setIsRestoring(true);
     try {
       const result = await restoreAllFirebaseData(pendingRestoreData);
       setPendingRestoreData(null);
       if (result.success) {
+        await logAuditEvent(
+          'Manajemen Data',
+          'Restore Backup',
+          result.cloudSynced
+            ? 'Memulihkan seluruh data dan pengaturan dari file backup JSON ke perangkat dan Cloud.'
+            : `Memulihkan data dari file backup JSON (dengan catatan sinkronisasi Cloud: ${result.warnings[0] || 'sebagian lokal'}).`
+        );
         if (result.cloudSynced) {
           showSystemNotice('success', 'Seluruh data & pengaturan berhasil direstore ke perangkat dan Cloud. Memuat ulang...');
           setTimeout(() => {
@@ -2069,7 +2055,7 @@ export const PengaturanView: React.FC<{
                   [
                     ...FIREBASE_KEYS,
                     'kombel-visi', 'kombel-misi', 'kombel-pembina', 'kombel-penanggungjawab', 'kombel-pengurus',
-                    'org-config', 'logo-kombel', 'pgri-verified-pengurus-names', 'kombel-undangan-npa'
+                    'org-config', 'logo-kombel', 'pgri-verified-pengurus-names', 'kombel-undangan-npa', 'pgri-dues-start-period'
                   ].forEach((k) => {
                     const val = localStorage.getItem(k);
                     if (val !== null) settingsObj[k] = val;
@@ -2150,14 +2136,23 @@ export const PengaturanView: React.FC<{
               {isBackingUp ? <Loader2 className="w-5 h-5 animate-spin" /> : <Download className="w-5 h-5" />}
               <span>{isBackingUp ? 'Membuat Backup...' : 'Backup Data'}</span>
             </button>
-            <button
-              onClick={handleRestore}
-              disabled={isBackingUp || isRestoring}
-              className="flex-1 px-4 py-3 bg-red-800 hover:bg-red-700 disabled:opacity-60 disabled:cursor-not-allowed text-white rounded-xl font-semibold flex items-center justify-center gap-2 transition-colors cursor-pointer"
-            >
-              {isRestoring ? <Loader2 className="w-5 h-5 animate-spin" /> : <UploadCloud className="w-5 h-5" />}
-              <span>{isRestoring ? 'Merestore Data...' : 'Restore Data'}</span>
-            </button>
+            {pengurusRole === 'ketua' ? (
+              <button
+                onClick={handleRestore}
+                disabled={isBackingUp || isRestoring}
+                className="flex-1 px-4 py-3 bg-red-800 hover:bg-red-700 disabled:opacity-60 disabled:cursor-not-allowed text-white rounded-xl font-semibold flex items-center justify-center gap-2 transition-colors cursor-pointer"
+              >
+                {isRestoring ? <Loader2 className="w-5 h-5 animate-spin" /> : <UploadCloud className="w-5 h-5" />}
+                <span>{isRestoring ? 'Merestore Data...' : 'Restore Data'}</span>
+              </button>
+            ) : (
+              <div className={`flex-1 px-4 py-3 rounded-xl border text-xs font-medium flex items-center justify-center gap-2 text-center ${
+                isDark ? 'bg-stone-800/50 border-stone-700 text-stone-400' : 'bg-stone-50 border-stone-200 text-stone-500'
+              }`}>
+                <ShieldCheck className="w-4 h-4 shrink-0 text-amber-500" />
+                <span>Restore Data penuh khusus Ketua / Super Admin</span>
+              </div>
+            )}
           </div>
         </div>
       )}

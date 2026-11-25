@@ -22,11 +22,10 @@ import { collection, doc, deleteDoc, getDoc, getDocFromServer, getDocs, query, w
 import { onAuthStateChanged } from 'firebase/auth';
 import { CheckCircle2, AlertTriangle, XCircle, Volume2, VolumeX } from 'lucide-react';
 import { auth, db } from './lib/firebase';
-import { canAccessAdminForTab, isPengurusRole, PENGURUS_ROLE_LABELS, resolvePengurusRole } from './lib/auth';
+import { canAccessAdminForTab, isPengurusRole, logAuditEvent, PENGURUS_ROLE_LABELS, resolvePengurusRole } from './lib/auth';
 import { Sidebar } from './components/Sidebar';
 import { Header } from './components/Header';
 import { OfflineIndicator } from './components/OfflineIndicator';
-import type { TaskSubmission } from './components/views/JadwalView';
 import { MenuTransitionCurtain } from './components/MenuTransitionCurtain';
 import batikKusumaBangsaBg from './assets/images/batik_kusuma_bangsa_1795456604040.webp';
 
@@ -45,33 +44,23 @@ const SyncModal = React.lazy(() => import('./components/SyncModal').then((m) => 
 
 import {
   ActiveTab,
-  Material,
   ActivityEvent,
   AttendanceRecord,
   Announcement,
-  ForumPost,
-  GalleryItem,
-  DocumentItem,
   Teacher,
   FinancialTransaction,
   CashPayment,
-  Webinar,
   PengurusRole,
   PengaturanSubTab
 } from './types';
 
 import {
   INITIAL_TEACHERS,
-  INITIAL_MATERIALS,
   INITIAL_EVENTS,
   INITIAL_ATTENDANCE,
   INITIAL_ANNOUNCEMENTS,
-  INITIAL_FORUM_POSTS,
-  INITIAL_GALLERY,
-  INITIAL_DOCUMENTS,
   INITIAL_FINANCIAL_TRANSACTIONS,
-  INITIAL_CASH_PAYMENTS,
-  INITIAL_WEBINARS
+  INITIAL_CASH_PAYMENTS
 } from './data/initialData';
 
 const getFormattedFullDate = () => {
@@ -104,10 +93,49 @@ const ensureArray = <T,>(data: any): T[] | null => {
   return null;
 };
 
+// Helper penyimpanan localStorage aman yang otomatis membersihkan cache lama jika kuota penuh
+const safeSetLocalStorage = (key: string, value: string): void => {
+  try {
+    localStorage.setItem(key, value);
+  } catch (err: any) {
+    if (err && (err.name === 'QuotaExceededError' || err.code === 22)) {
+      const legacyKeys = [
+        'kombel-materials',
+        'kombel_materi_list',
+        'kombel-forumPosts',
+        'kombel-webinars',
+        'kombel-transactions',
+        'kombel-cash-payments',
+        'kombel-attendance-list'
+      ];
+      legacyKeys.forEach((legacyKey) => {
+        try {
+          localStorage.removeItem(legacyKey);
+        } catch {}
+      });
+      try {
+        localStorage.setItem(key, value);
+      } catch {}
+    }
+  }
+};
+
 export default function App() {
-  const [showWelcomePopup, setShowWelcomePopup] = useState(true);
+  const [showWelcomePopup, setShowWelcomePopup] = useState(() => {
+    try {
+      return sessionStorage.getItem('pgri_welcome_shown') !== '1';
+    } catch {
+      return true;
+    }
+  });
   const [welcomeProgress, setWelcomeProgress] = useState(0);
-  const [welcomePhase, setWelcomePhase] = useState<'loading' | 'ready' | 'showcase' | 'blackout' | 'exiting' | 'done'>('loading');
+  const [welcomePhase, setWelcomePhase] = useState<'loading' | 'ready' | 'showcase' | 'blackout' | 'exiting' | 'done'>(() => {
+    try {
+      return sessionStorage.getItem('pgri_welcome_shown') === '1' ? 'done' : 'loading';
+    } catch {
+      return 'loading';
+    }
+  });
   const [isWelcomeAudioMuted, setIsWelcomeAudioMuted] = useState(false);
   const [isWelcomeAudioUnlocked, setIsWelcomeAudioUnlocked] = useState(false);
   const welcomeAudioCtxRef = useRef<AudioContext | null>(null);
@@ -430,6 +458,9 @@ export default function App() {
     }
     if (welcomePhase === 'exiting') {
       const doneTimer = setTimeout(() => {
+        try {
+          sessionStorage.setItem('pgri_welcome_shown', '1');
+        } catch {}
         setWelcomePhase('done');
         setShowWelcomePopup(false);
       }, 700);
@@ -526,8 +557,7 @@ export default function App() {
           'financialTransactions',
           'cashPayments',
           'attendanceList',
-          'announcements',
-          'taskSubmissions'
+          'announcements'
         ];
 
         const keysToFetch = startupKeys.filter((k) => shouldFetchByVersion(k, cloudVersions));
@@ -570,24 +600,19 @@ export default function App() {
               setFinancialTransactions(val);
               try {
                 localStorage.setItem('kombel-financialTransactions', JSON.stringify(val));
-                localStorage.setItem('kombel-transactions', JSON.stringify(val));
+                localStorage.removeItem('kombel-transactions');
               } catch (e) {}
             } else if (key === 'cashPayments') {
               setCashPayments(val);
               try {
                 localStorage.setItem('kombel-cashPayments', JSON.stringify(val));
-                localStorage.setItem('kombel-cash-payments', JSON.stringify(val));
-              } catch (e) {}
-            } else if (key === 'taskSubmissions') {
-              setTaskSubmissions(val);
-              try {
-                localStorage.setItem('kombel-task-submissions', JSON.stringify(val));
+                localStorage.removeItem('kombel-cash-payments');
               } catch (e) {}
             } else if (key === 'attendanceList') {
               setAttendanceList(val);
               try {
                 localStorage.setItem('kombel-attendance', JSON.stringify(val));
-                localStorage.setItem('kombel-attendance-list', JSON.stringify(val));
+                localStorage.removeItem('kombel-attendance-list');
               } catch (e) {}
             } else if (key === 'announcements') {
               setAnnouncements(val);
@@ -619,50 +644,12 @@ export default function App() {
 
   const isInitialMount = useRef({
     teachers: true,
-    materials: true,
     events: true,
     attendanceList: true,
-    forumPosts: true,
     financialTransactions: true,
     cashPayments: true,
-    announcements: true,
-    taskSubmissions: true,
-    webinars: true
+    announcements: true
   });
-
-  const [taskSubmissions, setTaskSubmissions] = useState<TaskSubmission[]>(() => {
-    try {
-      const saved = localStorage.getItem('kombel-task-submissions');
-      return saved ? JSON.parse(saved) : [];
-    } catch (e) {
-      console.warn('Gagal membaca task submissions:', e);
-      return [];
-    }
-  });
-  const taskSubmissionsRef = useRef<TaskSubmission[]>(taskSubmissions);
-  useEffect(() => {
-    taskSubmissionsRef.current = taskSubmissions;
-  }, [taskSubmissions]);
-
-  const [webinars, setWebinars] = useState<Webinar[]>(() => {
-    try {
-      const saved = localStorage.getItem('kombel-webinars');
-      return saved ? JSON.parse(saved) : INITIAL_WEBINARS;
-    } catch (e) {
-      return INITIAL_WEBINARS;
-    }
-  });
-
-  useEffect(() => {
-    try {
-      localStorage.setItem('kombel-webinars', JSON.stringify(webinars));
-      if (isInitialMount.current.webinars) {
-        isInitialMount.current.webinars = false;
-      }
-    } catch (e) {
-      console.warn('Gagal menyimpan data webinars:', e);
-    }
-  }, [webinars]);
 
   const [activeTab, setActiveTab] = useState<ActiveTab>('beranda');
   const [pengaturanSubTab, setPengaturanSubTab] = useState<PengaturanSubTab>('logo');
@@ -767,11 +754,41 @@ export default function App() {
     setActiveTab('beranda');
   }, [activeRole]);
 
+  const isTabLockedForGuru = (tab: ActiveTab): boolean => {
+    if (activeRole === 'admin' && Boolean(authEmail) && isPengurusRole(pengurusRole)) {
+      return false;
+    }
+    try {
+      const saved = localStorage.getItem('kombel-locked-menus');
+      if (!saved) return false;
+      const parsed = JSON.parse(saved) as Record<string, boolean>;
+      return Boolean(parsed[tab]);
+    } catch {
+      return false;
+    }
+  };
+
+  const navigateWithLockCheck = (tab: ActiveTab) => {
+    if (isTabLockedForGuru(tab)) {
+      emitSyncStatus({
+        type: 'warning',
+        message: 'Menu tersebut sedang dikunci oleh Pengurus PGRI.'
+      });
+      return;
+    }
+    setActiveTab(tab);
+    setSelectedEventForAbsensi(null);
+  };
+
   useEffect(() => {
     if (activeTab === 'pengaturan' && (activeRole !== 'admin' || !canAccessAdminForTab(pengurusRole, 'pengaturan'))) {
       setActiveTab('beranda');
+      return;
     }
-  }, [activeTab, activeRole, pengurusRole]);
+    if (activeTab !== 'beranda' && isTabLockedForGuru(activeTab)) {
+      setActiveTab('beranda');
+    }
+  }, [activeTab, activeRole, pengurusRole, authEmail]);
 
   const roleForTab = (tab: ActiveTab): 'guru' | 'admin' => {
     if (activeRole !== 'admin') return 'guru';
@@ -780,7 +797,7 @@ export default function App() {
 
   const currentUser = {
     name: activeRole === 'admin' ? (authDisplayName || PENGURUS_ROLE_LABELS[pengurusRole]) : 'Semua Guru',
-    school: 'PGRI Ranting Gelang - Sumberbaru',
+    school: 'PGRI Ranting Gelang',
     role: activeRole === 'admin' ? PENGURUS_ROLE_LABELS[pengurusRole] : 'Guru'
   };
 
@@ -831,26 +848,7 @@ export default function App() {
       isInitialMount.current.teachers = false;
     }
   }, [teachers]);
-
-  const [materials, setMaterials] = useState<Material[]>(() => {
-    try {
-      const saved = localStorage.getItem('kombel-materials');
-      return saved ? JSON.parse(saved) : INITIAL_MATERIALS;
-    } catch (e) {
-      return INITIAL_MATERIALS;
-    }
-  });
-
-  useEffect(() => {
-    try {
-      localStorage.setItem('kombel-materials', JSON.stringify(materials));
-      localStorage.setItem('kombel_materi_list', JSON.stringify(materials));
-    } catch {}
-    if (isInitialMount.current.materials) {
-      isInitialMount.current.materials = false;
-    }
-  }, [materials]);
-
+  
   const [events, setEvents] = useState<ActivityEvent[]>(() => {
     try {
       const saved = localStorage.getItem('kombel-events');
@@ -942,40 +940,6 @@ export default function App() {
     }
   }, [announcements]);
 
-  const [forumPosts, setForumPosts] = useState<ForumPost[]>(() => {
-    try {
-      const saved = localStorage.getItem('kombel-forumPosts');
-      return saved ? JSON.parse(saved) : INITIAL_FORUM_POSTS;
-    } catch (e) {
-      return INITIAL_FORUM_POSTS;
-    }
-  });
-
-  useEffect(() => {
-    try {
-      localStorage.setItem('kombel-forumPosts', JSON.stringify(forumPosts));
-    } catch {}
-    if (isInitialMount.current.forumPosts) {
-      isInitialMount.current.forumPosts = false;
-    }
-  }, [forumPosts]);
-
-  useEffect(() => {
-    try {
-      localStorage.setItem('kombel-task-submissions', JSON.stringify(taskSubmissions));
-      if (isInitialMount.current.taskSubmissions) {
-        isInitialMount.current.taskSubmissions = false;
-        return;
-      }
-      // Jangan auto-push stale data ke Firestore saat pergantian state/role agar tidak menimpa tugas baru dari guru
-    } catch (e) {
-      console.warn('Gagal menyimpan data taskSubmissions:', e);
-    }
-  }, [taskSubmissions, activeRole]);
-
-  const [gallery] = useState<GalleryItem[]>(INITIAL_GALLERY);
-  const [documents] = useState<DocumentItem[]>(INITIAL_DOCUMENTS);
-
   const [financialTransactions, setFinancialTransactions] = useState<FinancialTransaction[]>(() => {
     try {
       const saved = localStorage.getItem('kombel-financialTransactions') || localStorage.getItem('kombel-transactions');
@@ -985,8 +949,7 @@ export default function App() {
           if (parsed.length === 0) return [];
           // Jika masih tersimpan data dummy lama tahun 2025, migrasikan ke data resmi 2026
           if (parsed.some((t: any) => t.id === 'tx1' || (t.description && t.description.toLowerCase().includes('sisa saldo bulan april')))) {
-            localStorage.setItem('kombel-financialTransactions', JSON.stringify(INITIAL_FINANCIAL_TRANSACTIONS));
-            localStorage.setItem('kombel-transactions', JSON.stringify(INITIAL_FINANCIAL_TRANSACTIONS));
+            safeSetLocalStorage('kombel-financialTransactions', JSON.stringify(INITIAL_FINANCIAL_TRANSACTIONS));
             return INITIAL_FINANCIAL_TRANSACTIONS;
           }
           return parsed;
@@ -1069,10 +1032,9 @@ export default function App() {
 
       // 2. Modul Jadwal Kegiatan & Absensi
       if (isAll || selectedModuleIds.includes('jadwal')) {
-        const [fEvents, fAttendance, fTasks] = await Promise.all([
+        const [fEvents, fAttendance] = await Promise.all([
           syncFromFirebase('events'),
-          syncFromFirebase('attendanceList'),
-          syncFromFirebase('taskSubmissions')
+          syncFromFirebase('attendanceList')
         ]);
         const parsedCloudEvents = ensureArray<ActivityEvent>(fEvents);
         if (parsedCloudEvents && Array.isArray(parsedCloudEvents)) {
@@ -1102,7 +1064,7 @@ export default function App() {
           setAttendanceList(parsedCloudAttendance);
           try {
             localStorage.setItem('kombel-attendance', JSON.stringify(parsedCloudAttendance));
-            localStorage.setItem('kombel-attendance-list', JSON.stringify(parsedCloudAttendance));
+            localStorage.removeItem('kombel-attendance-list');
           } catch (e) {}
           markLocalVersionSynced('attendanceList', cloudVersions);
         }
@@ -1113,15 +1075,6 @@ export default function App() {
           if (Array.isArray(mergedAtt)) {
             setAttendanceList(mergedAtt);
           }
-        }
-
-        const parsedCloudTasks = ensureArray<TaskSubmission>(fTasks);
-        if (parsedCloudTasks && Array.isArray(parsedCloudTasks)) {
-          setTaskSubmissions(parsedCloudTasks);
-          try {
-            localStorage.setItem('kombel-task-submissions', JSON.stringify(parsedCloudTasks));
-          } catch (e) {}
-          markLocalVersionSynced('taskSubmissions', cloudVersions);
         }
       }
 
@@ -1149,7 +1102,7 @@ export default function App() {
           setFinancialTransactions(parsedCloudFin);
           try {
             localStorage.setItem('kombel-financialTransactions', JSON.stringify(parsedCloudFin));
-            localStorage.setItem('kombel-transactions', JSON.stringify(parsedCloudFin));
+            localStorage.removeItem('kombel-transactions');
           } catch (e) {}
           markLocalVersionSynced('financialTransactions', cloudVersions);
         }
@@ -1159,7 +1112,7 @@ export default function App() {
           setCashPayments(parsedCloudCash);
           try {
             localStorage.setItem('kombel-cashPayments', JSON.stringify(parsedCloudCash));
-            localStorage.setItem('kombel-cash-payments', JSON.stringify(parsedCloudCash));
+            localStorage.removeItem('kombel-cash-payments');
           } catch (e) {}
           markLocalVersionSynced('cashPayments', cloudVersions);
         }
@@ -1265,6 +1218,27 @@ export default function App() {
         } catch (e) {}
       }
 
+      // 9b. Modul Layanan Informasi & Masukan (Kontak)
+      if (isAll || selectedModuleIds.includes('kontak')) {
+        try {
+          const fKontak = await syncFromFirebase('kontakFeedback');
+          const parsedKontak = ensureArray<any>(fKontak);
+          if (parsedKontak && Array.isArray(parsedKontak)) {
+            try {
+              localStorage.setItem('pgri-kontak-feedback', JSON.stringify(parsedKontak));
+            } catch (e) {}
+            markLocalVersionSynced('kontakFeedback', cloudVersions);
+          }
+          if (auth.currentUser?.emailVerified && canAccessAdminForTab(pengurusRole, 'kontak')) {
+            await mergePendingKontakSubmissions(Array.isArray(parsedKontak) ? parsedKontak : []);
+          }
+          try {
+            sessionStorage.setItem('pgri_kontak_sync_ts', String(Date.now()));
+          } catch (e) {}
+          window.dispatchEvent(new Event('pgri-kontak-synced'));
+        } catch (e) {}
+      }
+
       // 10. Modul Kepengurusan & Pengaturan (Termasuk Status Kunci Menu)
       if (isAll || selectedModuleIds.includes('pengaturan')) {
         try {
@@ -1367,90 +1341,7 @@ export default function App() {
       window.removeEventListener('storage', handleStorageChange);
     };
   }, []);
-
-  const handleAddMaterial = (newMat: Omit<Material, 'id' | 'downloadCount' | 'date'>) => {
-    const created: Material = {
-      ...newMat,
-      id: `m-${Date.now()}`,
-      downloadCount: 0,
-      date: getFormattedShortDate()
-    };
-    setMaterials(prev => {
-      const updated = [created, ...prev];
-      try {
-        localStorage.setItem('kombel-materials', JSON.stringify(updated));
-        localStorage.setItem('kombel_materi_list', JSON.stringify(updated));
-      } catch (e) {}
-      return updated;
-    });
-    mutateCloudCollection<Material>(
-      'materials',
-      ['kombel-materials', 'kombel_materi_list'],
-      (latest) => [created, ...latest.filter(m => m.id !== created.id)],
-      materials,
-      'Materi & Modul'
-    ).then(res => setMaterials(res.items));
-  };
-
-  const handleUpdateMaterial = (updatedMat: Material) => {
-    setMaterials(prev => {
-      const updated = prev.map(m => m.id === updatedMat.id ? updatedMat : m);
-      try {
-        localStorage.setItem('kombel-materials', JSON.stringify(updated));
-        localStorage.setItem('kombel_materi_list', JSON.stringify(updated));
-      } catch (e) {}
-      return updated;
-    });
-    mutateCloudCollection<Material>(
-      'materials',
-      ['kombel-materials', 'kombel_materi_list'],
-      (latest) => latest.some(m => m.id === updatedMat.id)
-        ? latest.map(m => m.id === updatedMat.id ? updatedMat : m)
-        : [updatedMat, ...latest],
-      materials,
-      'Materi & Modul'
-    ).then(res => setMaterials(res.items));
-  };
-
-  const handleDeleteMaterial = async (id: string): Promise<boolean> => {
-    const nextFallback = materials.filter(m => m.id !== id);
-    setMaterials(prev => {
-      const updated = prev.filter(m => m.id !== id);
-      try {
-        localStorage.setItem('kombel-materials', JSON.stringify(updated));
-        localStorage.setItem('kombel_materi_list', JSON.stringify(updated));
-      } catch (e) {}
-      return updated;
-    });
-    const res = await mutateCloudCollection<Material>(
-      'materials',
-      ['kombel-materials', 'kombel_materi_list'],
-      (latest) => latest.filter(m => m.id !== id),
-      nextFallback,
-      'Materi & Modul'
-    );
-    setMaterials(res.items);
-    return res.success;
-  };
-
-  const handleIncrementDownload = (id: string) => {
-    setMaterials(prev => {
-      const updated = prev.map(m => m.id === id ? { ...m, downloadCount: m.downloadCount + 1 } : m);
-      try {
-        localStorage.setItem('kombel-materials', JSON.stringify(updated));
-        localStorage.setItem('kombel_materi_list', JSON.stringify(updated));
-      } catch (e) {}
-      return updated;
-    });
-    mutateCloudCollection<Material>(
-      'materials',
-      ['kombel-materials', 'kombel_materi_list'],
-      (latest) => latest.map(m => m.id === id ? { ...m, downloadCount: (m.downloadCount || 0) + 1 } : m),
-      materials,
-      'Jumlah Unduhan Materi'
-    ).then(res => setMaterials(res.items));
-  };
-
+  
   const handleAddAttendance = (rec: Omit<AttendanceRecord, 'id' | 'timestamp'>) => {
     const created: AttendanceRecord = {
       ...rec,
@@ -1459,10 +1350,7 @@ export default function App() {
     };
     setAttendanceList(prev => {
       const updated = [created, ...prev];
-      try {
-        localStorage.setItem('kombel-attendance', JSON.stringify(updated));
-        localStorage.setItem('kombel-attendance-list', JSON.stringify(updated));
-      } catch (e) {}
+      safeSetLocalStorage('kombel-attendance', JSON.stringify(updated));
       return updated;
     });
 
@@ -1505,7 +1393,7 @@ export default function App() {
     savePerDocItem('attendance_docs', created.id, created, 'Presensi Kehadiran');
     mutateCloudCollection<AttendanceRecord>(
       'attendanceList',
-      ['kombel-attendance', 'kombel-attendance-list'],
+      ['kombel-attendance'],
       (latest) => [created, ...latest.filter(a => a.id !== created.id)],
       attendanceList,
       'Presensi Kehadiran'
@@ -1525,10 +1413,7 @@ export default function App() {
 
     setAttendanceList(prev => {
       const updated = [...createdList, ...prev];
-      try {
-        localStorage.setItem('kombel-attendance', JSON.stringify(updated));
-        localStorage.setItem('kombel-attendance-list', JSON.stringify(updated));
-      } catch (e) {}
+      safeSetLocalStorage('kombel-attendance', JSON.stringify(updated));
       return updated;
     });
 
@@ -1541,7 +1426,7 @@ export default function App() {
     const createdIds = new Set(createdList.map(c => c.id));
     mutateCloudCollection<AttendanceRecord>(
       'attendanceList',
-      ['kombel-attendance', 'kombel-attendance-list'],
+      ['kombel-attendance'],
       (latest) => [...createdList, ...latest.filter(a => !createdIds.has(a.id))],
       attendanceList,
       `Presensi Massal (${createdList.length} Anggota)`
@@ -1567,13 +1452,15 @@ export default function App() {
         : [updated, ...cleaned];
       try {
         localStorage.setItem('kombel-attendance', JSON.stringify(updatedList));
-        localStorage.setItem('kombel-attendance-list', JSON.stringify(updatedList));
       } catch (e) {}
       return updatedList;
     });
+    if (auth.currentUser && auth.currentUser.emailVerified) {
+      void savePerDocItem('attendance_docs', updated.id, updated, 'Presensi Kehadiran');
+    }
     mutateCloudCollection<AttendanceRecord>(
       'attendanceList',
-      ['kombel-attendance', 'kombel-attendance-list'],
+      ['kombel-attendance'],
       (latest) => {
         const cleaned = latest.filter(a => !isDuplicateTeacherEvent(a, updated));
         return cleaned.some(a => a.id === updated.id)
@@ -1586,13 +1473,11 @@ export default function App() {
   };
 
   const handleDeleteAttendance = async (id: string): Promise<boolean> => {
+    const deletedRec = attendanceList.find(a => a.id === id);
     const nextFallback = attendanceList.filter(a => a.id !== id);
     setAttendanceList(prev => {
       const updatedList = prev.filter(a => a.id !== id);
-      try {
-        localStorage.setItem('kombel-attendance', JSON.stringify(updatedList));
-        localStorage.setItem('kombel-attendance-list', JSON.stringify(updatedList));
-      } catch (e) {}
+      safeSetLocalStorage('kombel-attendance', JSON.stringify(updatedList));
       return updatedList;
     });
     removeFromOfflineQueue('attendance_docs', id);
@@ -1601,12 +1486,19 @@ export default function App() {
     }
     const res = await mutateCloudCollection<AttendanceRecord>(
       'attendanceList',
-      ['kombel-attendance', 'kombel-attendance-list'],
+      ['kombel-attendance'],
       (latest) => latest.filter(a => a.id !== id),
       nextFallback,
       'Presensi Kehadiran'
     );
     setAttendanceList(res.items);
+    if (deletedRec) {
+      void logAuditEvent(
+        'Jadwal & Presensi',
+        'Hapus Presensi',
+        `Menghapus presensi ${deletedRec.teacherName} pada "${deletedRec.eventTitle}".`
+      );
+    }
     return res.success;
   };
 
@@ -1623,6 +1515,7 @@ export default function App() {
       } catch (e) {}
       return updated;
     });
+    void logAuditEvent('Jadwal Kegiatan', 'Tambah Kegiatan', `Menambahkan kegiatan "${created.title}" (${created.fullDate || created.date}).`);
     mutateCloudCollection<ActivityEvent>(
       'events',
       ['kombel-events'],
@@ -1646,6 +1539,7 @@ export default function App() {
       } catch (e) {}
       return updatedList;
     });
+    void logAuditEvent('Jadwal Kegiatan', 'Edit Kegiatan', `Memperbarui kegiatan "${updated.title}".`);
     mutateCloudCollection<ActivityEvent>(
       'events',
       ['kombel-events'],
@@ -1658,6 +1552,7 @@ export default function App() {
   };
 
   const handleDeleteEvent = async (id: string): Promise<boolean> => {
+    const deletedEvt = events.find(e => e.id === id);
     const nextFallback = events.filter(e => e.id !== id);
     setEvents(prev => {
       const updatedList = prev.filter(e => e.id !== id);
@@ -1674,78 +1569,12 @@ export default function App() {
       'Jadwal Kegiatan'
     );
     setEvents(res.items);
+    if (deletedEvt) {
+      void logAuditEvent('Jadwal Kegiatan', 'Hapus Kegiatan', `Menghapus kegiatan "${deletedEvt.title}".`);
+    }
     return res.success;
   };
-
-  const handleAddPost = (post: Omit<ForumPost, 'id' | 'likes' | 'replies' | 'date'>) => {
-    const created: ForumPost = {
-      ...post,
-      id: `fp-${Date.now()}`,
-      likes: 0,
-      replies: [],
-      date: getFormattedShortDate()
-    };
-    setForumPosts(prev => {
-      const updated = [created, ...prev];
-      try {
-        localStorage.setItem('kombel-forumPosts', JSON.stringify(updated));
-      } catch (e) {}
-      return updated;
-    });
-    mutateCloudCollection<ForumPost>(
-      'forumPosts',
-      ['kombel-forumPosts'],
-      (latest) => [created, ...latest.filter(p => p.id !== created.id)],
-      forumPosts,
-      'Forum Diskusi'
-    ).then(res => setForumPosts(res.items));
-  };
-
-  const handleAddReply = (postId: string, replyContent: string, authorName: string, schoolName: string) => {
-    const newReply = {
-      id: `fr-${Date.now()}`,
-      author: authorName,
-      school: schoolName,
-      avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80',
-      content: replyContent,
-      date: getFormattedShortDate(),
-      likes: 0
-    };
-    setForumPosts(prev => {
-      const updated = prev.map(p => p.id === postId ? { ...p, replies: [...p.replies, newReply] } : p);
-      try {
-        localStorage.setItem('kombel-forumPosts', JSON.stringify(updated));
-      } catch (e) {}
-      return updated;
-    });
-    mutateCloudCollection<ForumPost>(
-      'forumPosts',
-      ['kombel-forumPosts'],
-      (latest) => latest.map(p => p.id === postId
-        ? { ...p, replies: [...(p.replies || []).filter(r => r.id !== newReply.id), newReply] }
-        : p),
-      forumPosts,
-      'Balasan Forum'
-    ).then(res => setForumPosts(res.items));
-  };
-
-  const handleToggleLike = (postId: string) => {
-    setForumPosts(prev => {
-      const updated = prev.map(p => p.id === postId ? { ...p, likes: p.likes + 1 } : p);
-      try {
-        localStorage.setItem('kombel-forumPosts', JSON.stringify(updated));
-      } catch (e) {}
-      return updated;
-    });
-    mutateCloudCollection<ForumPost>(
-      'forumPosts',
-      ['kombel-forumPosts'],
-      (latest) => latest.map(p => p.id === postId ? { ...p, likes: (p.likes || 0) + 1 } : p),
-      forumPosts,
-      'Suka Forum Diskusi'
-    ).then(res => setForumPosts(res.items));
-  };
-
+  
   const handleOpenAttendanceFromDashboard = (event: ActivityEvent) => {
     setSelectedEventForAbsensi(event);
     setActiveTab('jadwal');
@@ -1763,6 +1592,7 @@ export default function App() {
       } catch (e) {}
       return updated;
     });
+    void logAuditEvent('Pengumuman', 'Tambah Pengumuman', `Menerbitkan pengumuman "${created.title}".`);
     mutateCloudCollection<Announcement>(
       'announcements',
       ['kombel-announcements'],
@@ -1780,6 +1610,7 @@ export default function App() {
       } catch (e) {}
       return updated;
     });
+    void logAuditEvent('Pengumuman', 'Edit Pengumuman', `Memperbarui pengumuman "${updatedAnn.title}".`);
     mutateCloudCollection<Announcement>(
       'announcements',
       ['kombel-announcements'],
@@ -1804,6 +1635,7 @@ export default function App() {
       } catch (e) {}
       return updated;
     });
+    void logAuditEvent('Pengumuman', 'Salin Pengumuman', `Menyalin pengumuman "${item.title}".`);
     mutateCloudCollection<Announcement>(
       'announcements',
       ['kombel-announcements'],
@@ -1814,6 +1646,7 @@ export default function App() {
   };
 
   const handleDeleteAnnouncement = async (id: string | number): Promise<boolean> => {
+    const deletedAnn = announcements.find(a => a.id === id);
     const nextFallback = announcements.filter(a => a.id !== id);
     setAnnouncements(prev => {
       const updated = prev.filter(a => a.id !== id);
@@ -1830,83 +1663,10 @@ export default function App() {
       'Pengumuman'
     );
     setAnnouncements(res.items);
+    if (deletedAnn) {
+      void logAuditEvent('Pengumuman', 'Hapus Pengumuman', `Menghapus pengumuman "${deletedAnn.title}".`);
+    }
     return res.success;
-  };
-
-  const handleAddWebinar = (newWebinar: Omit<Webinar, 'id'>) => {
-    const created: Webinar = {
-      ...newWebinar,
-      id: `w-${Date.now()}`
-    };
-    setWebinars(prev => {
-      const updated = [created, ...prev];
-      try {
-        localStorage.setItem('kombel-webinars', JSON.stringify(updated));
-      } catch (e) {}
-      return updated;
-    });
-    mutateCloudCollection<Webinar>(
-      'webinars',
-      ['kombel-webinars'],
-      (latest) => [created, ...latest.filter(w => w.id !== created.id)],
-      webinars,
-      'Jadwal Webinar'
-    ).then(res => setWebinars(res.items));
-  };
-
-  const handleUpdateWebinar = (updated: Webinar) => {
-    setWebinars(prev => {
-      const updatedList = prev.map(w => w.id === updated.id ? updated : w);
-      try {
-        localStorage.setItem('kombel-webinars', JSON.stringify(updatedList));
-      } catch (e) {}
-      return updatedList;
-    });
-    mutateCloudCollection<Webinar>(
-      'webinars',
-      ['kombel-webinars'],
-      (latest) => latest.some(w => w.id === updated.id)
-        ? latest.map(w => w.id === updated.id ? updated : w)
-        : [updated, ...latest],
-      webinars,
-      'Jadwal Webinar'
-    ).then(res => setWebinars(res.items));
-  };
-
-  const handleDeleteWebinar = async (id: string): Promise<boolean> => {
-    const nextFallback = webinars.filter(w => w.id !== id);
-    setWebinars(prev => {
-      const updatedList = prev.filter(w => w.id !== id);
-      try {
-        localStorage.setItem('kombel-webinars', JSON.stringify(updatedList));
-      } catch (e) {}
-      return updatedList;
-    });
-    const res = await mutateCloudCollection<Webinar>(
-      'webinars',
-      ['kombel-webinars'],
-      (latest) => latest.filter(w => w.id !== id),
-      nextFallback,
-      'Jadwal Webinar'
-    );
-    setWebinars(res.items);
-    return res.success;
-  };
-
-  const handleUpdateTaskSubmissions: React.Dispatch<React.SetStateAction<TaskSubmission[]>> = (updater) => {
-    const next = typeof updater === 'function' ? updater(taskSubmissionsRef.current) : updater;
-    taskSubmissionsRef.current = next;
-    setTaskSubmissions(next);
-    try {
-      localStorage.setItem('kombel-task-submissions', JSON.stringify(next));
-    } catch (e) {}
-    void mutateCloudCollection<TaskSubmission>(
-      'taskSubmissions',
-      ['kombel-task-submissions'],
-      () => next,
-      next,
-      'Unggahan Tugas'
-    ).then((res) => setTaskSubmissions(res.items));
   };
 
   return (
@@ -2751,20 +2511,13 @@ export default function App() {
           >
           {activeTab === 'beranda' && (
             <BerandaView
-              onNavigate={(tab) => {
-                setActiveTab(tab);
-                setSelectedEventForAbsensi(null);
-              }}
+              onNavigate={navigateWithLockCheck}
               events={events}
-              announcements={announcements}
               onOpenAttendance={handleOpenAttendanceFromDashboard}
               theme={theme}
               teachers={teachers}
-              materials={materials}
-              forumPosts={forumPosts}
               cashPayments={cashPayments}
               attendanceList={attendanceList}
-              activeRole={activeRole}
               isEntryReady={(welcomePhase === 'exiting' || welcomePhase === 'done') && menuEntryPhase !== 'intro'}
             />
           )}
@@ -2798,8 +2551,6 @@ export default function App() {
               currentUser={currentUser}
               selectedEventForAbsensi={selectedEventForAbsensi}
               activeRole={roleForTab('jadwal')}
-              taskSubmissions={taskSubmissions}
-              onUpdateTaskSubmissions={handleUpdateTaskSubmissions}
             />
           )}
 

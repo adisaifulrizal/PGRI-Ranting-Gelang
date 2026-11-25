@@ -114,12 +114,6 @@ const MENU_META: Record<ActiveTab, MenuMeta> = {
     subtitle: 'Menyiapkan pengumuman resmi & informasi organisasi',
     icon: <Bell className="w-6 h-6" />
   },
-  galeri: {
-    category: 'Dokumentasi',
-    title: 'Membuka Galeri Kegiatan...',
-    subtitle: 'Menyiapkan dokumentasi foto & arsip kegiatan organisasi',
-    icon: <ImageIcon className="w-6 h-6" />
-  },
   undangan: {
     category: 'Administrasi Surat',
     title: 'Membuka Buat Undangan...',

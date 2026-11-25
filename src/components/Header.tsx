@@ -36,8 +36,8 @@ export const Header: React.FC<HeaderProps> = ({
 
     const syncLocalLogo = () => {
       const saved = localStorage.getItem('logo-pgri') || localStorage.getItem('logo-kombel');
-      if (saved && isMounted) {
-        setLogoKombel(saved);
+      if (isMounted) {
+        setLogoKombel(saved || null);
       }
     };
 

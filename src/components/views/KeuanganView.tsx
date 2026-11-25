@@ -1,8 +1,9 @@
 import { safeDownloadBlob } from '../../lib/download';
 import { mutateCloudCollection, savePerDocItem, deletePerDocItem, syncSettingsToCloud } from '../../lib/sync';
-import { getOrgConfig, openWhatsAppShare } from '../../lib/orgConfig';
+import { buildDefaultProfilCandidates, DEFAULT_KETUA_FALLBACK, getOrgConfig, openWhatsAppShare } from '../../lib/orgConfig';
 import { logAuditEvent } from '../../lib/auth';
 import { isMobileDevice, downloadContainerAsPdf } from '../../lib/pdfExport';
+import { generateQrSvgDataUrl } from '../../lib/qrGenerator';
 import React, { useState, useMemo, useEffect } from 'react';
 import { FinancialTransaction, CashPayment, Teacher, ActivityEvent } from '../../types';
 import {
@@ -442,19 +443,6 @@ export const KeuanganView: React.FC<KeuanganViewProps> = ({
     setTimeout(() => setCopiedBank(false), 2000);
   };
 
-  // Helper format tanggal kegiatan (Contoh: Sabtu, 15 Agustus 2026)
-  const formatEventDate = (dateStr?: string) => {
-    if (!dateStr) return '';
-    const date = new Date(dateStr);
-    if (isNaN(date.getTime())) return dateStr;
-    return new Intl.DateTimeFormat('id-ID', {
-      weekday: 'long',
-      day: 'numeric',
-      month: 'long',
-      year: 'numeric'
-    }).format(date);
-  };
-
   // Helper untuk menentukan jenis kelamin anggota
   const getGender = (t: Teacher): 'L' | 'P' => {
     if (t.gender) return t.gender;
@@ -462,41 +450,9 @@ export const KeuanganView: React.FC<KeuanganViewProps> = ({
     return femaleNames.some(n => t.name && t.name.includes(n)) ? 'P' : 'L';
   };
 
-  // Default data lengkap Pengurus dari ProfilKBView (Pembina, Penanggung Jawab, dan Struktur Kepengurusan)
-  const defaultPengurusList: any[] = useMemo(() => [
-    // Struktur Kepengurusan (9 Perorangan - mengecualikan 'Semua Kepala Sekolah')
-    { id: 'pengurus-1', name: 'Umar Ali Kusuma', nip: '198912092025211092', school: 'SDN GELANG 03', phone: '6288235537431', jabatanPengurus: 'Ketua PGRI Ranting Gelang', kategoriProfil: 'Pengurus Ranting', isPengurus: true },
-    { id: 'pengurus-2', name: 'Hartatik, S.Pd', nip: '198301072022212001', school: 'SDN KALIGLAGAH 02', phone: '6282245380232', jabatanPengurus: 'Wakil Ketua', kategoriProfil: 'Pengurus Ranting', isPengurus: true },
-    { id: 'pengurus-3', name: 'Adi Saiful Rizal, S.Pd', nip: '199401162025211089', school: 'SDN GELANG 03', phone: '6282292232649', jabatanPengurus: 'Sekretaris', kategoriProfil: 'Pengurus Ranting', isPengurus: true },
-    { id: 'pengurus-4', name: 'Atik Andriyati, S.Pd', nip: '197701142014122002', school: 'SDN GELANG 06', phone: '6281515786365', jabatanPengurus: 'Bendahara', kategoriProfil: 'Pengurus Ranting', isPengurus: true },
-    { id: 'pengurus-5', name: 'Saiful Arif, S.Pd', nip: '198604122022211003', school: 'SDN GELANG 07', phone: '62881026888955', jabatanPengurus: 'Seksi Pembinaan Olahraga', kategoriProfil: 'Pengurus Ranting', isPengurus: true },
-    { id: 'pengurus-6', name: 'Siti Oktavia, S.Pd', nip: '197910072022212001', school: 'SDN GELANG 04', phone: '6285697890959', jabatanPengurus: 'Seksi Pemberdayaan Perempuan', kategoriProfil: 'Pengurus Ranting', isPengurus: true },
-    { id: 'pengurus-7', name: 'Rohman, S.Pd', nip: '198904202022211002', school: 'SDN KALIGLAGAH 02', phone: '6282332910923', jabatanPengurus: 'Seksi Pengembangan Profesi & Karir', kategoriProfil: 'Pengurus Ranting', isPengurus: true },
-    { id: 'pengurus-8', name: 'Jasuri Budianto, S.Pd', nip: '196918082022211001', school: 'SDN GELANG 01', phone: '6285314904015', jabatanPengurus: 'Seksi Humas', kategoriProfil: 'Pengurus Ranting', isPengurus: true },
-    { id: 'pengurus-9', name: 'Muhammad Jupri, S.Pd.I', nip: '', school: 'SD NU 21 MIFTAHUL ULUM', phone: '628817159553', jabatanPengurus: 'Seksi Keagamaan', kategoriProfil: 'Pengurus Ranting', isPengurus: true },
-    // Penanggung Jawab (2 Perorangan)
-    { id: 'pj-1', name: 'Ghufron Atok Urrohman, S.Pd', nip: '197805192014121003', school: 'Ketua Kelompok Kerja Kepala Sekolah', phone: '6285859342500', jabatanPengurus: 'Ketua K3S', kategoriProfil: 'Penanggung Jawab', isPengurus: true },
-    { id: 'pj-2', name: 'Christian Dri Firman Widodo, S.Pd', nip: '198012262014121002', school: 'Ketua PGRI Cabang Kecamatan Sumberbaru', phone: '6281217910263', jabatanPengurus: 'Ketua PGRI Cabang', kategoriProfil: 'Penanggung Jawab', isPengurus: true },
-    // Pembina (1 Perorangan)
-    { id: 'pembina-1', name: 'Hanifatul Susmiyah, S.Pd', nip: '197306022002122005', school: 'Pengawas Bina Kecamatan Sumberbaru', phone: '6285859083645', jabatanPengurus: 'Pengawas Bina', kategoriProfil: 'Pembina', isPengurus: true },
-  ], []);
-
   // Memuat seluruh kandidat perorangan dari ProfilKBView (Struktur Pengurus, Penanggung Jawab, Pembina) + fallback lengkap
   const loadAllProfilCandidates = (): (Teacher & { jabatanPengurus?: string; kategoriProfil?: string; isPengurus?: boolean })[] => {
-    const fallbackAll = [
-      { id: 'pengurus-1', name: 'Umar Ali Kusuma', nip: '198912092025211092', school: 'SDN GELANG 03', phone: '6288235537431', jabatanPengurus: 'Ketua PGRI Ranting Gelang', kategoriProfil: 'Pengurus Ranting', isPengurus: true },
-      { id: 'pengurus-2', name: 'Hartatik, S.Pd', nip: '198301072022212001', school: 'SDN KALIGLAGAH 02', phone: '6282245380232', jabatanPengurus: 'Wakil Ketua', kategoriProfil: 'Pengurus Ranting', isPengurus: true },
-      { id: 'pengurus-3', name: 'Adi Saiful Rizal, S.Pd', nip: '199401162025211089', school: 'SDN GELANG 03', phone: '6282292232649', jabatanPengurus: 'Sekretaris', kategoriProfil: 'Pengurus Ranting', isPengurus: true },
-      { id: 'pengurus-4', name: 'Atik Andriyati, S.Pd', nip: '197701142014122002', school: 'SDN GELANG 06', phone: '6281515786365', jabatanPengurus: 'Bendahara', kategoriProfil: 'Pengurus Ranting', isPengurus: true },
-      { id: 'pengurus-5', name: 'Saiful Arif, S.Pd', nip: '198604122022211003', school: 'SDN GELANG 07', phone: '62881026888955', jabatanPengurus: 'Seksi Pembinaan Olahraga', kategoriProfil: 'Pengurus Ranting', isPengurus: true },
-      { id: 'pengurus-6', name: 'Siti Oktavia, S.Pd', nip: '197910072022212001', school: 'SDN GELANG 04', phone: '6285697890959', jabatanPengurus: 'Seksi Pemberdayaan Perempuan', kategoriProfil: 'Pengurus Ranting', isPengurus: true },
-      { id: 'pengurus-7', name: 'Rohman, S.Pd', nip: '198904202022211002', school: 'SDN KALIGLAGAH 02', phone: '6282332910923', jabatanPengurus: 'Seksi Pengembangan Profesi & Karir', kategoriProfil: 'Pengurus Ranting', isPengurus: true },
-      { id: 'pengurus-8', name: 'Jasuri Budianto, S.Pd', nip: '196918082022211001', school: 'SDN GELANG 01', phone: '6285314904015', jabatanPengurus: 'Seksi Humas', kategoriProfil: 'Pengurus Ranting', isPengurus: true },
-      { id: 'pengurus-9', name: 'Muhammad Jupri, S.Pd.I', nip: '', school: 'SD NU 21 MIFTAHUL ULUM', phone: '628817159553', jabatanPengurus: 'Seksi Keagamaan', kategoriProfil: 'Pengurus Ranting', isPengurus: true },
-      { id: 'pj-1', name: 'Ghufron Atok Urrohman, S.Pd', nip: '197805192014121003', school: 'Ketua Kelompok Kerja Kepala Sekolah', phone: '6285859342500', jabatanPengurus: 'Ketua K3S', kategoriProfil: 'Penanggung Jawab', isPengurus: true },
-      { id: 'pj-2', name: 'Christian Dri Firman Widodo, S.Pd', nip: '198012262014121002', school: 'Ketua PGRI Cabang Kecamatan Sumberbaru', phone: '6281217910263', jabatanPengurus: 'Ketua PGRI Cabang', kategoriProfil: 'Penanggung Jawab', isPengurus: true },
-      { id: 'pembina-1', name: 'Hanifatul Susmiyah, S.Pd', nip: '197306022002122005', school: 'Pengawas Bina Kecamatan Sumberbaru', phone: '6285859083645', jabatanPengurus: 'Pengawas Bina', kategoriProfil: 'Pembina', isPengurus: true },
-    ];
+    const fallbackAll = buildDefaultProfilCandidates();
 
     if (typeof window === 'undefined') return fallbackAll as any;
 
@@ -645,7 +601,7 @@ export const KeuanganView: React.FC<KeuanganViewProps> = ({
       window.removeEventListener('storage', handleSyncPengurus);
       window.removeEventListener('kombel-settings-updated', handleSyncPengurus);
     };
-  }, [defaultPengurusList]);
+  }, []);
 
   // Menggabungkan Pengurus Terpilih & Anggota Sekolah tanpa duplikasi (Urut A-Z)
   const sortedTeachers = useMemo(() => {
@@ -755,7 +711,7 @@ export const KeuanganView: React.FC<KeuanganViewProps> = ({
   const qrisImageSrc = useMemo(() => {
     if (customQrisImage) return customQrisImage;
     const payload = `QRIS|${orgConfig.bankName}|${orgConfig.bankAccountNumber}|${orgConfig.bankAccountHolder}`;
-    return `https://api.qrserver.com/v1/create-qr-code/?size=480x480&margin=12&format=png&data=${encodeURIComponent(payload)}`;
+    return generateQrSvgDataUrl(payload, 480, 3);
   }, [customQrisImage, orgConfig]);
 
   // Download kartu QRIS lengkap (Header Bank + QR + No Rekening) dalam format PNG
@@ -913,7 +869,7 @@ export const KeuanganView: React.FC<KeuanganViewProps> = ({
 
   // Helper resolver Nama & NPA Ketua / Bendahara dari Kepengurusan + Daftar Anggota (menjaga default NPA resmi)
   const resolveSignersFromPengurus = () => {
-    let ketuaName = 'UMAR ALI KUSUMA';
+    let ketuaName = DEFAULT_KETUA_FALLBACK.name;
     let ketuaNpa = '13301500431';
     let bendaharaName = 'Atik Andriyati, S.Pd';
     let bendaharaNpa = '1330230358';
@@ -934,8 +890,8 @@ export const KeuanganView: React.FC<KeuanganViewProps> = ({
         );
         if (ketua?.name && ketua.name !== '-') {
           const resolvedName = String(ketua.name).trim();
-          const isDefaultKetua = resolvedName.toLowerCase().includes('umar ali kusuma');
-          ketuaName = isDefaultKetua ? 'UMAR ALI KUSUMA' : resolvedName;
+          const isDefaultKetua = resolvedName.toLowerCase().includes(DEFAULT_KETUA_FALLBACK.name.toLowerCase());
+          ketuaName = isDefaultKetua ? DEFAULT_KETUA_FALLBACK.name : resolvedName;
           const explicitNpa = (ketua.npa ? String(ketua.npa).trim() : '') || findTeacherNpa(resolvedName);
           if (explicitNpa) {
             ketuaNpa = explicitNpa;
@@ -1643,7 +1599,6 @@ export const KeuanganView: React.FC<KeuanganViewProps> = ({
     if (typeof window !== 'undefined') {
       try {
         localStorage.setItem('kombel-financialTransactions', JSON.stringify(updated));
-        localStorage.setItem('kombel-transactions', JSON.stringify(updated));
       } catch (err) {}
     }
     handleCloseModal();
@@ -1669,7 +1624,7 @@ export const KeuanganView: React.FC<KeuanganViewProps> = ({
 
     const res = await mutateCloudCollection<FinancialTransaction>(
       'financialTransactions',
-      ['kombel-financialTransactions', 'kombel-transactions'],
+      ['kombel-financialTransactions'],
       (latest) => {
         if (targetEditId) {
           return latest.some(t => t.id === targetEditId)
@@ -1869,7 +1824,7 @@ export const KeuanganView: React.FC<KeuanganViewProps> = ({
               <tr style="background:#f8fafc !important; font-weight:bold;">
                 <td style="text-align:center;">1</td>
                 <td style="text-align:center;">${escapeHtmlSafe(grp.firstDateShort)}</td>
-                <td style="text-transform:capitalize;">Saldo Awal Bulan ${escapeHtmlSafe(grp.monthName)}</td>
+                <td style="text-transform:capitalize;">Saldo Awal Bulan</td>
                 <td style="text-align:right; color:#059669; font-family:monospace;">${grp.openingBalance > 0 ? escapeHtmlSafe(formatRupiah(grp.openingBalance)) : '-'}</td>
                 <td style="text-align:center;">-</td>
                 <td style="text-align:center;">-</td>
@@ -1900,7 +1855,7 @@ export const KeuanganView: React.FC<KeuanganViewProps> = ({
               <tr style="background:#f8fafc !important; font-weight:bold;">
                 <td style="text-align:center;">${grp.items.length + 2}</td>
                 <td style="text-align:center;">${escapeHtmlSafe(grp.lastDateShort)}</td>
-                <td style="text-transform:capitalize;">Saldo Akhir Bulan ${escapeHtmlSafe(grp.monthName)}</td>
+                <td style="text-transform:capitalize;">Saldo Akhir Bulan</td>
                 <td style="text-align:right; font-family:monospace;">-</td>
                 <td style="text-align:center;">-</td>
                 <td style="text-align:center;">-</td>
@@ -1919,7 +1874,7 @@ export const KeuanganView: React.FC<KeuanganViewProps> = ({
                 <div class="bku-header-title">
                   <div class="bku-header-box">
                     <div class="bku-main-title">BUKU KAS UMUM</div>
-                    <div class="bku-sub-title">BULAN : ${escapeHtmlSafe(grp.monthName.toUpperCase())} TAHUN : ${escapeHtmlSafe(grp.yearStr)}</div>
+                    <div class="bku-sub-title">BULAN : ${escapeHtmlSafe(grp.monthName.toUpperCase())} ${escapeHtmlSafe(grp.yearStr)}</div>
                   </div>
                 </div>
 
@@ -1942,7 +1897,7 @@ export const KeuanganView: React.FC<KeuanganViewProps> = ({
                     ${rowsHtml}
                     ${closingRowHtml}
                     <tr style="background:#f1f5f9 !important; font-weight:bold;">
-                      <td colspan="3" style="text-align:center;">Jumlah Bulan ${escapeHtmlSafe(grp.monthName)} ${escapeHtmlSafe(grp.yearStr)}</td>
+                      <td colspan="3" style="text-align:center;">Jumlah</td>
                       <td style="text-align:right; color:#059669; font-family:monospace;">${escapeHtmlSafe(formatRupiah(totalPenerimaanBulan))}</td>
                       <td colspan="3" style="text-align:center;">-</td>
                       <td style="text-align:right; color:#dc2626; font-family:monospace;">${escapeHtmlSafe(formatRupiah(grp.totalKeluar))}</td>
@@ -1985,7 +1940,8 @@ export const KeuanganView: React.FC<KeuanganViewProps> = ({
                 <div class="ttd-grid">
                   <div class="ttd-col">
                     <p>Menyetujui,</p>
-                    <p>Ketua ${rantingTitleCase}</p>
+                    <p>Ketua PGRI ${rantingTitleCase}</p>
+                    <p>Kecamatan Sumberbaru</p>
                     <div class="ttd-signature-area">
                       ${stempel ? `<img src="${stempel}" class="stempel-img" alt="Stempel" />` : ''}
                       ${ttdKetua ? `<img src="${ttdKetua}" class="ttd-ketua-img" alt="TTD Ketua" />` : ''}
@@ -1995,7 +1951,8 @@ export const KeuanganView: React.FC<KeuanganViewProps> = ({
                   </div>
                   <div class="ttd-col">
                     <p>Sumberbaru, ${escapeHtmlSafe(grp.lastDateFull)}</p>
-                    <p>Bendahara ${rantingTitleCase}</p>
+                    <p>Bendahara PGRI ${rantingTitleCase}</p>
+                    <p>Kecamatan Sumberbaru</p>
                     <div class="ttd-signature-area">
                       ${ttdBendahara ? `<img src="${ttdBendahara}" class="ttd-bendahara-img" alt="TTD Bendahara" />` : ''}
                     </div>
@@ -2044,7 +2001,7 @@ export const KeuanganView: React.FC<KeuanganViewProps> = ({
       .kop-ranting { font-size: 16.5pt; font-weight: bold; text-transform: uppercase; letter-spacing: 0.5px; margin-top: 1px; }
       .kop-wilayah { font-size: 12pt; font-weight: bold; text-transform: uppercase; letter-spacing: 0.3px; margin-top: 1px; }
       .kop-sekretariat { font-size: 8pt; font-style: italic; margin-top: 2px; white-space: nowrap; }
-      .kop-divider { border-top: 2.5px solid #000; border-bottom: 1px solid #000; height: 5px; margin-bottom: 12px; position: relative; z-index: 2; }
+      .kop-divider { border-top: 2px solid #000; border-bottom: 1px solid #000; height: 2px; margin-bottom: 12px; position: relative; z-index: 2; }
       .bku-header-title { text-align: center; margin-top: 10px; margin-bottom: 14px; position: relative; z-index: 1; }
       .bku-header-box { display: inline-block; text-align: center; }
       .bku-main-title {
@@ -2180,12 +2137,13 @@ export const KeuanganView: React.FC<KeuanganViewProps> = ({
   const confirmDelete = async () => {
     if (!deleteTarget) return;
     const targetId = deleteTarget.id;
+    const targetDesc = deleteTarget.desc;
+    const deletedTx = transactions.find(t => t.id === targetId);
     const updated = transactions.filter(t => t.id !== targetId);
     onTransactionsChange(updated);
     if (typeof window !== 'undefined') {
       try {
         localStorage.setItem('kombel-financialTransactions', JSON.stringify(updated));
-        localStorage.setItem('kombel-transactions', JSON.stringify(updated));
       } catch (err) {}
     }
     handleCloseDeleteModal();
@@ -2193,12 +2151,14 @@ export const KeuanganView: React.FC<KeuanganViewProps> = ({
     await deletePerDocItem('transaction_docs', targetId, 'Catatan Keuangan');
     const res = await mutateCloudCollection<FinancialTransaction>(
       'financialTransactions',
-      ['kombel-financialTransactions', 'kombel-transactions'],
+      ['kombel-financialTransactions'],
       (latest) => latest.filter(t => t.id !== targetId),
       updated,
       'Catatan Keuangan'
     );
     onTransactionsChange(res.items);
+    const amountSuffix = deletedTx ? ` (${deletedTx.type} ${formatRupiah(Number(deletedTx.amount) || 0)})` : '';
+    void logAuditEvent('Catatan Keuangan', 'Hapus Transaksi', `Menghapus transaksi "${targetDesc}"${amountSuffix}.`);
   };
 
   // Set spesifik status pembayaran & sinkronisasi otomatis transaksi kas secara agregat (1 baris per bulan & tahun)
@@ -2327,16 +2287,14 @@ export const KeuanganView: React.FC<KeuanganViewProps> = ({
     if (typeof window !== 'undefined') {
       try {
         localStorage.setItem('kombel-cashPayments', JSON.stringify(updatedCashPayments));
-        localStorage.setItem('kombel-cash-payments', JSON.stringify(updatedCashPayments));
         localStorage.setItem('kombel-financialTransactions', JSON.stringify(updatedTransactions));
-        localStorage.setItem('kombel-transactions', JSON.stringify(updatedTransactions));
       } catch (err) {}
     }
 
     // 2. Fetch-Before-Write ke Cloud Firestore agar perubahan perangkat lain tidak tertimpa
     const cashRes = await mutateCloudCollection<CashPayment>(
       'cashPayments',
-      ['kombel-cashPayments', 'kombel-cash-payments'],
+      ['kombel-cashPayments'],
       (latestPayments) => applyPaymentMutation(latestPayments),
       updatedCashPayments,
       'Pembayaran Kas'
@@ -2346,7 +2304,7 @@ export const KeuanganView: React.FC<KeuanganViewProps> = ({
     const latestTotalAmount = computeLunasCount(cashRes.items) * 10000;
     const txRes = await mutateCloudCollection<FinancialTransaction>(
       'financialTransactions',
-      ['kombel-financialTransactions', 'kombel-transactions'],
+      ['kombel-financialTransactions'],
       (latestTransactions) => applyAutoTxMutation(latestTransactions, latestTotalAmount),
       updatedTransactions,
       'Catatan Keuangan'
@@ -2486,15 +2444,13 @@ export const KeuanganView: React.FC<KeuanganViewProps> = ({
       if (typeof window !== 'undefined') {
         try {
           localStorage.setItem('kombel-cashPayments', JSON.stringify(updatedCashPayments));
-          localStorage.setItem('kombel-cash-payments', JSON.stringify(updatedCashPayments));
           localStorage.setItem('kombel-financialTransactions', JSON.stringify(updatedTransactions));
-          localStorage.setItem('kombel-transactions', JSON.stringify(updatedTransactions));
         } catch (err) {}
       }
 
       const cashRes = await mutateCloudCollection<CashPayment>(
         'cashPayments',
-        ['kombel-cashPayments', 'kombel-cash-payments'],
+        ['kombel-cashPayments'],
         (latestPayments) => applyBulkMutation(latestPayments),
         updatedCashPayments,
         'Pembayaran Kas'
@@ -2504,7 +2460,7 @@ export const KeuanganView: React.FC<KeuanganViewProps> = ({
       const latestTotalAmount = computeLunasCount(cashRes.items) * 10000;
       const txRes = await mutateCloudCollection<FinancialTransaction>(
         'financialTransactions',
-        ['kombel-financialTransactions', 'kombel-transactions'],
+        ['kombel-financialTransactions'],
         (latestTransactions) => applyAutoTxMutation(latestTransactions, latestTotalAmount),
         updatedTransactions,
         'Catatan Keuangan'
@@ -2567,8 +2523,30 @@ export const KeuanganView: React.FC<KeuanganViewProps> = ({
 
     const selectedMonthObj = filterMonth !== 'Semua' ? MONTH_OPTIONS.find(m => m.id === filterMonth) : null;
     const periodeSubtitle = selectedMonthObj
-      ? `Bulan : ${selectedMonthObj.name} ${filterYear}`
-      : `Tahun : ${filterYear}`;
+      ? `BULAN : ${selectedMonthObj.name.toUpperCase()} ${filterYear}`
+      : `TAHUN : ${filterYear}`;
+
+    const formatSchoolTitleCase = (schoolRaw?: string) => {
+      const trimmed = String(schoolRaw || '').trim();
+      if (!trimmed) return '-';
+      const words = trimmed.toLowerCase().split(/\s+/);
+      return words
+        .map((word, idx) => {
+          if (word === 'sdn') return 'SDN';
+          if (word === 'sd') return 'SD';
+          if (word === 'nu' && idx > 0 && words[idx - 1] === 'sd') return 'NU';
+          return word.charAt(0).toUpperCase() + word.slice(1);
+        })
+        .join(' ');
+    };
+
+    const formatPhoneZeroPrefix = (phoneRaw?: string) => {
+      const cleaned = String(phoneRaw || '').replace(/^'+/, '').replace(/[^0-9]/g, '');
+      if (!cleaned) return '-';
+      if (cleaned.startsWith('62')) return `0${cleaned.slice(2)}`;
+      if (!cleaned.startsWith('0')) return `0${cleaned}`;
+      return cleaned;
+    };
 
     const sudahBayarCount = paymentItems.filter(item => {
       const payment = getPayment(item.teacher.id, item.month.id, item.teacher.name, item.year);
@@ -2580,19 +2558,21 @@ export const KeuanganView: React.FC<KeuanganViewProps> = ({
       const payment = getPayment(item.teacher.id, item.month.id, item.teacher.name, item.year);
       const isLunas = payment?.status === 'Lunas';
       const gender = getGender(item.teacher);
-      const npaOrNip = (item.teacher as any).npa || (item.teacher as any).nip || '-';
+      const nipOnly = String((item.teacher as any).nip || '').trim() || '-';
+      const formattedSchool = formatSchoolTitleCase(item.teacher.school);
+      const formattedPhone = formatPhoneZeroPrefix((item.teacher as any).phone);
 
       return `
         <tr>
           <td style="text-align: center;">${index + 1}</td>
-          <td style="text-align: left; font-weight: bold;">${item.teacher.name}</td>
-          <td style="text-align: center; font-family: monospace;">${npaOrNip}</td>
-          <td style="text-align: center; font-weight: bold;">${gender}</td>
-          <td style="text-align: left;">${item.teacher.school || '-'}</td>
-          <td style="text-align: center; font-family: monospace;">${(item.teacher as any).phone || '-'}</td>
-          <td style="text-align: center;">${item.month.name} ${item.year}</td>
+          <td style="text-align: left; font-weight: bold;">${escapeHtmlSafe(item.teacher.name)}</td>
+          <td style="text-align: center; font-family: monospace;">${escapeHtmlSafe(nipOnly)}</td>
+          <td style="text-align: center; font-weight: bold;">${escapeHtmlSafe(gender)}</td>
+          <td style="text-align: left;">${escapeHtmlSafe(formattedSchool)}</td>
+          <td style="text-align: center; font-family: monospace;">${escapeHtmlSafe(formattedPhone)}</td>
+          <td style="text-align: center;">${escapeHtmlSafe(item.month.name)} ${escapeHtmlSafe(item.year)}</td>
           <td style="text-align: center; font-weight: bold; color: ${isLunas ? '#059669' : '#dc2626'};">
-            ${isLunas ? 'LUNAS' : 'BELUM BAYAR'}
+            ${isLunas ? 'Lunas' : 'Belum Bayar'}
           </td>
         </tr>
       `;
@@ -2674,9 +2654,9 @@ export const KeuanganView: React.FC<KeuanganViewProps> = ({
               white-space: nowrap;
             }
             .kop-divider {
-              border-top: 2.5px solid #000000;
+              border-top: 2px solid #000000;
               border-bottom: 1px solid #000000;
-              height: 5px;
+              height: 2px;
               margin-bottom: 12px;
               position: relative;
               z-index: 2;
@@ -2859,7 +2839,7 @@ export const KeuanganView: React.FC<KeuanganViewProps> = ({
                 <tr>
                   <th style="width: 26px;">No</th>
                   <th>Nama Anggota</th>
-                  <th style="width: 115px;">NPA/NIP</th>
+                  <th style="width: 115px;">NIP</th>
                   <th style="width: 35px;">L/P</th>
                   <th>Nama Sekolah</th>
                   <th style="width: 95px;">WhatsApp</th>
@@ -3018,9 +2998,9 @@ export const KeuanganView: React.FC<KeuanganViewProps> = ({
               white-space: nowrap;
             }
             .kop-divider {
-              border-top: 2.5px solid #000000;
+              border-top: 2px solid #000000;
               border-bottom: 1px solid #000000;
-              height: 5px;
+              height: 2px;
               margin-bottom: 12px;
               position: relative;
               z-index: 2;
@@ -3228,7 +3208,7 @@ export const KeuanganView: React.FC<KeuanganViewProps> = ({
               <tr>
                 <th style="width: 26px;">No</th>
                 <th>Nama Anggota</th>
-                <th style="width: 115px;">NPA/NIP</th>
+                <th style="width: 115px;">NIP</th>
                 <th style="width: 35px;">L/P</th>
                 <th>Nama Sekolah</th>
                 <th style="width: 95px;">WhatsApp</th>
