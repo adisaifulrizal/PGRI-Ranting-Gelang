@@ -121,21 +121,9 @@ const safeSetLocalStorage = (key: string, value: string): void => {
 };
 
 export default function App() {
-  const [showWelcomePopup, setShowWelcomePopup] = useState(() => {
-    try {
-      return sessionStorage.getItem('pgri_welcome_shown') !== '1';
-    } catch {
-      return true;
-    }
-  });
+  const [showWelcomePopup, setShowWelcomePopup] = useState(true);
   const [welcomeProgress, setWelcomeProgress] = useState(0);
-  const [welcomePhase, setWelcomePhase] = useState<'loading' | 'ready' | 'showcase' | 'blackout' | 'exiting' | 'done'>(() => {
-    try {
-      return sessionStorage.getItem('pgri_welcome_shown') === '1' ? 'done' : 'loading';
-    } catch {
-      return 'loading';
-    }
-  });
+  const [welcomePhase, setWelcomePhase] = useState<'loading' | 'ready' | 'showcase' | 'blackout' | 'exiting' | 'done'>('loading');
   const [isWelcomeAudioMuted, setIsWelcomeAudioMuted] = useState(false);
   const [isWelcomeAudioUnlocked, setIsWelcomeAudioUnlocked] = useState(false);
   const welcomeAudioCtxRef = useRef<AudioContext | null>(null);
@@ -458,9 +446,6 @@ export default function App() {
     }
     if (welcomePhase === 'exiting') {
       const doneTimer = setTimeout(() => {
-        try {
-          sessionStorage.setItem('pgri_welcome_shown', '1');
-        } catch {}
         setWelcomePhase('done');
         setShowWelcomePopup(false);
       }, 700);
