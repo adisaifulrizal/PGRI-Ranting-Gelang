@@ -2,6 +2,7 @@ import { safeDownloadBlob } from '../../lib/download';
 import { mutateCloudCollection, savePerDocItem, deletePerDocItem, syncSettingsToCloud } from '../../lib/sync';
 import { getOrgConfig, openWhatsAppShare } from '../../lib/orgConfig';
 import { logAuditEvent } from '../../lib/auth';
+import { isMobileDevice, downloadContainerAsPdf } from '../../lib/pdfExport';
 import React, { useState, useMemo, useEffect } from 'react';
 import { FinancialTransaction, CashPayment, Teacher, ActivityEvent } from '../../types';
 import {
@@ -33,7 +34,8 @@ import {
   UserCheck,
   SlidersHorizontal,
   QrCode,
-  Receipt
+  Receipt,
+  Loader2
 } from 'lucide-react';
 
 const POS_ANGGARAN_OPTIONS: NonNullable<FinancialTransaction['category']>[] = [
@@ -224,6 +226,8 @@ export const KeuanganView: React.FC<KeuanganViewProps> = ({
   const [isClosingQrisModal, setIsClosingQrisModal] = useState(false);
   const [isDownloadingQris, setIsDownloadingQris] = useState(false);
   const [qrisDownloadError, setQrisDownloadError] = useState<string | null>(null);
+  const [isExportingLpj, setIsExportingLpj] = useState(false);
+  const [isDownloadingKasPdf, setIsDownloadingKasPdf] = useState(false);
 
   // Deteksi mode gelap dari tag <html> secara real-time (tanpa flicker awal)
   const [isDark, setIsDark] = useState<boolean>(() =>
@@ -504,7 +508,7 @@ export const KeuanganView: React.FC<KeuanganViewProps> = ({
     };
 
     try {
-      // 1. Struktur Kepengurusan (kombel-pengurus) - gabungkan dengan default jika tersimpan < 10 item
+      // 1. Struktur Kepengurusan (kombel-pengurus) - gunakan data terbaru dari Pengaturan, fallback hanya jika belum ada
       const savedPengurus = localStorage.getItem('kombel-pengurus');
       const pengurusSource = savedPengurus ? JSON.parse(savedPengurus) : null;
       if (Array.isArray(pengurusSource) && pengurusSource.length > 0) {
@@ -521,15 +525,11 @@ export const KeuanganView: React.FC<KeuanganViewProps> = ({
             isPengurus: true
           });
         });
+      } else {
+        fallbackAll
+          .filter(f => f.kategoriProfil === 'Pengurus Ranting')
+          .forEach(f => candidates.push(f));
       }
-      // Lengkapi dari fallback Pengurus Ranting jika belum masuk
-      fallbackAll
-        .filter(f => f.kategoriProfil === 'Pengurus Ranting')
-        .forEach(f => {
-          if (!candidates.some(c => c.name.trim().toLowerCase() === f.name.trim().toLowerCase())) {
-            candidates.push(f);
-          }
-        });
 
       // 2. Penanggung Jawab (kombel-penanggungjawab)
       const savedPj = localStorage.getItem('kombel-penanggungjawab');
@@ -984,6 +984,7 @@ export const KeuanganView: React.FC<KeuanganViewProps> = ({
     const bendaharaNpa = signers.bendaharaNpaLabel;
     const logoPgri = localStorage.getItem('logo-pgri') || localStorage.getItem('logo-kombel') || '';
     const ttdBendahara = localStorage.getItem('ttd-bendahara') || '';
+    const ttdBendaharaScale = Math.max(0.3, Math.min(2.5, (Number(localStorage.getItem('ttd-bendahara-size')) || 100) / 100));
 
     const loadOptionalImg = (src: string) =>
       new Promise<HTMLImageElement | null>((resolve) => {
@@ -1090,7 +1091,16 @@ export const KeuanganView: React.FC<KeuanganViewProps> = ({
     ctx.fillText('PGRI Ranting Gelang', signCenterX, 412);
 
     if (ttdImg) {
-      ctx.drawImage(ttdImg, signCenterX - 52, 415, 104, 50);
+      const aspect = ttdImg.naturalWidth && ttdImg.naturalHeight ? ttdImg.naturalWidth / ttdImg.naturalHeight : 104 / 50;
+      let drawH = 50 * ttdBendaharaScale;
+      let drawW = drawH * aspect;
+      const maxW = 140 * ttdBendaharaScale;
+      if (drawW > maxW) {
+        drawW = maxW;
+        drawH = drawW / aspect;
+      }
+      const drawCenterY = 440;
+      ctx.drawImage(ttdImg, signCenterX - drawW / 2, drawCenterY - drawH / 2, drawW, drawH);
     }
 
     // Stempel LUNAS hijau miring dengan efek tekstur stempel tepat di atas area tanda tangan
@@ -1232,38 +1242,30 @@ export const KeuanganView: React.FC<KeuanganViewProps> = ({
       const safeSchool = schoolName.replace(/[^a-zA-Z0-9]/g, '_');
       const docTitle = `Kuitansi_${safeSchool}_${monthObj.name}_${rekapYear}`;
 
-      // JIKA DI PONSEL ATAU POP-UP DIBLOKIR: Direct download PDF menggunakan html2pdf
+      // JIKA DI PONSEL ATAU POP-UP DIBLOKIR: Direct download PDF menggunakan html2pdf lokal
       if (isMobile || !printWindow) {
-        const html2pdf = await getHtml2Pdf();
         container = document.createElement('div');
-        container.style.position = 'fixed';
-        container.style.left = '-9999px';
-        container.style.top = '0';
         container.style.width = '760px';
         container.style.backgroundColor = '#ffffff';
         container.style.padding = '8px';
 
         container.innerHTML = `
-          <style>
+          <style data-pdf-style="true">
             .receipt-page { display: flex; flex-direction: column; gap: 18px; padding: 6px 0; }
             .page-break { page-break-after: always; break-after: page; }
             .receipt-img { width: 100%; height: auto; display: block; border: 1px solid #e7e5e4; }
           </style>
           ${pagesHtml.join('')}
         `;
-        document.body.appendChild(container);
 
-        const opt = {
-          margin: [8, 10, 8, 10],
+        await downloadContainerAsPdf(container, {
           filename: `${docTitle}.pdf`,
-          image: { type: 'jpeg', quality: 0.98 },
-          html2canvas: { scale: 2, useCORS: true, logging: false },
-          jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
+          orientation: 'portrait',
+          margin: [8, 10, 8, 10],
+          quality: 0.98,
+          scale: 2,
           pagebreak: { mode: ['css', 'legacy'] }
-        };
-
-        const pdfBlob = await html2pdf().set(opt).from(container).outputPdf('blob');
-        await safeDownloadBlob(pdfBlob, opt.filename);
+        });
         return;
       }
 
@@ -1709,14 +1711,18 @@ export const KeuanganView: React.FC<KeuanganViewProps> = ({
 
   // Cetak / Unduh LPJ Keuangan Resmi PGRI Ranting Gelang (PC: Jendela Cetak | Ponsel: Auto Download PDF)
   const handleExportOfficialLPJ = async () => {
+    if (isExportingLpj) return;
+    setIsExportingLpj(true);
+    try {
     const printWindow = !isMobileDevice() ? window.open('', '_blank') : null;
     const logoPgri = localStorage.getItem('logo-pgri') || localStorage.getItem('logo-kombel') || '';
     const ttdKetua = localStorage.getItem('ttd-ketua') || '';
-    const ttdKetuaSize = localStorage.getItem('ttd-ketua-size') ? Number(localStorage.getItem('ttd-ketua-size')) : 100;
+    const ttdKetuaScale = Math.max(0.3, Math.min(2.5, (Number(localStorage.getItem('ttd-ketua-size')) || 100) / 100));
     const ttdBendahara = localStorage.getItem('ttd-bendahara') || '';
-    const ttdBendaharaSize = localStorage.getItem('ttd-bendahara-size') ? Number(localStorage.getItem('ttd-bendahara-size')) : 100;
+    const ttdBendaharaScale = Math.max(0.3, Math.min(2.5, (Number(localStorage.getItem('ttd-bendahara-size')) || 100) / 100));
     const stempel = localStorage.getItem('logo-stempel') || '';
-    const stempelSize = localStorage.getItem('logo-stempel-size') ? Number(localStorage.getItem('logo-stempel-size')) : 100;
+    const stempelScale = Math.max(0.3, Math.min(2.5, (Number(localStorage.getItem('logo-stempel-size')) || 100) / 100));
+    const stempelRotation = Number(localStorage.getItem('logo-stempel-rotation')) || 0;
     const lpjSigners = resolveSignersFromPengurus();
     const todayStr = new Date().toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' });
 
@@ -2089,22 +2095,18 @@ export const KeuanganView: React.FC<KeuanganViewProps> = ({
       .ttd-col { width: 42%; text-align: center; font-size: 8.8pt; position: relative; }
       .ttd-col p { margin: 1px 0; line-height: 1.25; }
       .ttd-signature-area { height: 65px; display: flex; align-items: center; justify-content: center; position: relative; overflow: visible; }
-      .stempel-img { position: absolute; right: 50%; top: 50%; transform: translateY(-50%); width: ${92 * (stempelSize / 100)}px; height: auto; opacity: 0.85; object-fit: contain; pointer-events: none; z-index: 2; }
-      .ttd-ketua-img { max-height: 62px; width: auto; object-fit: contain; transform: scale(${ttdKetuaSize / 100}); position: relative; z-index: 1; }
-      .ttd-bendahara-img { max-height: 62px; width: auto; object-fit: contain; transform: scale(${ttdBendaharaSize / 100}); }
+      .stempel-img { position: absolute; right: 50%; top: 50%; transform: translateY(-50%) rotate(${stempelRotation}deg); width: ${Math.round(112 * stempelScale)}px; height: ${Math.round(112 * stempelScale)}px; opacity: 0.85; object-fit: contain; pointer-events: none; z-index: 2; }
+      .ttd-ketua-img { height: ${Math.round(62 * ttdKetuaScale)}px; width: auto; max-width: ${Math.round(160 * ttdKetuaScale)}px; object-fit: contain; position: relative; z-index: 1; }
+      .ttd-bendahara-img { height: ${Math.round(62 * ttdBendaharaScale)}px; width: auto; max-width: ${Math.round(160 * ttdBendaharaScale)}px; object-fit: contain; }
       .ttd-name { font-weight: bold; text-decoration: underline; text-underline-offset: 4px; text-decoration-thickness: 1px; color: #000; margin-top: 2px; }
       .ttd-nip { font-size: 8pt; color: #111; }
     `;
 
-    // JIKA DI PONSEL ATAU POP-UP DIBLOKIR: Gunakan html2pdf untuk direct download PDF yang presisi
+    // JIKA DI PONSEL ATAU POP-UP DIBLOKIR: Gunakan html2pdf lokal untuk direct download PDF yang presisi
     if (!printWindow) {
       let container: HTMLDivElement | null = null;
       try {
-        const html2pdf = await getHtml2Pdf();
         container = document.createElement('div');
-        container.style.position = 'fixed';
-        container.style.left = '-9999px';
-        container.style.top = '0';
         container.style.width = '1050px';
         container.style.backgroundColor = '#ffffff';
         container.style.color = '#000000';
@@ -2112,20 +2114,16 @@ export const KeuanganView: React.FC<KeuanganViewProps> = ({
         container.style.padding = '0';
         container.style.margin = '0';
 
-        container.innerHTML = `<style>${lpjStyles}</style><div style="position: relative;">${lpjBodyInnerHtml}</div>`;
-        document.body.appendChild(container);
+        container.innerHTML = `<style data-pdf-style="true">${lpjStyles}</style><div style="position: relative;">${lpjBodyInnerHtml}</div>`;
 
-        const opt = {
-          margin: [8, 12, 6, 12],
+        await downloadContainerAsPdf(container, {
           filename: `LPJ_Keuangan_PGRI_Ranting_Gelang_${new Date().toISOString().split('T')[0]}.pdf`,
-          image: { type: 'jpeg', quality: 0.98 },
-          html2canvas: { scale: 2, useCORS: true, logging: false },
-          jsPDF: { unit: 'mm', format: 'a4', orientation: 'landscape' },
+          orientation: 'landscape',
+          margin: [8, 12, 6, 12],
+          quality: 0.98,
+          scale: 2,
           pagebreak: { mode: ['css', 'legacy'], after: '.page-break-after-month' }
-        };
-
-        const pdfBlob = await html2pdf().set(opt).from(container).outputPdf('blob');
-        await safeDownloadBlob(pdfBlob, opt.filename);
+        });
       } catch (err) {
         console.error('Gagal mengunduh PDF LPJ di ponsel:', err);
       } finally {
@@ -2166,6 +2164,9 @@ export const KeuanganView: React.FC<KeuanganViewProps> = ({
 
     printWindow.document.write(htmlContent);
     printWindow.document.close();
+    } finally {
+      setIsExportingLpj(false);
+    }
   };
 
   // Confirm Hapus
@@ -2541,784 +2542,21 @@ export const KeuanganView: React.FC<KeuanganViewProps> = ({
     };
   };
 
-  // Helper cek apakah pengguna mengakses dari perangkat mobile (Ponsel / Tablet)
-  const isMobileDevice = () => {
-    if (typeof window === 'undefined') return false;
-    return /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
-  };
-
-  // Helper memuat library html2pdf khusus saat di ponsel
-  const getHtml2Pdf = async (): Promise<any> => {
-    if (typeof window !== 'undefined' && (window as any).html2pdf) {
-      return (window as any).html2pdf;
-    }
-    return new Promise((resolve, reject) => {
-      const script = document.createElement('script');
-      script.src = 'https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js';
-      script.onload = () => resolve((window as any).html2pdf);
-      script.onerror = () => reject(new Error('Gagal memuat library html2pdf.'));
-      document.head.appendChild(script);
-    });
-  };
-
-  // 1. Handler Unduh PDF Laporan Buku Kas Umum (PC: Jendela Cetak | Ponsel: Auto Download PDF)
-  const handleDownloadPDF = async () => {
-    const printWindow = !isMobileDevice() ? window.open('', '_blank') : null;
-    const { settingsData, bendaharaName, bendaharaNpaLabel } = await fetchPrintSettingsAndSigner();
-
-    const logoPgri = settingsData['logo-pgri'] || settingsData['logo-kombel'] || '';
-    const ttdBendahara = settingsData['ttd-bendahara'] || '';
-    const ttdBendaharaSize = settingsData['ttd-bendahara-size'] ? Number(settingsData['ttd-bendahara-size']) : 100;
-
-    // Tanggal cetak hari ini (contoh: Jember, 18 Agustus 2026)
-    const todayFormatted = new Date().toLocaleDateString('id-ID', {
-      day: 'numeric',
-      month: 'long',
-      year: 'numeric'
-    });
-
-    const rows = transactionsWithRunningBalance.map((tx, index) => `
-      <tr>
-        <td style="text-align: center;">${index + 1}</td>
-        <td style="text-align: center;">${new Date(tx.date).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' })}</td>
-        <td style="text-align: left; font-weight: 500; text-transform: capitalize;">${tx.description}</td>
-        <td style="text-align: right; color: #059669; font-weight: bold; font-family: monospace;">${tx.type === 'Pemasukan' ? formatRupiah(tx.amount) : '-'}</td>
-        <td style="text-align: right; color: #dc2626; font-weight: bold; font-family: monospace;">${tx.type === 'Pengeluaran' ? formatRupiah(tx.amount) : '-'}</td>
-        <td style="text-align: right; font-weight: bold; font-family: monospace;">${formatRupiah(tx.runningBalance)}</td>
-      </tr>
-    `).join('');
-
-    // JIKA DI PONSEL ATAU POP-UP DIBLOKIR: Gunakan html2pdf untuk direct download PDF yang presisi
-    if (!printWindow) {
-      let container: HTMLDivElement | null = null;
-      try {
-        const html2pdf = await getHtml2Pdf();
-        container = document.createElement('div');
-        container.style.position = 'fixed';
-        container.style.left = '-9999px';
-        container.style.top = '0';
-        container.style.width = '750px';
-        container.style.backgroundColor = '#ffffff';
-        container.style.color = '#000000';
-        container.style.fontFamily = "'Times New Roman', Times, serif";
-        container.style.padding = '0';
-        container.style.margin = '0';
-
-        container.innerHTML = `
-          <style>
-            * { box-sizing: border-box; font-family: 'Times New Roman', Times, serif; }
-            .kop-container {
-              display: flex;
-              align-items: center;
-              gap: 14px;
-              padding-bottom: 6px;
-              position: relative;
-              z-index: 2;
-            }
-            .kop-logo-wrapper {
-              width: 94px;
-              flex-shrink: 0;
-              display: flex;
-              align-items: center;
-              justify-content: center;
-            }
-            .kop-logo {
-              width: 92px;
-              height: 92px;
-              object-fit: contain;
-              display: block;
-            }
-            .kop-text-container {
-              flex: 1;
-              text-align: center;
-              line-height: 1.18;
-              color: #000000;
-              padding-left: 8px;
-            }
-            .kop-org {
-              font-size: 13pt;
-              font-weight: bold;
-              text-transform: uppercase;
-              letter-spacing: 0.3px;
-            }
-            .kop-sub-org {
-              font-size: 10.5pt;
-              font-weight: bold;
-              font-style: italic;
-              margin-top: 1px;
-            }
-            .kop-ranting {
-              font-size: 16.5pt;
-              font-weight: bold;
-              text-transform: uppercase;
-              letter-spacing: 0.5px;
-              margin-top: 1px;
-            }
-            .kop-wilayah {
-              font-size: 12pt;
-              font-weight: bold;
-              text-transform: uppercase;
-              letter-spacing: 0.3px;
-              margin-top: 1px;
-            }
-            .kop-sekretariat {
-              font-size: 8pt;
-              font-style: italic;
-              margin-top: 2px;
-              white-space: nowrap;
-            }
-            .kop-divider {
-              border-top: 2.5px solid #000000;
-              border-bottom: 1px solid #000000;
-              height: 5px;
-              margin-bottom: 12px;
-              position: relative;
-              z-index: 2;
-            }
-            .document-title {
-              text-align: center;
-              margin-top: 16px;
-              margin-bottom: 20px;
-              position: relative;
-              z-index: 1;
-            }
-            .document-title-container {
-              display: inline-block;
-              text-align: center;
-            }
-            .document-title h3 {
-              margin: 0 0 2px 0;
-              font-size: 11.5pt;
-              font-weight: bold;
-              text-transform: uppercase;
-              letter-spacing: 0.5px;
-            }
-            .title-divider {
-              width: 100%;
-              border-top: 1px solid #000;
-              margin: 2px 0 3px 0;
-            }
-            .document-title p {
-              margin: 0;
-              font-size: 8.5pt;
-              font-weight: bold;
-            }
-            table.data-table { 
-              width: 100%; 
-              border-collapse: collapse; 
-              font-size: 8pt;
-              position: relative;
-              z-index: 1;
-            }
-            table.data-table tr {
-              page-break-inside: avoid;
-              break-inside: avoid;
-            }
-            table.data-table th, table.data-table td { 
-              padding: 4px 6px; 
-              border: 1px solid #333; 
-              white-space: nowrap;
-              line-height: 1.2;
-            }
-            table.data-table th { 
-              background-color: #f1f5f9; 
-              color: #000; 
-              text-align: center; 
-              font-weight: bold; 
-              font-size: 8pt; 
-              text-transform: uppercase;
-            }
-            table.data-table tr:nth-child(even) { 
-              background-color: #fafafa; 
-            }
-            .footer-section {
-              margin-top: 28px;
-              width: 100%;
-              page-break-inside: avoid !important;
-              break-inside: avoid !important;
-              display: table;
-              position: relative;
-              z-index: 1;
-            }
-            .footer-row {
-              display: table-row;
-              page-break-inside: avoid !important;
-              break-inside: avoid !important;
-            }
-            .keterangan-col {
-              display: table-cell;
-              width: 50%;
-              vertical-align: top;
-            }
-            .keterangan-box {
-              border: 1.2px solid #000;
-              padding: 6px 10px;
-              font-size: 8.5pt;
-              background-color: rgba(255, 255, 255, 0.9);
-              display: inline-block;
-              min-width: 220px;
-            }
-            .keterangan-title {
-              margin: 0 0 5px 0;
-              font-weight: bold;
-              text-decoration: underline;
-              text-underline-offset: 4px;
-              text-decoration-thickness: 1px;
-            }
-            .keterangan-table {
-              border-collapse: collapse;
-              width: 100%;
-              font-size: 8pt;
-            }
-            .keterangan-table td {
-              border: none !important;
-              padding: 0.5px 2px !important;
-              line-height: 1.15;
-              white-space: nowrap;
-            }
-            .keterangan-table td.label-col { width: 110px; }
-            .keterangan-table td.colon-col { width: 10px; text-align: center; }
-            .keterangan-table td.val-col {
-              font-weight: bold;
-              text-align: left;
-              font-family: monospace;
-            }
-            .spacer-col {
-              display: table-cell;
-              width: 10%;
-            }
-            .ttd-col {
-              display: table-cell;
-              width: 40%;
-              text-align: center;
-              position: relative;
-              font-size: 8.8pt;
-              vertical-align: top;
-            }
-            .ttd-col p {
-              margin: 1px 0;
-              line-height: 1.25;
-            }
-            .ttd-signature-area {
-              height: 65px;
-              display: flex;
-              align-items: center;
-              justify-content: center;
-              overflow: visible;
-            }
-            .ttd-signature-area img {
-              max-height: 62px;
-              width: auto;
-              object-fit: contain;
-              transform: scale(${ttdBendaharaSize / 100});
-            }
-            .ttd-name {
-              font-weight: bold;
-              text-decoration: underline;
-              text-underline-offset: 4px;
-              text-decoration-thickness: 1px;
-              color: #000;
-              margin-top: 2px;
-            }
-            .ttd-nip {
-              font-size: 8pt;
-              color: #111;
-            }
-          </style>
-
-          <div style="position: relative; min-height: 980px;">
-            <div class="kop-container">
-              <div class="kop-logo-wrapper">
-                ${logoPgri
-                  ? `<img src="${logoPgri}" alt="Logo PGRI" class="kop-logo" />`
-                  : `<div style="width: 92px; height: 92px; border: 1.5px dashed #94a3b8; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 9pt; color: #64748b; text-align: center;">Logo<br/>PGRI</div>`}
-              </div>
-              <div class="kop-text-container">
-                <div class="kop-org">PERSATUAN GURU REPUBLIK INDONESIA</div>
-                <div class="kop-sub-org">(Teachers Association Of Republic Indonesia)</div>
-                <div class="kop-ranting">RANTING GELANG</div>
-                <div class="kop-wilayah">KECAMATAN SUMBERBARU - KABUPATEN JEMBER</div>
-                <div class="kop-sekretariat">Sekretariat : Jl. PTPN XII Gunung Gambir Desa Gelang, Kecamatan Sumberbaru - Kabupaten Jember 68156</div>
-              </div>
-              <div style="width: 94px; flex-shrink: 0;"></div>
-            </div>
-            <div class="kop-divider"></div>
-
-            <div class="document-title">
-              <div class="document-title-container">
-                <h3>LAPORAN KEUANGAN</h3>
-                <div class="title-divider"></div>
-                <p>Periode : 2026-2027</p>
-              </div>
-            </div>
-
-            <table class="data-table">
-              <thead>
-                <tr>
-                  <th style="width: 26px;">No</th>
-                  <th style="width: 75px;">Tanggal</th>
-                  <th>Keterangan</th>
-                  <th style="width: 95px;">Pemasukan</th>
-                  <th style="width: 95px;">Pengeluaran</th>
-                  <th style="width: 100px;">Total Saldo</th>
-                </tr>
-              </thead>
-              <tbody>
-                ${rows.length > 0 ? rows : '<tr><td colSpan="6" style="text-align:center;">Belum ada data transaksi.</td></tr>'}
-              </tbody>
-            </table>
-
-            <div class="footer-section">
-              <div class="footer-row">
-                <div class="keterangan-col">
-                  <div class="keterangan-box">
-                    <p class="keterangan-title">Ringkasan Kas :</p>
-                    <table class="keterangan-table">
-                      <tr>
-                        <td class="label-col">Total Pemasukan</td>
-                        <td class="colon-col">:</td>
-                        <td class="val-col" style="color: #059669;">${formatRupiah(totalPemasukan)}</td>
-                      </tr>
-                      <tr>
-                        <td class="label-col">Total Pengeluaran</td>
-                        <td class="colon-col">:</td>
-                        <td class="val-col" style="color: #dc2626;">${formatRupiah(totalPengeluaran)}</td>
-                      </tr>
-                      <tr>
-                        <td class="label-col">Saldo Kas Akhir</td>
-                        <td class="colon-col">:</td>
-                        <td class="val-col" style="color: #000;">${formatRupiah(saldoAkhir)}</td>
-                      </tr>
-                    </table>
-                  </div>
-                </div>
-
-                <div class="spacer-col"></div>
-
-                <div class="ttd-col">
-                  <p>Sumberbaru, ${todayFormatted}</p>
-                  <p>Bendahara PGRI Ranting Gelang</p>
-                  <p>Kecamatan Sumberbaru</p>
-                  
-                  <div class="ttd-signature-area">
-                    ${ttdBendahara ? `<img src="${ttdBendahara}" alt="TTD Bendahara" />` : ''}
-                  </div>
-
-                  <p class="ttd-name">${bendaharaName}</p>
-                  <p class="ttd-nip">${bendaharaNpaLabel}</p>
-                </div>
-              </div>
-            </div>
-          </div>
-        `;
-
-        document.body.appendChild(container);
-
-        const opt = {
-          margin: [8, 12, 6, 12],
-          filename: `Laporan_Buku_Kas_Umum_${new Date().toISOString().split('T')[0]}.pdf`,
-          image: { type: 'jpeg', quality: 0.98 },
-          html2canvas: { scale: 2, useCORS: true, logging: false },
-          jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }
-        };
-
-        const pdfBlob = await html2pdf().set(opt).from(container).outputPdf('blob');
-        await safeDownloadBlob(pdfBlob, opt.filename);
-      } catch (err) {
-        console.error('Gagal mengunduh PDF di ponsel:', err);
-      } finally {
-        if (container && document.body.contains(container)) {
-          document.body.removeChild(container);
-        }
-      }
-      return;
-    }
-
-    // JIKA DI PC / LAPTOP: Gunakan pratinjau cetak bawaan browser
-    if (!printWindow) return;
-
-    const htmlContent = `
-      <!DOCTYPE html>
-      <html>
-        <head>
-          <title>Laporan Buku Kas Umum</title>
-          <style>
-            @page { 
-              size: A4 portrait; 
-              margin: 0.8cm 1.2cm 0.6cm 1.2cm; 
-            }
-            * {
-              box-sizing: border-box;
-              font-family: 'Times New Roman', Times, serif;
-            }
-            html, body { 
-              font-family: 'Times New Roman', Times, serif; 
-              margin: 0; 
-              padding: 0; 
-              color: #000; 
-              position: relative;
-              min-height: 100%;
-              -webkit-print-color-adjust: exact;
-              print-color-adjust: exact;
-            }
-
-            /* Kop Surat PGRI Ranting Gelang */
-            .kop-container {
-              display: flex;
-              align-items: center;
-              gap: 14px;
-              padding-bottom: 6px;
-              position: relative;
-              z-index: 2;
-            }
-            .kop-logo-wrapper {
-              width: 94px;
-              flex-shrink: 0;
-              display: flex;
-              align-items: center;
-              justify-content: center;
-            }
-            .kop-logo {
-              width: 92px;
-              height: 92px;
-              object-fit: contain;
-              display: block;
-            }
-            .kop-text-container {
-              flex: 1;
-              text-align: center;
-              line-height: 1.18;
-              color: #000000;
-              padding-left: 8px;
-            }
-            .kop-org {
-              font-size: 13pt;
-              font-weight: bold;
-              text-transform: uppercase;
-              letter-spacing: 0.3px;
-            }
-            .kop-sub-org {
-              font-size: 10.5pt;
-              font-weight: bold;
-              font-style: italic;
-              margin-top: 1px;
-            }
-            .kop-ranting {
-              font-size: 16.5pt;
-              font-weight: bold;
-              text-transform: uppercase;
-              letter-spacing: 0.5px;
-              margin-top: 1px;
-            }
-            .kop-wilayah {
-              font-size: 12pt;
-              font-weight: bold;
-              text-transform: uppercase;
-              letter-spacing: 0.3px;
-              margin-top: 1px;
-            }
-            .kop-sekretariat {
-              font-size: 8pt;
-              font-style: italic;
-              margin-top: 2px;
-              white-space: nowrap;
-            }
-            .kop-divider {
-              border-top: 2.5px solid #000000;
-              border-bottom: 1px solid #000000;
-              height: 5px;
-              margin-bottom: 12px;
-              position: relative;
-              z-index: 2;
-            }
-
-            /* Judul Dokumen */
-            .document-title {
-              text-align: center;
-              margin-top: 20px;
-              margin-bottom: 24px;
-            }
-            .document-title-container {
-              display: inline-block;
-              text-align: center;
-            }
-            .document-title h3 {
-              margin: 0 0 3px 0;
-              font-size: 13pt;
-              font-weight: bold;
-              text-transform: uppercase;
-              text-decoration: none;
-              letter-spacing: 0.5px;
-            }
-            .title-divider {
-              width: 100%;
-              border-top: 1px solid #000;
-              margin: 3px 0 4px 0;
-            }
-            .document-title p {
-              margin: 0;
-              font-size: 9.5pt;
-              font-weight: bold;
-            }
-
-            /* Tabel */
-            table.data-table { 
-              width: 100%; 
-              border-collapse: collapse; 
-              font-size: 8pt;
-              page-break-inside: auto;
-            }
-            table.data-table tr {
-              page-break-inside: avoid;
-              break-inside: avoid;
-            }
-            table.data-table th, table.data-table td { 
-              padding: 3.5px 6px; 
-              border: 1px solid #333; 
-              white-space: nowrap;
-              line-height: 1.2;
-            }
-            table.data-table th { 
-              background-color: #f1f5f9 !important; 
-              color: #000 !important; 
-              text-align: center; 
-              font-weight: bold; 
-              font-size: 8pt; 
-              text-transform: uppercase;
-            }
-            table.data-table tr:nth-child(even) { 
-              background-color: #fafafa !important; 
-            }
-
-            /* Area Bawah: Kotak Keterangan Kas & TTD */
-            .footer-section {
-              margin-top: 28px;
-              width: 100%;
-              page-break-inside: avoid !important;
-              break-inside: avoid !important;
-              display: table;
-            }
-            .footer-row {
-              display: table-row;
-              page-break-inside: avoid !important;
-              break-inside: avoid !important;
-            }
-
-            /* Kotak Ringkasan Kas Pojok Kiri Bawah */
-            .keterangan-col {
-              display: table-cell;
-              width: 50%;
-              vertical-align: top;
-              page-break-inside: avoid !important;
-              break-inside: avoid !important;
-            }
-            .keterangan-box {
-              border: 1.2px solid #000;
-              padding: 6px 10px;
-              font-size: 8.5pt;
-              background-color: rgba(255, 255, 255, 0.85);
-              display: inline-block;
-              min-width: 220px;
-              page-break-inside: avoid !important;
-              break-inside: avoid !important;
-            }
-            .keterangan-title {
-              margin: 0 0 5px 0;
-              font-weight: bold;
-              text-decoration: underline;
-              text-underline-offset: 4px;
-              text-decoration-thickness: 1px;
-            }
-            .keterangan-table {
-              border-collapse: collapse;
-              width: 100%;
-              font-size: 8pt;
-            }
-            .keterangan-table td {
-              border: none !important;
-              padding: 0.5px 2px !important;
-              line-height: 1.15;
-              white-space: nowrap;
-            }
-            .keterangan-table td.label-col {
-              width: 110px;
-            }
-            .keterangan-table td.colon-col {
-              width: 10px;
-              text-align: center;
-            }
-            .keterangan-table td.val-col {
-              font-weight: bold;
-              text-align: left;
-              font-family: monospace;
-            }
-
-            /* Spacer Tengah */
-            .spacer-col {
-              display: table-cell;
-              width: 10%;
-            }
-
-            /* Kotak Tanda Tangan Pojok Kanan Bawah */
-            .ttd-col {
-              display: table-cell;
-              width: 40%;
-              text-align: center;
-              position: relative;
-              font-size: 8.8pt;
-              vertical-align: top;
-              page-break-inside: avoid !important;
-              break-inside: avoid !important;
-            }
-            .ttd-col p {
-              margin: 1px 0;
-              line-height: 1.25;
-            }
-            .ttd-signature-area {
-              height: 65px;
-              display: flex;
-              align-items: center;
-              justify-content: center;
-              overflow: visible;
-            }
-            .ttd-signature-area img {
-              max-height: 62px;
-              width: auto;
-              object-fit: contain;
-              transform: scale(${ttdBendaharaSize / 100});
-            }
-            .ttd-name {
-              font-weight: bold;
-              text-decoration: underline;
-              text-underline-offset: 4px;
-              text-decoration-thickness: 1px;
-              color: #000;
-              margin-top: 2px;
-            }
-            .ttd-nip {
-              font-size: 8pt;
-              color: #111;
-            }
-          </style>
-        </head>
-        <body>
-
-          <!-- Kop Surat PGRI Ranting Gelang -->
-          <div class="kop-container">
-            <div class="kop-logo-wrapper">
-              ${logoPgri
-                ? `<img src="${logoPgri}" alt="Logo PGRI" class="kop-logo" />`
-                : `<div style="width: 92px; height: 92px; border: 1.5px dashed #94a3b8; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 9pt; color: #64748b; text-align: center;">Logo<br/>PGRI</div>`}
-            </div>
-            <div class="kop-text-container">
-              <div class="kop-org">PERSATUAN GURU REPUBLIK INDONESIA</div>
-              <div class="kop-sub-org">(Teachers Association Of Republic Indonesia)</div>
-              <div class="kop-ranting">RANTING GELANG</div>
-              <div class="kop-wilayah">KECAMATAN SUMBERBARU - KABUPATEN JEMBER</div>
-              <div class="kop-sekretariat">Sekretariat : Jl. PTPN XII Gunung Gambir Desa Gelang, Kecamatan Sumberbaru - Kabupaten Jember 68156</div>
-            </div>
-            <div style="width: 94px; flex-shrink: 0;"></div>
-          </div>
-          <div class="kop-divider"></div>
-
-          <!-- Judul Dokumen -->
-          <div class="document-title">
-            <div class="document-title-container">
-              <h3>LAPORAN KEUANGAN</h3>
-              <div class="title-divider"></div>
-              <p>Periode : 2026-2027</p>
-            </div>
-          </div>
-
-          <!-- Tabel Transaksi -->
-          <table class="data-table">
-            <thead>
-              <tr>
-                <th style="width: 26px;">No</th>
-                <th style="width: 75px;">Tanggal</th>
-                <th>Keterangan</th>
-                <th style="width: 95px;">Pemasukan</th>
-                <th style="width: 95px;">Pengeluaran</th>
-                <th style="width: 100px;">Total Saldo</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${rows.length > 0 ? rows : '<tr><td colSpan="6" style="text-align:center;">Belum ada data transaksi.</td></tr>'}
-            </tbody>
-          </table>
-
-          <!-- Area Bawah: Kotak Ringkasan Kas (Kiri) & TTD (Kanan) -->
-          <div class="footer-section">
-            <div class="footer-row">
-              
-              <!-- Kotak Ringkasan Kas -->
-              <div class="keterangan-col">
-                <div class="keterangan-box">
-                  <p class="keterangan-title">Ringkasan Kas :</p>
-                  <table class="keterangan-table">
-                    <tr>
-                      <td class="label-col">Total Pemasukan</td>
-                      <td class="colon-col">:</td>
-                      <td class="val-col" style="color: #059669;">${formatRupiah(totalPemasukan)}</td>
-                    </tr>
-                    <tr>
-                      <td class="label-col">Total Pengeluaran</td>
-                      <td class="colon-col">:</td>
-                      <td class="val-col" style="color: #dc2626;">${formatRupiah(totalPengeluaran)}</td>
-                    </tr>
-                    <tr>
-                      <td class="label-col">Saldo Kas Akhir</td>
-                      <td class="colon-col">:</td>
-                      <td class="val-col" style="color: #000;">${formatRupiah(saldoAkhir)}</td>
-                    </tr>
-                  </table>
-                </div>
-              </div>
-
-              <!-- Spacer Tengah -->
-              <div class="spacer-col"></div>
-
-              <!-- Kotak Tanda Tangan Bendahara -->
-              <div class="ttd-col">
-                <p>Sumberbaru, ${todayFormatted}</p>
-                <p>Bendahara PGRI Ranting Gelang</p>
-                <p>Kecamatan Sumberbaru</p>
-                
-                <div class="ttd-signature-area">
-                  ${ttdBendahara ? `<img src="${ttdBendahara}" alt="TTD Bendahara" />` : ''}
-                </div>
-
-                <p class="ttd-name">${bendaharaName}</p>
-                <p class="ttd-nip">${bendaharaNpaLabel}</p>
-              </div>
-
-            </div>
-          </div>
-
-          <script>
-            window.onload = function() {
-              window.print();
-            };
-            window.onafterprint = function() { 
-              window.close(); 
-            };
-          </script>
-        </body>
-      </html>
-    `;
-
-    printWindow.document.write(htmlContent);
-    printWindow.document.close();
-  };
-
-  // 2. Handler Unduh PDF Daftar Pembayaran Uang Kas Anggota (PC: Jendela Cetak | Ponsel: Auto Download PDF)
+  // Handler Unduh PDF Daftar Pembayaran Uang Kas Anggota (PC: Jendela Cetak | Ponsel: Auto Download PDF)
   const handleDownloadDaftarPembayaranPDF = async () => {
+    if (isDownloadingKasPdf) return;
+    setIsDownloadingKasPdf(true);
+    try {
     const printWindow = !isMobileDevice() ? window.open('', '_blank') : null;
     const { settingsData, bendaharaName, bendaharaNpaLabel } = await fetchPrintSettingsAndSigner();
 
     const logoPgri = settingsData['logo-pgri'] || settingsData['logo-kombel'] || '';
     const ttdBendahara = settingsData['ttd-bendahara'] || '';
-    const ttdBendaharaSize = settingsData['ttd-bendahara-size'] ? Number(settingsData['ttd-bendahara-size']) : 100;
+    const ttdBendaharaScale = Math.max(0.3, Math.min(2.5, (Number(settingsData['ttd-bendahara-size']) || 100) / 100));
+    const kopOrg = escapeHtmlSafe(orgConfig.kopOrganisasi || 'PERSATUAN GURU REPUBLIK INDONESIA');
+    const kopRanting = escapeHtmlSafe(orgConfig.kopRanting || 'RANTING GELANG');
+    const kopWilayah = escapeHtmlSafe(orgConfig.kopWilayah || 'KECAMATAN SUMBERBARU - KABUPATEN JEMBER');
+    const kopSekretariat = escapeHtmlSafe(orgConfig.kopSekretariat || 'Sekretariat : Jl. PTPN XII Gunung Gambir Desa Gelang, Kecamatan Sumberbaru - Kabupaten Jember 68156');
 
     // Tanggal cetak hari ini (contoh: Jember, 18 Agustus 2026)
     const todayFormatted = new Date().toLocaleDateString('id-ID', {
@@ -3360,15 +2598,11 @@ export const KeuanganView: React.FC<KeuanganViewProps> = ({
       `;
     }).join('');
 
-    // JIKA DI PONSEL ATAU POP-UP DIBLOKIR: Gunakan html2pdf untuk direct download PDF yang presisi
+    // JIKA DI PONSEL ATAU POP-UP DIBLOKIR: Gunakan html2pdf lokal untuk direct download PDF yang presisi
     if (!printWindow) {
       let container: HTMLDivElement | null = null;
       try {
-        const html2pdf = await getHtml2Pdf();
         container = document.createElement('div');
-        container.style.position = 'fixed';
-        container.style.left = '-9999px';
-        container.style.top = '0';
         container.style.width = '1050px';
         container.style.backgroundColor = '#ffffff';
         container.style.color = '#000000';
@@ -3377,7 +2611,7 @@ export const KeuanganView: React.FC<KeuanganViewProps> = ({
         container.style.margin = '0';
 
         container.innerHTML = `
-          <style>
+          <style data-pdf-style="true">
             * { box-sizing: border-box; font-family: 'Times New Roman', Times, serif; }
             .kop-container {
               display: flex;
@@ -3575,10 +2809,10 @@ export const KeuanganView: React.FC<KeuanganViewProps> = ({
               overflow: visible;
             }
             .ttd-signature-area img {
-              max-height: 62px;
+              height: ${Math.round(62 * ttdBendaharaScale)}px;
               width: auto;
+              max-width: ${Math.round(160 * ttdBendaharaScale)}px;
               object-fit: contain;
-              transform: scale(${ttdBendaharaSize / 100});
             }
             .ttd-name {
               font-weight: bold;
@@ -3602,11 +2836,11 @@ export const KeuanganView: React.FC<KeuanganViewProps> = ({
                   : `<div style="width: 92px; height: 92px; border: 1.5px dashed #94a3b8; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 9pt; color: #64748b; text-align: center;">Logo<br/>PGRI</div>`}
               </div>
               <div class="kop-text-container">
-                <div class="kop-org">PERSATUAN GURU REPUBLIK INDONESIA</div>
+                <div class="kop-org">${kopOrg}</div>
                 <div class="kop-sub-org">(Teachers Association Of Republic Indonesia)</div>
-                <div class="kop-ranting">RANTING GELANG</div>
-                <div class="kop-wilayah">KECAMATAN SUMBERBARU - KABUPATEN JEMBER</div>
-                <div class="kop-sekretariat">Sekretariat : Jl. PTPN XII Gunung Gambir Desa Gelang, Kecamatan Sumberbaru - Kabupaten Jember 68156</div>
+                <div class="kop-ranting">${kopRanting}</div>
+                <div class="kop-wilayah">${kopWilayah}</div>
+                <div class="kop-sekretariat">${kopSekretariat}</div>
               </div>
               <div style="width: 94px; flex-shrink: 0;"></div>
             </div>
@@ -3677,18 +2911,13 @@ export const KeuanganView: React.FC<KeuanganViewProps> = ({
           </div>
         `;
 
-        document.body.appendChild(container);
-
-        const opt = {
-          margin: [8, 12, 6, 12],
+        await downloadContainerAsPdf(container, {
           filename: `Rekap_Daftar_Pembayaran_Uang_Kas_${new Date().toISOString().split('T')[0]}.pdf`,
-          image: { type: 'jpeg', quality: 0.98 },
-          html2canvas: { scale: 2, useCORS: true, logging: false },
-          jsPDF: { unit: 'mm', format: 'a4', orientation: 'landscape' }
-        };
-
-        const pdfBlob = await html2pdf().set(opt).from(container).outputPdf('blob');
-        await safeDownloadBlob(pdfBlob, opt.filename);
+          orientation: 'landscape',
+          margin: [8, 12, 6, 12],
+          quality: 0.98,
+          scale: 2
+        });
       } catch (err) {
         console.error('Gagal mengunduh PDF di ponsel:', err);
       } finally {
@@ -3945,10 +3174,10 @@ export const KeuanganView: React.FC<KeuanganViewProps> = ({
               overflow: visible;
             }
             .ttd-signature-area img {
-              max-height: 62px;
+              height: ${Math.round(62 * ttdBendaharaScale)}px;
               width: auto;
+              max-width: ${Math.round(160 * ttdBendaharaScale)}px;
               object-fit: contain;
-              transform: scale(${ttdBendaharaSize / 100});
             }
             .ttd-name {
               font-weight: bold;
@@ -3974,11 +3203,11 @@ export const KeuanganView: React.FC<KeuanganViewProps> = ({
                 : `<div style="width: 92px; height: 92px; border: 1.5px dashed #94a3b8; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 9pt; color: #64748b; text-align: center;">Logo<br/>PGRI</div>`}
             </div>
             <div class="kop-text-container">
-              <div class="kop-org">PERSATUAN GURU REPUBLIK INDONESIA</div>
+              <div class="kop-org">${kopOrg}</div>
               <div class="kop-sub-org">(Teachers Association Of Republic Indonesia)</div>
-              <div class="kop-ranting">RANTING GELANG</div>
-              <div class="kop-wilayah">KECAMATAN SUMBERBARU - KABUPATEN JEMBER</div>
-              <div class="kop-sekretariat">Sekretariat : Jl. PTPN XII Gunung Gambir Desa Gelang, Kecamatan Sumberbaru - Kabupaten Jember 68156</div>
+              <div class="kop-ranting">${kopRanting}</div>
+              <div class="kop-wilayah">${kopWilayah}</div>
+              <div class="kop-sekretariat">${kopSekretariat}</div>
             </div>
             <div style="width: 94px; flex-shrink: 0;"></div>
           </div>
@@ -4069,6 +3298,9 @@ export const KeuanganView: React.FC<KeuanganViewProps> = ({
 
     printWindow.document.write(htmlContent);
     printWindow.document.close();
+    } finally {
+      setIsDownloadingKasPdf(false);
+    }
   };
 
   // Sinkronisasi status guru murni per bulan & tahun yang dipilih (mengabaikan periode sebelum mulai iuran)
@@ -4374,11 +3606,18 @@ export const KeuanganView: React.FC<KeuanganViewProps> = ({
                   <button
                     type="button"
                     onClick={handleExportOfficialLPJ}
+                    disabled={isExportingLpj}
                     title="Unduh Laporan Pertanggungjawaban (LPJ) Resmi PGRI per Pos Anggaran"
-                    className="flex-1 sm:flex-initial sm:w-auto px-3.5 sm:px-4 py-2.5 rounded-xl bg-[#faf8f5] [.dark_&]:bg-stone-800 dark:bg-stone-800 border border-stone-300 [.dark_&]:border-stone-700 dark:border-stone-700 hover:border-amber-500/50 text-stone-800 [.dark_&]:text-stone-200 dark:text-stone-200 font-semibold text-xs sm:text-sm hover:bg-stone-100 [.dark_&]:hover:bg-stone-700 dark:hover:bg-stone-700 active:scale-95 flex items-center justify-center gap-1.5 cursor-pointer shrink-0 shadow-sm transition-colors"
+                    className={`flex-1 sm:flex-initial sm:w-auto px-3.5 sm:px-4 py-2.5 rounded-xl bg-[#faf8f5] [.dark_&]:bg-stone-800 dark:bg-stone-800 border border-stone-300 [.dark_&]:border-stone-700 dark:border-stone-700 hover:border-amber-500/50 text-stone-800 [.dark_&]:text-stone-200 dark:text-stone-200 font-semibold text-xs sm:text-sm hover:bg-stone-100 [.dark_&]:hover:bg-stone-700 dark:hover:bg-stone-700 active:scale-95 flex items-center justify-center gap-1.5 shrink-0 shadow-sm transition-colors ${
+                      isExportingLpj ? 'opacity-70 cursor-not-allowed' : 'cursor-pointer'
+                    }`}
                   >
-                    <FileSpreadsheet className="w-4 h-4 text-amber-700 dark:text-amber-400" />
-                    <span>Cetak LPJ</span>
+                    {isExportingLpj ? (
+                      <Loader2 className="w-4 h-4 animate-spin text-amber-700 dark:text-amber-400" />
+                    ) : (
+                      <FileSpreadsheet className="w-4 h-4 text-amber-700 dark:text-amber-400" />
+                    )}
+                    <span>{isExportingLpj ? 'Menyiapkan PDF...' : 'Cetak LPJ'}</span>
                   </button>
                 </div>
               </div>
@@ -4581,12 +3820,20 @@ export const KeuanganView: React.FC<KeuanganViewProps> = ({
 
                   {/* 5. Tombol Unduh PDF */}
                   <button
+                    type="button"
                     onClick={handleDownloadDaftarPembayaranPDF}
+                    disabled={isDownloadingKasPdf}
                     title="Unduh Daftar Pembayaran (PDF)"
-                    className="flex-1 sm:flex-initial sm:w-auto px-4 py-2.5 rounded-xl bg-red-800 hover:bg-red-700 text-white font-bold text-xs shadow-sm active:scale-95 flex items-center justify-center gap-2 transition-colors cursor-pointer shrink-0"
+                    className={`flex-1 sm:flex-initial sm:w-auto px-4 py-2.5 rounded-xl bg-red-800 hover:bg-red-700 text-white font-bold text-xs shadow-sm active:scale-95 flex items-center justify-center gap-2 transition-colors shrink-0 ${
+                      isDownloadingKasPdf ? 'opacity-70 cursor-not-allowed' : 'cursor-pointer'
+                    }`}
                   >
-                    <Download className="w-4 h-4 text-white" />
-                    <span>Unduh PDF</span>
+                    {isDownloadingKasPdf ? (
+                      <Loader2 className="w-4 h-4 animate-spin text-white" />
+                    ) : (
+                      <Download className="w-4 h-4 text-white" />
+                    )}
+                    <span>{isDownloadingKasPdf ? 'Menyiapkan PDF...' : 'Unduh PDF'}</span>
                   </button>
 
                 </div>

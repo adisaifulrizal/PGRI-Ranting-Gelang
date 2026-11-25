@@ -13,7 +13,8 @@ import {
   ExternalLink,
   Search,
   Layers,
-  Wallet
+  Wallet,
+  Loader2
 } from 'lucide-react';
 import { ProkerItem, PengurusRole } from '../../types';
 import {
@@ -29,6 +30,7 @@ import {
 import { logAuditEvent } from '../../lib/auth';
 import { openWhatsAppShare } from '../../lib/orgConfig';
 import { safeDownloadBlob } from '../../lib/download';
+import { isMobileDevice, downloadContainerAsPdf } from '../../lib/pdfExport';
 
 interface ProkerViewProps {
   activeRole: 'guru' | 'admin';
@@ -100,6 +102,7 @@ export const ProkerView: React.FC<ProkerViewProps> = ({
   const [search, setSearch] = useState('');
   const [filterSeksi, setFilterSeksi] = useState('Semua');
   const [filterStatus, setFilterStatus] = useState('Semua');
+  const [isPrintingProker, setIsPrintingProker] = useState(false);
 
   const [penanggungJawabOptions, setPenanggungJawabOptions] = useState<{ name: string; role: string }[]>([]);
 
@@ -394,126 +397,112 @@ export const ProkerView: React.FC<ProkerViewProps> = ({
   };
 
   const handlePrintProker = async () => {
-    const rows = filteredItems
-      .map(
-        (p, idx) => `
-      <tr>
-        <td style="text-align:center;">${idx + 1}</td>
-        <td><strong>${p.title}</strong><br/><span style="font-size:11px;color:#475569;">${p.description || ''}</span></td>
-        <td>${p.seksi}</td>
-        <td>${p.penanggungJawab || '-'}</td>
-        <td style="text-align:center;">${p.targetDate || '-'}</td>
-        <td style="text-align:right;">Rp ${(p.budget || 0).toLocaleString('id-ID')}</td>
-        <td style="text-align:center;">${p.status} (${p.progress}%)</td>
-      </tr>`
-      )
-      .join('');
+    if (isPrintingProker) return;
+    setIsPrintingProker(true);
+    let container: HTMLDivElement | null = null;
+    try {
+      const rows = filteredItems
+        .map(
+          (p, idx) => `
+        <tr>
+          <td style="text-align:center;">${idx + 1}</td>
+          <td><strong>${p.title}</strong><br/><span style="font-size:11px;color:#475569;">${p.description || ''}</span></td>
+          <td>${p.seksi}</td>
+          <td>${p.penanggungJawab || '-'}</td>
+          <td style="text-align:center;">${p.targetDate || '-'}</td>
+          <td style="text-align:right;">Rp ${(p.budget || 0).toLocaleString('id-ID')}</td>
+          <td style="text-align:center;">${p.status} (${p.progress}%)</td>
+        </tr>`
+        )
+        .join('');
 
-    const bodyHtml = `
-      <h2>MATRIKS PROGRAM KERJA & REALISASI</h2>
-      <h3>PGRI RANTING GELANG — KECAMATAN SUMBERBARU</h3>
-      <p class="sub">Dicetak pada ${new Date().toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' })} | Total Anggaran Rencana: Rp ${stats.totalBudget.toLocaleString('id-ID')}</p>
-      <table>
-        <thead>
-          <tr>
-            <th>No</th>
-            <th>Program Kerja</th>
-            <th>Seksi</th>
-            <th>Penanggung Jawab</th>
-            <th>Target</th>
-            <th>Anggaran</th>
-            <th>Realisasi</th>
-          </tr>
-        </thead>
-        <tbody>${rows}</tbody>
-      </table>
-    `;
+      const bodyHtml = `
+        <h2>MATRIKS PROGRAM KERJA & REALISASI</h2>
+        <h3>PGRI RANTING GELANG — KECAMATAN SUMBERBARU</h3>
+        <p class="sub">Dicetak pada ${new Date().toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' })} | Total Anggaran Rencana: Rp ${stats.totalBudget.toLocaleString('id-ID')}</p>
+        <table>
+          <thead>
+            <tr>
+              <th>No</th>
+              <th>Program Kerja</th>
+              <th>Seksi</th>
+              <th>Penanggung Jawab</th>
+              <th>Target</th>
+              <th>Anggaran</th>
+              <th>Realisasi</th>
+            </tr>
+          </thead>
+          <tbody>${rows}</tbody>
+        </table>
+      `;
 
-    const fullHtml = `
-      <!doctype html>
-      <html>
-        <head>
-          <meta charset="utf-8" />
-          <title>Rekap Program Kerja PGRI Ranting Gelang</title>
-          <style>
-            body { font-family: Arial, sans-serif; padding: 28px; color: #0f172a; background: #ffffff; }
+      const fullHtml = `
+        <!doctype html>
+        <html>
+          <head>
+            <meta charset="utf-8" />
+            <title>Rekap Program Kerja PGRI Ranting Gelang</title>
+            <style>
+              body { font-family: Arial, sans-serif; padding: 28px; color: #0f172a; background: #ffffff; }
+              h2, h3 { margin: 0; text-align: center; }
+              .sub { text-align: center; font-size: 12px; color: #475569; margin: 4px 0 18px; }
+              table { width: 100%; border-collapse: collapse; font-size: 12px; }
+              th, td { border: 1px solid #cbd5e1; padding: 8px; vertical-align: top; }
+              th { background: #f1f5f9; }
+            </style>
+          </head>
+          <body>
+            ${bodyHtml}
+            <script>window.onload = function() { window.print(); }</script>
+          </body>
+        </html>
+      `;
+
+      const printWin = !isMobileDevice() ? window.open('', '_blank', 'width=960,height=720') : null;
+      if (printWin) {
+        printWin.document.write(fullHtml);
+        printWin.document.close();
+        return;
+      }
+
+      // Fallback otomatis ke unduhan langsung PDF lokal jika di ponsel atau pop-up diblokir
+      try {
+        container = document.createElement('div');
+        container.style.width = '900px';
+        container.style.backgroundColor = '#ffffff';
+        container.style.color = '#0f172a';
+        container.style.fontFamily = 'Arial, sans-serif';
+        container.style.padding = '24px';
+        container.innerHTML = `
+          <style data-pdf-style="true">
+            * { box-sizing: border-box; font-family: Arial, sans-serif; }
             h2, h3 { margin: 0; text-align: center; }
             .sub { text-align: center; font-size: 12px; color: #475569; margin: 4px 0 18px; }
             table { width: 100%; border-collapse: collapse; font-size: 12px; }
             th, td { border: 1px solid #cbd5e1; padding: 8px; vertical-align: top; }
             th { background: #f1f5f9; }
           </style>
-        </head>
-        <body>
           ${bodyHtml}
-          <script>window.onload = function() { window.print(); }</script>
-        </body>
-      </html>
-    `;
-
-    const isMobile = typeof window !== 'undefined' && /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
-    const printWin = !isMobile ? window.open('', '_blank', 'width=960,height=720') : null;
-    if (printWin) {
-      printWin.document.write(fullHtml);
-      printWin.document.close();
-      return;
-    }
-
-    // Fallback otomatis ke unduhan langsung PDF / HTML jika di ponsel atau pop-up diblokir
-    let container: HTMLDivElement | null = null;
-    try {
-      const html2pdf = await new Promise<any>((resolve, reject) => {
-        if (typeof window !== 'undefined' && (window as any).html2pdf) {
-          return resolve((window as any).html2pdf);
-        }
-        const script = document.createElement('script');
-        script.src = 'https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js';
-        script.onload = () => resolve((window as any).html2pdf);
-        script.onerror = () => reject(new Error('Gagal memuat library html2pdf.'));
-        document.head.appendChild(script);
-      });
-
-      container = document.createElement('div');
-      container.style.position = 'fixed';
-      container.style.left = '-9999px';
-      container.style.top = '0';
-      container.style.width = '900px';
-      container.style.backgroundColor = '#ffffff';
-      container.style.color = '#0f172a';
-      container.style.fontFamily = 'Arial, sans-serif';
-      container.style.padding = '24px';
-      container.innerHTML = `
-        <style>
-          h2, h3 { margin: 0; text-align: center; }
-          .sub { text-align: center; font-size: 12px; color: #475569; margin: 4px 0 18px; }
-          table { width: 100%; border-collapse: collapse; font-size: 12px; }
-          th, td { border: 1px solid #cbd5e1; padding: 8px; vertical-align: top; }
-          th { background: #f1f5f9; }
-        </style>
-        ${bodyHtml}
-      `;
-      document.body.appendChild(container);
-      const filename = `Matriks_Program_Kerja_PGRI_${new Date().toISOString().split('T')[0]}.pdf`;
-      const pdfBlob = await html2pdf()
-        .set({
-          margin: [10, 12, 10, 12],
+        `;
+        const filename = `Matriks_Program_Kerja_PGRI_${new Date().toISOString().split('T')[0]}.pdf`;
+        await downloadContainerAsPdf(container, {
           filename,
-          image: { type: 'jpeg', quality: 0.96 },
-          html2canvas: { scale: 2, useCORS: true, logging: false },
-          jsPDF: { unit: 'mm', format: 'a4', orientation: 'landscape' }
-        })
-        .from(container)
-        .outputPdf('blob');
-      await safeDownloadBlob(pdfBlob, filename);
-    } catch {
-      const htmlBlob = new Blob([fullHtml.replace('<script>window.onload = function() { window.print(); }</script>', '')], {
-        type: 'text/html;charset=utf-8'
-      });
-      await safeDownloadBlob(htmlBlob, `Matriks_Program_Kerja_PGRI_${new Date().toISOString().split('T')[0]}.html`);
+          orientation: 'landscape',
+          margin: [10, 12, 10, 12],
+          quality: 0.96,
+          scale: 2
+        });
+      } catch {
+        const htmlBlob = new Blob([fullHtml.replace('<script>window.onload = function() { window.print(); }</script>', '')], {
+          type: 'text/html;charset=utf-8'
+        });
+        await safeDownloadBlob(htmlBlob, `Matriks_Program_Kerja_PGRI_${new Date().toISOString().split('T')[0]}.html`);
+      }
     } finally {
       if (container && document.body.contains(container)) {
         document.body.removeChild(container);
       }
+      setIsPrintingProker(false);
     }
   };
 
@@ -557,14 +546,21 @@ export const ProkerView: React.FC<ProkerViewProps> = ({
           <button
             type="button"
             onClick={handlePrintProker}
-            className={`px-3.5 py-2.5 rounded-xl text-xs font-bold flex items-center gap-1.5 cursor-pointer border ${
+            disabled={isPrintingProker}
+            className={`px-3.5 py-2.5 rounded-xl text-xs font-bold flex items-center gap-1.5 border ${
+              isPrintingProker ? 'opacity-70 cursor-not-allowed' : 'cursor-pointer'
+            } ${
               isDark
                 ? 'bg-stone-800 border-stone-700 text-stone-200 hover:bg-stone-700'
                 : 'bg-white border-stone-300 text-stone-800 hover:bg-stone-50'
             }`}
           >
-            <Printer className="w-4 h-4" />
-            Cetak Matriks LPJ
+            {isPrintingProker ? (
+              <Loader2 className="w-4 h-4 animate-spin" />
+            ) : (
+              <Printer className="w-4 h-4" />
+            )}
+            {isPrintingProker ? 'Menyiapkan PDF...' : 'Cetak Matriks LPJ'}
           </button>
           {canEdit && (
             <button

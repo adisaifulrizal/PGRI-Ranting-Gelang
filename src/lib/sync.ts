@@ -71,11 +71,20 @@ export async function syncToFirebaseWithStatus(collectionName: string, items: an
         error: `Ukuran data ${collectionName} (${Math.round(byteSize / 1024)} KB) melebihi batas dokumen Firestore (1 MB). Data tersimpan secara lokal.`
       };
     }
+    const nearSizeLimit = byteSize > 750 * 1024;
     const cleanData = JSON.parse(jsonStr);
     // Batas timeout 15 detik agar pengiriman lebih stabil di jaringan seluler lambat
     await withTimeout(setDoc(doc(db, 'kombel_data', collectionName), { data: cleanData }), 15000);
     if ((SYNC_VERSION_KEYS as readonly string[]).includes(collectionName)) {
       void bumpCloudVersion(collectionName as SyncVersionKey);
+    }
+    if (nearSizeLimit) {
+      const kbSize = Math.round(byteSize / 1024);
+      emitSyncStatus({
+        type: 'warning',
+        collectionName,
+        message: `Peringatan kapasitas: data ${collectionName} mencapai ${kbSize} KB dari batas 1 MB Cloud. Disarankan melakukan Backup & arsip data lama di Pengaturan.`
+      });
     }
     return { success: true };
   } catch (error: any) {

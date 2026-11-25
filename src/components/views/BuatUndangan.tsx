@@ -43,9 +43,9 @@ import {
   markLocalVersionSynced
 } from '../../lib/sync';
 import { logAuditEvent } from '../../lib/auth';
-import { safeDownloadBlob } from '../../lib/download';
 import { ActivityEvent, AttendanceRecord, NotulenItem, SuratAgendaItem, Teacher } from '../../types';
 import { getOrgConfig, openWhatsAppShare } from '../../lib/orgConfig';
+import { isMobileDevice, downloadContainerAsPdf, exportFullHtmlToPdfOrPrint } from '../../lib/pdfExport';
 
 interface BuatUndanganProps {
   activeRole?: 'guru' | 'admin';
@@ -468,10 +468,10 @@ const buildInvitationPdfHtml = (data: InvitationData, assets: OrgAssets): string
         <div style="width: 36%; text-align: center; line-height: 1.35;">
           <div>${escapeHtml(data.ketuaJabatan)}</div>
           <div>${escapeHtml(data.ketuaSubJabatan)}</div>
-          <div style="height: 66px; display: flex; align-items: center; justify-content: center; margin: 2px 0;">
+          <div style="height: 66px; display: flex; align-items: center; justify-content: center; margin: 2px 0; overflow: visible;">
             ${
               data.showTtdImages && assets.ttdKetua
-                ? `<img src="${assets.ttdKetua}" alt="TTD Ketua" style="max-height: ${Math.round(62 * ttdKetuaScale)}px; max-width: ${Math.round(150 * ttdKetuaScale)}px; object-fit: contain;" />`
+                ? `<img src="${assets.ttdKetua}" alt="TTD Ketua" style="height: ${Math.round(62 * ttdKetuaScale)}px; width: auto; max-width: ${Math.round(160 * ttdKetuaScale)}px; object-fit: contain;" />`
                 : ''
             }
           </div>
@@ -479,7 +479,7 @@ const buildInvitationPdfHtml = (data: InvitationData, assets: OrgAssets): string
           <div>NPA. ${escapeHtml(data.ketuaNpa || '-')}</div>
         </div>
 
-        <div style="width: 28%; display: flex; align-items: center; justify-content: center;">
+        <div style="width: 28%; display: flex; align-items: center; justify-content: center; overflow: visible;">
           ${
             data.showStempel && assets.logoStempel
               ? `<img src="${assets.logoStempel}" alt="Stempel Resmi" style="${stempelImgStyle}" />`
@@ -490,10 +490,10 @@ const buildInvitationPdfHtml = (data: InvitationData, assets: OrgAssets): string
         <div style="width: 36%; text-align: center; line-height: 1.35;">
           <div>${escapeHtml(data.sekretarisJabatan)}</div>
           <div>${escapeHtml(data.sekretarisSubJabatan)}</div>
-          <div style="height: 66px; display: flex; align-items: center; justify-content: center; margin: 2px 0;">
+          <div style="height: 66px; display: flex; align-items: center; justify-content: center; margin: 2px 0; overflow: visible;">
             ${
               data.showTtdImages && assets.ttdSekretaris
-                ? `<img src="${assets.ttdSekretaris}" alt="TTD Sekretaris" style="max-height: ${Math.round(62 * ttdSekretarisScale)}px; max-width: ${Math.round(150 * ttdSekretarisScale)}px; object-fit: contain;" />`
+                ? `<img src="${assets.ttdSekretaris}" alt="TTD Sekretaris" style="height: ${Math.round(62 * ttdSekretarisScale)}px; width: auto; max-width: ${Math.round(160 * ttdSekretarisScale)}px; object-fit: contain;" />`
                 : ''
             }
           </div>
@@ -588,6 +588,7 @@ export const EOfficeSubPanels: React.FC<EOfficeProps> = ({
     ? 'w-full px-3.5 py-2.5 rounded-xl bg-stone-950 border border-stone-800 text-stone-100 text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-red-700/50 focus:border-red-700'
     : 'w-full px-3.5 py-2.5 rounded-xl bg-[#faf8f5] border border-stone-200 text-stone-900 text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-red-700/35 focus:border-red-700';
   const labelClass = `block text-xs font-semibold mb-1 ${isDark ? 'text-stone-300' : 'text-stone-700'}`;
+  const [isExportingEofficePdf, setIsExportingEofficePdf] = useState(false);
 
   // =========================================================================
   // 1. SURAT TUGAS / DELEGASI
@@ -701,7 +702,7 @@ export const EOfficeSubPanels: React.FC<EOfficeProps> = ({
         .footer-wrap { margin-top: 24px; padding-top: 8px; }
         .ttd-grid { display: flex; justify-content: space-between; align-items: flex-end; position: relative; }
         .ttd-col { width: 220px; text-align: center; position: relative; }
-        .ttd-space { height: 68px; position: relative; display: flex; align-items: center; justify-content: center; }
+        .ttd-space { height: 68px; position: relative; display: flex; align-items: center; justify-content: center; overflow: visible; }
         .stempel-center { position: absolute; left: 50%; transform: translateX(-50%); bottom: 6px; width: 96px; opacity: 0.88; mix-blend-mode: multiply; pointer-events: none; }
         @media print {
           html, body { background: #ffffff; }
@@ -755,7 +756,7 @@ export const EOfficeSubPanels: React.FC<EOfficeProps> = ({
               <div>Ketua</div>
               <div>PGRI Ranting Gelang</div>
               <div class="ttd-space">
-                ${ttdKetua ? `<img src="${ttdKetua}" style="max-height:${Math.round(62 * ttdKetuaScale)}px; max-width:${Math.round(150 * ttdKetuaScale)}px; object-fit:contain;" alt="TTD Ketua" />` : ''}
+                ${ttdKetua ? `<img src="${ttdKetua}" style="height:${Math.round(62 * ttdKetuaScale)}px; width:auto; max-width:${Math.round(160 * ttdKetuaScale)}px; object-fit:contain;" alt="TTD Ketua" />` : ''}
               </div>
               <div style="font-weight:bold; text-decoration:underline;">${escapeHtml(namaKetua)}</div>
               <div style="font-size:10pt;">NPA. ${escapeHtml(npaKetua)}</div>
@@ -765,7 +766,7 @@ export const EOfficeSubPanels: React.FC<EOfficeProps> = ({
               <div>Sekretaris</div>
               <div>PGRI Ranting Gelang</div>
               <div class="ttd-space">
-                ${ttdSekretaris ? `<img src="${ttdSekretaris}" style="max-height:${Math.round(62 * ttdSekretarisScale)}px; max-width:${Math.round(150 * ttdSekretarisScale)}px; object-fit:contain;" alt="TTD Sekretaris" />` : ''}
+                ${ttdSekretaris ? `<img src="${ttdSekretaris}" style="height:${Math.round(62 * ttdSekretarisScale)}px; width:auto; max-width:${Math.round(160 * ttdSekretarisScale)}px; object-fit:contain;" alt="TTD Sekretaris" />` : ''}
               </div>
               <div style="font-weight:bold; text-decoration:underline;">${escapeHtml(namaSekretaris)}</div>
               <div style="font-size:10pt;">NPA. ${escapeHtml(npaSekretaris)}</div>
@@ -793,11 +794,24 @@ export const EOfficeSubPanels: React.FC<EOfficeProps> = ({
   };
 
   const handleExportSuratTugas = async () => {
-    const html = buildSuratTugasHtml();
-    const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
-    await safeDownloadBlob(blob, `Surat_Tugas_${stNomor.replace(/[^a-zA-Z0-9]/g, '_')}.html`);
-    logAuditEvent('E-Office', 'Cetak Surat Tugas', `Menerbitkan Surat Tugas No. ${stNomor} (${selectedDelegates.length} delegasi).`);
-    onNotice('success', 'File Surat Tugas berhasil diunduh (buka di browser lalu Ctrl+P untuk simpan PDF).');
+    if (isExportingEofficePdf) return;
+    setIsExportingEofficePdf(true);
+    try {
+      const html = buildSuratTugasHtml();
+      await exportFullHtmlToPdfOrPrint(html, {
+        filename: `Surat_Tugas_${stNomor.replace(/[^a-zA-Z0-9]/g, '_')}.pdf`,
+        orientation: 'portrait'
+      });
+      logAuditEvent('E-Office', 'Cetak Surat Tugas', `Menerbitkan Surat Tugas No. ${stNomor} (${selectedDelegates.length} delegasi).`);
+      onNotice(
+        'success',
+        isMobileDevice()
+          ? 'File PDF Surat Tugas berhasil diunduh.'
+          : 'Jendela cetak Surat Tugas dibuka (pilih Save as PDF untuk menyimpan).'
+      );
+    } finally {
+      setIsExportingEofficePdf(false);
+    }
   };
 
   // =========================================================================
@@ -923,7 +937,7 @@ export const EOfficeSubPanels: React.FC<EOfficeProps> = ({
         .footer-wrap { margin-top: 18px; padding-top: 6px; }
         .ttd-single-wrap { display: flex; justify-content: flex-end; }
         .ttd-col { width: 240px; text-align: center; position: relative; }
-        .ttd-space { height: 64px; position: relative; display: flex; align-items: center; justify-content: center; }
+        .ttd-space { height: 64px; position: relative; display: flex; align-items: center; justify-content: center; overflow: visible; }
         .stempel-ketua { position: absolute; left: -34px; top: 50%; width: 96px; opacity: 0.88; mix-blend-mode: multiply; pointer-events: none; }
         @media print {
           html, body { background: #ffffff; }
@@ -995,8 +1009,8 @@ export const EOfficeSubPanels: React.FC<EOfficeProps> = ({
               <div>Ketua</div>
               <div>PGRI Ranting Gelang</div>
               <div class="ttd-space">
-                ${stempel ? `<img src="${stempel}" class="stempel-ketua" style="width:${Math.round(110 * stempelScale)}px; height:${Math.round(110 * stempelScale)}px; object-fit:contain; transform:translateY(-50%) rotate(${stempelRotation}deg);" alt="Stempel" />` : ''}
-                ${ttdKetua ? `<img src="${ttdKetua}" style="max-height:${Math.round(60 * ttdKetuaScale)}px; max-width:${Math.round(145 * ttdKetuaScale)}px; object-fit:contain; position:relative; z-index:2;" alt="TTD Ketua" />` : ''}
+                ${stempel ? `<img src="${stempel}" class="stempel-ketua" style="width:${Math.round(112 * stempelScale)}px; height:${Math.round(112 * stempelScale)}px; object-fit:contain; transform:translateY(-50%) rotate(${stempelRotation}deg);" alt="Stempel" />` : ''}
+                ${ttdKetua ? `<img src="${ttdKetua}" style="height:${Math.round(62 * ttdKetuaScale)}px; width:auto; max-width:${Math.round(160 * ttdKetuaScale)}px; object-fit:contain; position:relative; z-index:2;" alt="TTD Ketua" />` : ''}
               </div>
               <div style="font-weight:bold; text-decoration:underline;">${escapeHtml(namaKetua)}</div>
               <div style="font-size:10pt;">NPA. ${escapeHtml(npaKetua)}</div>
@@ -1024,15 +1038,28 @@ export const EOfficeSubPanels: React.FC<EOfficeProps> = ({
   };
 
   const handleExportPengawasUjian = async () => {
-    const html = buildPengawasUjianHtml();
-    const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
-    await safeDownloadBlob(blob, `Pengawas_Ujian_Silang_${puNomor.replace(/[^a-zA-Z0-9]/g, '_')}.html`);
-    logAuditEvent(
-      'E-Office',
-      'Cetak Surat Tugas Pengawas Ujian',
-      `Menerbitkan Surat Tugas Pengawas Ujian Silang No. ${puNomor} (${puRows.length} pengawas).`
-    );
-    onNotice('success', 'Dokumen Pengawas Ujian Silang berhasil diunduh (buka di browser lalu Ctrl+P untuk simpan PDF).');
+    if (isExportingEofficePdf) return;
+    setIsExportingEofficePdf(true);
+    try {
+      const html = buildPengawasUjianHtml();
+      await exportFullHtmlToPdfOrPrint(html, {
+        filename: `Pengawas_Ujian_Silang_${puNomor.replace(/[^a-zA-Z0-9]/g, '_')}.pdf`,
+        orientation: 'portrait'
+      });
+      logAuditEvent(
+        'E-Office',
+        'Cetak Surat Tugas Pengawas Ujian',
+        `Menerbitkan Surat Tugas Pengawas Ujian Silang No. ${puNomor} (${puRows.length} pengawas).`
+      );
+      onNotice(
+        'success',
+        isMobileDevice()
+          ? 'File PDF Pengawas Ujian Silang berhasil diunduh.'
+          : 'Jendela cetak Pengawas Ujian Silang dibuka (pilih Save as PDF untuk menyimpan).'
+      );
+    } finally {
+      setIsExportingEofficePdf(false);
+    }
   };
 
   // =========================================================================
@@ -1216,7 +1243,7 @@ export const EOfficeSubPanels: React.FC<EOfficeProps> = ({
         th { background: #f3f4f6; text-align: center; }
         .ttd-grid { display: flex; justify-content: space-between; align-items: flex-end; position: relative; margin-top: 24px; }
         .ttd-col { width: 220px; text-align: center; position: relative; }
-        .ttd-space { height: 68px; position: relative; display: flex; align-items: center; justify-content: center; }
+        .ttd-space { height: 68px; position: relative; display: flex; align-items: center; justify-content: center; overflow: visible; }
         .stempel-center { position: absolute; left: 50%; transform: translateX(-50%); bottom: 6px; width: 96px; opacity: 0.88; mix-blend-mode: multiply; pointer-events: none; }
         @media print {
           html, body { background: #ffffff; }
@@ -1272,7 +1299,7 @@ export const EOfficeSubPanels: React.FC<EOfficeProps> = ({
               <div>Ketua</div>
               <div>PGRI Ranting Gelang</div>
               <div class="ttd-space">
-                ${ttdKetua ? `<img src="${ttdKetua}" style="max-height:${Math.round(62 * ttdKetuaScale)}px; max-width:${Math.round(150 * ttdKetuaScale)}px; object-fit:contain;" alt="TTD Ketua" />` : ''}
+                ${ttdKetua ? `<img src="${ttdKetua}" style="height:${Math.round(62 * ttdKetuaScale)}px; width:auto; max-width:${Math.round(160 * ttdKetuaScale)}px; object-fit:contain;" alt="TTD Ketua" />` : ''}
               </div>
               <div style="font-weight:bold; text-decoration:underline;">${escapeHtml(namaKetua)}</div>
               <div style="font-size:10pt;">NPA. ${escapeHtml(npaKetua)}</div>
@@ -1282,7 +1309,7 @@ export const EOfficeSubPanels: React.FC<EOfficeProps> = ({
               <div>Sekretaris</div>
               <div>PGRI Ranting Gelang</div>
               <div class="ttd-space">
-                ${ttdSekretaris ? `<img src="${ttdSekretaris}" style="max-height:${Math.round(62 * ttdSekretarisScale)}px; max-width:${Math.round(150 * ttdSekretarisScale)}px; object-fit:contain;" alt="TTD Sekretaris" />` : ''}
+                ${ttdSekretaris ? `<img src="${ttdSekretaris}" style="height:${Math.round(62 * ttdSekretarisScale)}px; width:auto; max-width:${Math.round(160 * ttdSekretarisScale)}px; object-fit:contain;" alt="TTD Sekretaris" />` : ''}
               </div>
               <div style="font-weight:bold; text-decoration:underline;">${escapeHtml(namaSekretaris)}</div>
               <div style="font-size:10pt;">NPA. ${escapeHtml(npaSekretaris)}</div>
@@ -1462,7 +1489,7 @@ export const EOfficeSubPanels: React.FC<EOfficeProps> = ({
         .box { border: 1px solid #000; padding: 10px 14px; margin: 8px 0 12px; min-height: 58px; white-space: pre-line; }
         .ttd-grid { display: flex; justify-content: space-between; align-items: flex-end; position: relative; margin-top: 20px; }
         .ttd-col { width: 220px; text-align: center; position: relative; }
-        .ttd-space { height: 68px; position: relative; display: flex; align-items: center; justify-content: center; }
+        .ttd-space { height: 68px; position: relative; display: flex; align-items: center; justify-content: center; overflow: visible; }
         .stempel-center { position: absolute; left: 50%; transform: translateX(-50%); bottom: 6px; width: 96px; opacity: 0.88; mix-blend-mode: multiply; pointer-events: none; }
         @media print {
           html, body { background: #ffffff; }
@@ -1506,7 +1533,7 @@ export const EOfficeSubPanels: React.FC<EOfficeProps> = ({
               <div>Ketua</div>
               <div>PGRI Ranting Gelang</div>
               <div class="ttd-space">
-                ${ttdKetua ? `<img src="${ttdKetua}" style="max-height:${Math.round(62 * ttdKetuaScale)}px; max-width:${Math.round(150 * ttdKetuaScale)}px; object-fit:contain;" alt="TTD Ketua" />` : ''}
+                ${ttdKetua ? `<img src="${ttdKetua}" style="height:${Math.round(62 * ttdKetuaScale)}px; width:auto; max-width:${Math.round(160 * ttdKetuaScale)}px; object-fit:contain;" alt="TTD Ketua" />` : ''}
               </div>
               <div style="font-weight:bold; text-decoration:underline;">${escapeHtml(namaKetua)}</div>
               <div style="font-size:10pt;">NPA. ${escapeHtml(npaKetua)}</div>
@@ -1516,7 +1543,7 @@ export const EOfficeSubPanels: React.FC<EOfficeProps> = ({
               <div>Sekretaris</div>
               <div>PGRI Ranting Gelang</div>
               <div class="ttd-space">
-                ${ttdSekretaris ? `<img src="${ttdSekretaris}" style="max-height:${Math.round(62 * ttdSekretarisScale)}px; max-width:${Math.round(150 * ttdSekretarisScale)}px; object-fit:contain;" alt="TTD Sekretaris" />` : ''}
+                ${ttdSekretaris ? `<img src="${ttdSekretaris}" style="height:${Math.round(62 * ttdSekretarisScale)}px; width:auto; max-width:${Math.round(160 * ttdSekretarisScale)}px; object-fit:contain;" alt="TTD Sekretaris" />` : ''}
               </div>
               <div style="font-weight:bold; text-decoration:underline;">${escapeHtml(namaSekretaris)}</div>
               <div style="font-size:10pt;">NPA. ${escapeHtml(npaSekretaris)}</div>
@@ -1533,11 +1560,24 @@ export const EOfficeSubPanels: React.FC<EOfficeProps> = ({
       </body></html>`;
   };
 
-  const handleExportNotulen = async (item: NotulenItem) => {
-    const html = buildNotulenHtml(item);
-    const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
-    await safeDownloadBlob(blob, `Notulen_${item.eventTitle.replace(/[^a-zA-Z0-9]/g, '_')}.html`);
-    onNotice('success', 'Dokumen Notulen & Berita Acara berhasil diunduh.');
+  const handleExportNotulen = async (item: Omit<NotulenItem, 'id' | 'updatedAt'>) => {
+    if (isExportingEofficePdf) return;
+    setIsExportingEofficePdf(true);
+    try {
+      const html = buildNotulenHtml(item);
+      await exportFullHtmlToPdfOrPrint(html, {
+        filename: `Notulen_${(item.eventTitle || 'Rapat').replace(/[^a-zA-Z0-9]/g, '_')}.pdf`,
+        orientation: 'portrait'
+      });
+      onNotice(
+        'success',
+        isMobileDevice()
+          ? 'File PDF Notulen & Berita Acara berhasil diunduh.'
+          : 'Jendela cetak Notulen & Berita Acara dibuka.'
+      );
+    } finally {
+      setIsExportingEofficePdf(false);
+    }
   };
 
   if (mode === 'surat_tugas') {
@@ -1733,10 +1773,13 @@ export const EOfficeSubPanels: React.FC<EOfficeProps> = ({
               <button
                 type="button"
                 onClick={handleExportSuratTugas}
-                className="px-4 py-2 rounded-xl text-xs font-bold bg-red-800 hover:bg-red-700 text-white flex items-center gap-1.5 cursor-pointer transition-colors"
+                disabled={isExportingEofficePdf}
+                className={`px-4 py-2 rounded-xl text-xs font-bold bg-red-800 hover:bg-red-700 text-white flex items-center gap-1.5 transition-colors ${
+                  isExportingEofficePdf ? 'opacity-70 cursor-not-allowed' : 'cursor-pointer'
+                }`}
               >
-                <Printer className="w-4 h-4" />
-                <span>Unduh / Cetak Surat</span>
+                {isExportingEofficePdf ? <Loader2 className="w-4 h-4 animate-spin" /> : <Printer className="w-4 h-4" />}
+                <span>{isExportingEofficePdf ? 'Menyiapkan PDF...' : 'Unduh / Cetak PDF'}</span>
               </button>
             </div>
           </div>
@@ -2052,10 +2095,13 @@ export const EOfficeSubPanels: React.FC<EOfficeProps> = ({
               <button
                 type="button"
                 onClick={handleExportPengawasUjian}
-                className="px-4 py-2 rounded-xl text-xs font-bold bg-red-800 hover:bg-red-700 text-white flex items-center gap-1.5 cursor-pointer transition-colors"
+                disabled={isExportingEofficePdf}
+                className={`px-4 py-2 rounded-xl text-xs font-bold bg-red-800 hover:bg-red-700 text-white flex items-center gap-1.5 transition-colors ${
+                  isExportingEofficePdf ? 'opacity-70 cursor-not-allowed' : 'cursor-pointer'
+                }`}
               >
-                <Printer className="w-4 h-4" />
-                <span>Unduh / Cetak Surat</span>
+                {isExportingEofficePdf ? <Loader2 className="w-4 h-4 animate-spin" /> : <Printer className="w-4 h-4" />}
+                <span>{isExportingEofficePdf ? 'Menyiapkan PDF...' : 'Unduh / Cetak PDF'}</span>
               </button>
             </div>
           </div>
@@ -2257,15 +2303,31 @@ export const EOfficeSubPanels: React.FC<EOfficeProps> = ({
               </button>
               <button
                 type="button"
+                disabled={isExportingEofficePdf}
                 onClick={async () => {
-                  const blob = new Blob([buildAgendaRekapHtml()], { type: 'text/html;charset=utf-8' });
-                  await safeDownloadBlob(blob, `Buku_Agenda_Surat_${agendaFilter}.html`);
-                  onNotice('success', 'Dokumen Rekap Buku Agenda Surat berhasil diunduh.');
+                  if (isExportingEofficePdf) return;
+                  setIsExportingEofficePdf(true);
+                  try {
+                    await exportFullHtmlToPdfOrPrint(buildAgendaRekapHtml(), {
+                      filename: `Buku_Agenda_Surat_${agendaFilter}.pdf`,
+                      orientation: 'portrait'
+                    });
+                    onNotice(
+                      'success',
+                      isMobileDevice()
+                        ? 'File PDF Rekap Buku Agenda Surat berhasil diunduh.'
+                        : 'Jendela cetak Rekap Buku Agenda Surat dibuka.'
+                    );
+                  } finally {
+                    setIsExportingEofficePdf(false);
+                  }
                 }}
-                className="px-4 py-2 rounded-xl bg-red-800 hover:bg-red-700 text-white text-xs font-bold flex items-center gap-1.5 cursor-pointer transition-colors"
+                className={`px-4 py-2 rounded-xl bg-red-800 hover:bg-red-700 text-white text-xs font-bold flex items-center gap-1.5 transition-colors ${
+                  isExportingEofficePdf ? 'opacity-70 cursor-not-allowed' : 'cursor-pointer'
+                }`}
               >
-                <Printer className="w-4 h-4" />
-                <span>Unduh Rekap Agenda</span>
+                {isExportingEofficePdf ? <Loader2 className="w-4 h-4 animate-spin" /> : <Printer className="w-4 h-4" />}
+                <span>{isExportingEofficePdf ? 'Menyiapkan PDF...' : 'Unduh Rekap PDF'}</span>
               </button>
             </div>
           </div>
@@ -2485,16 +2547,14 @@ export const EOfficeSubPanels: React.FC<EOfficeProps> = ({
             </button>
             <button
               type="button"
-              onClick={async () => {
-                const target = activePreviewNotulen || notulenForm;
-                const blob = new Blob([buildNotulenHtml(target)], { type: 'text/html;charset=utf-8' });
-                await safeDownloadBlob(blob, `Notulen_${(target.eventTitle || 'Rapat').replace(/[^a-zA-Z0-9]/g, '_')}.html`);
-                onNotice('success', 'Dokumen Notulen & Berita Acara berhasil diunduh.');
-              }}
-              className="px-4 py-2 rounded-xl bg-red-800 hover:bg-red-700 text-white text-xs font-bold flex items-center gap-1.5 cursor-pointer transition-colors"
+              disabled={isExportingEofficePdf}
+              onClick={() => handleExportNotulen(activePreviewNotulen || notulenForm)}
+              className={`px-4 py-2 rounded-xl bg-red-800 hover:bg-red-700 text-white text-xs font-bold flex items-center gap-1.5 transition-colors ${
+                isExportingEofficePdf ? 'opacity-70 cursor-not-allowed' : 'cursor-pointer'
+              }`}
             >
-              <Download className="w-4 h-4" />
-              <span>Unduh Notulen</span>
+              {isExportingEofficePdf ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
+              <span>{isExportingEofficePdf ? 'Menyiapkan PDF...' : 'Unduh Notulen PDF'}</span>
             </button>
           </div>
         </div>
@@ -2722,38 +2782,9 @@ export const BuatUndangan: React.FC<BuatUndanganProps> = ({
     setTimeout(() => setStatusNotice(null), 3500);
   };
 
-  // Helper cek apakah pengguna mengakses dari perangkat mobile (Ponsel / Tablet)
-  const isMobileDevice = () => {
-    if (typeof window === 'undefined') return false;
-    return /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
-  };
-
-  // Helper memuat library html2pdf khusus saat di ponsel atau fallback direct download
-  const getHtml2Pdf = (): Promise<any> => {
-    return new Promise((resolve, reject) => {
-      if (typeof window !== 'undefined' && (window as any).html2pdf) {
-        return resolve((window as any).html2pdf);
-      }
-      const existingScript = document.querySelector('script[data-html2pdf="true"]') as HTMLScriptElement | null;
-      if (existingScript) {
-        existingScript.addEventListener('load', () => resolve((window as any).html2pdf));
-        existingScript.addEventListener('error', () => reject(new Error('Gagal memuat library PDF. Periksa koneksi internet Anda.')));
-        return;
-      }
-      const script = document.createElement('script');
-      script.src = 'https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js';
-      script.setAttribute('data-html2pdf', 'true');
-      script.onload = () => resolve((window as any).html2pdf);
-      script.onerror = () => {
-        script.remove();
-        reject(new Error('Gagal memuat library PDF. Periksa koneksi internet Anda.'));
-      };
-      document.head.appendChild(script);
-    });
-  };
-
   // Handler Unduh PDF (PC: Jendela Cetak bawaan browser seperti menu lain | Ponsel / Popup diblokir: Auto Download PDF)
   const handleDownloadPdf = async (targetData: InvitationData = draft) => {
+    if (isGeneratingPdf) return;
     setIsGeneratingPdf(true);
     let container: HTMLDivElement | null = null;
     try {
@@ -2825,8 +2856,7 @@ export const BuatUndangan: React.FC<BuatUndanganProps> = ({
         }
       }
 
-      // JIKA DI PONSEL (atau jika popup jendela cetak diblokir): Direct download PDF dengan html2pdf
-      const html2pdf = await getHtml2Pdf();
+      // JIKA DI PONSEL (atau jika popup jendela cetak diblokir): Direct download PDF dengan html2pdf lokal
       container = document.createElement('div');
       container.id = 'undangan-pdf-export-root';
       container.style.width = '794px';
@@ -2850,27 +2880,13 @@ export const BuatUndangan: React.FC<BuatUndanganProps> = ({
         ${invitationHtml}
       `;
 
-      const opt = {
-        margin: [0, 0, 0, 0],
+      await downloadContainerAsPdf(container, {
         filename: pdfFilename,
-        image: { type: 'jpeg', quality: 0.98 },
-        html2canvas: {
-          scale: 2,
-          useCORS: true,
-          logging: false,
-          backgroundColor: '#ffffff',
-          onclone: (clonedDoc: Document) => {
-            // Hapus stylesheet Tailwind v4 (mengandung oklch) agar html2canvas tidak gagal parsing warna
-            clonedDoc
-              .querySelectorAll('style:not([data-pdf-style="true"]), link[rel="stylesheet"]')
-              .forEach((el) => el.remove());
-          }
-        },
-        jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }
-      };
-
-      const pdfBlob = await html2pdf().set(opt).from(container).outputPdf('blob');
-      await safeDownloadBlob(pdfBlob, opt.filename);
+        orientation: 'portrait',
+        margin: [0, 0, 0, 0],
+        quality: 0.98,
+        scale: 2
+      });
       showToast('success', 'File PDF undangan utuh berhasil diunduh.');
     } catch (err: any) {
       console.error('Gagal membuat PDF undangan:', err);

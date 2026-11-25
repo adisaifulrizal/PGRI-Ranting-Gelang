@@ -162,7 +162,7 @@ export const INITIAL_EVENTS: ActivityEvent[] = [
     presenters: [
       'Hanifatul Susmiyah, S.Pd',
       'Christian Dri Firman Widodo, S.Pd',
-      'Risky Firmansyah, S.Pd',
+      'Umar Ali Kusuma',
       'Adi Saiful Rizal, S.Pd'
     ],
     attendanceOpen: true,
@@ -179,12 +179,12 @@ export const INITIAL_EVENTS: ActivityEvent[] = [
     categoryColor: 'green',
     description: 'Rencana Anggaran Organisasi • Pembagian Seksi Kerja • Panduan Portal Digital PGRI',
     presenters: [
-      'Lukman Hadi, S.Pd',
+      'Ghufron Atok Urrohman, S.Pd',
       'Christian Dri Firman Widodo, S.Pd',
-      'Risky Firmansyah, S.Pd',
-      'Siska Wahyu Purwati, S.Pd',
-      'Ninik Dwi Sunanti, S.Pd',
-      'Adi Saiful Rizal, S.Pd'
+      'Umar Ali Kusuma',
+      'Hartatik, S.Pd',
+      'Adi Saiful Rizal, S.Pd',
+      'Atik Andriyati, S.Pd'
     ],
     attendanceOpen: true,
     uploadDeadline: '31/08/2026'

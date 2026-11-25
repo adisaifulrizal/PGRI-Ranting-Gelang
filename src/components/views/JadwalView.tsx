@@ -1,4 +1,3 @@
-import { safeDownloadBlob } from '../../lib/download';
 import { syncToFirebase, mutateCloudCollection } from '../../lib/sync';
 import React, { useState, useEffect, useRef } from 'react';
 import {
@@ -25,10 +24,12 @@ import {
   Check,
   SwitchCamera,
   Share2,
-  School
+  School,
+  Loader2
 } from 'lucide-react';
 import { ActivityEvent, AttendanceRecord, Teacher } from '../../types';
-import { openWhatsAppShare } from '../../lib/orgConfig';
+import { openWhatsAppShare, getOrgConfig } from '../../lib/orgConfig';
+import { isMobileDevice, downloadContainerAsPdf, resolveKetuaSigner, escapePdfHtml } from '../../lib/pdfExport';
 import { BrowserMultiFormatReader } from '@zxing/browser';
 import { DecodeHintType, BarcodeFormat } from '@zxing/library';
 
@@ -103,6 +104,7 @@ export const JadwalView: React.FC<JadwalViewProps> = ({
 
   // Real-time current time for countdown & validation
   const [currentTime, setCurrentTime] = useState<Date>(new Date());
+  const [isGeneratingAttendancePdf, setIsGeneratingAttendancePdf] = useState(false);
 
   useEffect(() => {
     const timer = setInterval(() => {
@@ -577,14 +579,37 @@ export const JadwalView: React.FC<JadwalViewProps> = ({
   const [tempSelectedMemberIds, setTempSelectedMemberIds] = useState<string[]>([]);
   const [memberSearchQuery, setMemberSearchQuery] = useState<string>('');
 
-  // Modal D3 Rekap Partisipasi Kehadiran per Unit Sekolah
+  // State Modal D3 Rekap Partisipasi Kehadiran per Unit Sekolah
   const [showSchoolParticipationModal, setShowSchoolParticipationModal] = useState<boolean>(false);
   const [selectedSchoolStatsEventId, setSelectedSchoolStatsEventId] = useState<string>('');
+  const [settingsRevision, setSettingsRevision] = useState<number>(0);
 
-  // Helper untuk mendapatkan seluruh daftar calon anggota (Kombinasi Profil Kombel Teratas A-Z + Daftar Anggota A-Z)
+  // Dengarkan pembaruan data kepengurusan dari menu Pengaturan / Sync Cloud
+  useEffect(() => {
+    const handleSettingsUpdated = () => {
+      setSettingsRevision(prev => prev + 1);
+    };
+    window.addEventListener('kombel-settings-updated', handleSettingsUpdated);
+    window.addEventListener('storage', handleSettingsUpdated);
+    return () => {
+      window.removeEventListener('kombel-settings-updated', handleSettingsUpdated);
+      window.removeEventListener('storage', handleSettingsUpdated);
+    };
+  }, []);
+
+  // Helper untuk mengecualikan entri kolektif / non-perorangan (misal: "Semua Kepala Sekolah" atau "-")
+  const isCollectiveOrInvalidName = (name?: string): boolean => {
+    const clean = String(name || '').trim();
+    const lower = clean.toLowerCase();
+    return !clean || lower === '-' || lower.startsWith('semua ');
+  };
+
+  // Helper untuk mendapatkan seluruh daftar calon anggota (Pembina, Penanggung Jawab, Pengurus dari Pengaturan + Daftar Anggota A-Z)
   const getAllCandidateMembers = (): Teacher[] => {
-    // 1. Data Profil Kombel (Pembina, Penanggung Jawab, Pengurus)
-    let pembinaData = {
+    void settingsRevision;
+
+    // 1. Data Kepengurusan (Pembina, Penanggung Jawab, Struktur Pengurus dari Pengaturan)
+    let pembinaData: { name: string; nip: string; school: string; role: string; phone: string } | null = {
       name: 'Hanifatul Susmiyah, S.Pd',
       nip: '197306022002122005',
       school: 'Pengawas Bina Kecamatan Sumberbaru',
@@ -595,14 +620,16 @@ export const JadwalView: React.FC<JadwalViewProps> = ({
       const saved = localStorage.getItem('kombel-pembina');
       if (saved) {
         const parsed = JSON.parse(saved);
-        if (parsed && parsed.name) {
-          pembinaData = {
-            name: parsed.name,
-            nip: parsed.nip || pembinaData.nip,
-            school: parsed.instansi || parsed.school || pembinaData.school,
-            role: parsed.role || pembinaData.role,
-            phone: parsed.wa || parsed.phone || pembinaData.phone
-          };
+        if (parsed && typeof parsed === 'object') {
+          pembinaData = parsed.name
+            ? {
+                name: parsed.name,
+                nip: parsed.nip || '-',
+                school: parsed.instansi || parsed.school || '-',
+                role: parsed.role || 'Pengawas Bina',
+                phone: parsed.wa || parsed.phone || '-'
+              }
+            : null;
         }
       }
     } catch (e) {}
@@ -618,8 +645,8 @@ export const JadwalView: React.FC<JadwalViewProps> = ({
       {
         name: 'Christian Dri Firman Widodo, S.Pd',
         nip: '198012262014121002',
-        school: 'Penanggungjawab PGRI Cabang Sumberbaru',
-        role: 'Penanggungjawab',
+        school: 'Ketua PGRI Cabang Kecamatan Sumberbaru',
+        role: 'Ketua PGRI Cabang',
         phone: '6281217910263'
       }
     ];
@@ -640,48 +667,16 @@ export const JadwalView: React.FC<JadwalViewProps> = ({
     } catch (e) {}
 
     let pengurusData = [
-      {
-        name: 'Risky Firmansyah, S.Pd',
-        nip: '199202152022211002',
-        school: 'SDN Kaliglagah 01',
-        role: 'Ketua PGRI Ranting Gelang',
-        phone: '6282245942601'
-      },
-      {
-        name: 'Adi Saiful Rizal, S.Pd',
-        nip: '199401162025211089',
-        school: 'SDN Gelang 03',
-        role: 'Sekretaris',
-        phone: '6282292232649'
-      },
-      {
-        name: 'Devy Eka Safitri, S.Pd',
-        nip: '199703232025212059',
-        school: 'SDN Sumberagung 03',
-        role: 'Bendahara',
-        phone: '6282247613463'
-      },
-      {
-        name: 'Ninik Dwi Sunanti, S.Pd',
-        nip: '199005122019032023',
-        school: 'SDN Rowotengah 04',
-        role: 'Koord. Bid. Perencanaan & Pelaksanaan Program',
-        phone: '6288219851338'
-      },
-      {
-        name: 'Dewi Utami, S.Pd',
-        nip: '198501072022212002',
-        school: 'SDN Jatiroto 03',
-        role: 'Koord. Bid. Pengembangan Organisasi, Sarana & Prasarana',
-        phone: '6285856483220'
-      },
-      {
-        name: 'Siska Wahyu Purwati, S.Pd',
-        nip: '199110162025212094',
-        school: 'SDN Pringgowirawan 01',
-        role: 'Koord. Bid. Humas & Kerjasama',
-        phone: '6281355629322'
-      }
+      { role: 'Penasehat', name: 'Semua Kepala Sekolah', nip: '-', school: '-', phone: '-' },
+      { role: 'Ketua PGRI Ranting Gelang', name: 'Umar Ali Kusuma', nip: '198912092025211092', school: 'SDN GELANG 03', phone: '6288235537431' },
+      { role: 'Wakil Ketua', name: 'Hartatik, S.Pd', nip: '198301072022212001', school: 'SDN KALIGLAGAH 02', phone: '6282245380232' },
+      { role: 'Sekretaris', name: 'Adi Saiful Rizal, S.Pd', nip: '199401162025211089', school: 'SDN GELANG 03', phone: '6282292232649' },
+      { role: 'Bendahara', name: 'Atik Andriyati, S.Pd', nip: '197701142014122002', school: 'SDN GELANG 06', phone: '6281515786365' },
+      { role: 'Seksi Pembinaan Olahraga', name: 'Saiful Arif, S.Pd', nip: '198604122022211003', school: 'SDN GELANG 07', phone: '62881026888955' },
+      { role: 'Seksi Pemberdayaan Perempuan', name: 'Siti Oktavia, S.Pd', nip: '197910072022212001', school: 'SDN GELANG 04', phone: '6285697890959' },
+      { role: 'Seksi Pengembangan Profesi & Karir', name: 'Rohman, S.Pd', nip: '198904202022211002', school: 'SDN KALIGLAGAH 02', phone: '6282332910923' },
+      { role: 'Seksi Humas', name: 'Jasuri Budianto, S.Pd', nip: '196918082022211001', school: 'SDN GELANG 01', phone: '6285314904015' },
+      { role: 'Seksi Keagamaan', name: 'Muhammad Jupri, S.Pd.I', nip: '-', school: 'SD NU 21 MIFTAHUL ULUM', phone: '628817159553' }
     ];
     try {
       const saved = localStorage.getItem('kombel-pengurus');
@@ -699,20 +694,28 @@ export const JadwalView: React.FC<JadwalViewProps> = ({
       }
     } catch (e) {}
 
-    const rawProfilKombel = [pembinaData, ...pjData, ...pengurusData];
+    const rawProfilKombel = [...(pembinaData ? [pembinaData] : []), ...pjData, ...pengurusData];
     const seenNames = new Set<string>();
+    const seenIds = new Set<string>();
     const profilMembers: Teacher[] = [];
 
     rawProfilKombel.forEach((p, idx) => {
+      if (isCollectiveOrInvalidName(p.name)) return;
       const cleanName = (p.name || '').trim();
       const lower = cleanName.toLowerCase();
-      if (!cleanName || seenNames.has(lower)) return;
+      if (seenNames.has(lower)) return;
       seenNames.add(lower);
 
-      const matchInTeachers = (teachers || []).find(t => 
+      const matchInTeachers = (teachers || []).find(t =>
         (t.name && t.name.trim().toLowerCase() === lower) ||
         (p.nip && p.nip !== '-' && t.nip && String(t.nip).trim() === String(p.nip).trim())
       );
+
+      if (matchInTeachers) {
+        seenIds.add(String(matchInTeachers.id).trim());
+        const matchedLower = (matchInTeachers.name || '').trim().toLowerCase();
+        if (matchedLower) seenNames.add(matchedLower);
+      }
 
       profilMembers.push({
         id: matchInTeachers ? String(matchInTeachers.id) : `profil-kombel-${idx}-${p.nip && p.nip !== '-' ? p.nip : cleanName.replace(/\s+/g, '-').toLowerCase()}`,
@@ -726,37 +729,13 @@ export const JadwalView: React.FC<JadwalViewProps> = ({
       });
     });
 
-    // Urutkan data Profil Kombel sesuai urutan hierarki resmi (1 s/d 9)
-    const profilOrder = [
-      'hanifatul susmiyah',
-      'ghufron atok urrohman',
-      'christian dri firman widodo',
-      'risky firmansyah',
-      'adi saiful rizal',
-      'devy eka safitri',
-      'ninik dwi sunanti',
-      'dewi utami',
-      'siska wahyu purwati'
-    ];
-
-    profilMembers.sort((a, b) => {
-      const aLower = (a.name || '').toLowerCase();
-      const bLower = (b.name || '').toLowerCase();
-      const aIndex = profilOrder.findIndex(name => aLower.includes(name));
-      const bIndex = profilOrder.findIndex(name => bLower.includes(name));
-
-      if (aIndex !== -1 && bIndex !== -1) return aIndex - bIndex;
-      if (aIndex !== -1) return -1;
-      if (bIndex !== -1) return 1;
-      return (a.name || '').localeCompare(b.name || '', 'id', { sensitivity: 'base' });
-    });
-
-    // 2. Data Anggota dari Menu Daftar Anggota yang belum ada di Profil Kombel
+    // 2. Data Anggota dari Menu Daftar Anggota yang belum ada di Data Kepengurusan
     const regularMembers: Teacher[] = [];
 
     (teachers || []).forEach(t => {
       const lower = (t.name || '').trim().toLowerCase();
-      if (!seenNames.has(lower)) {
+      const tid = String(t.id || '').trim();
+      if (!seenNames.has(lower) && !seenIds.has(tid)) {
         regularMembers.push(t);
       }
     });
@@ -764,11 +743,11 @@ export const JadwalView: React.FC<JadwalViewProps> = ({
     // Urutkan data Daftar Anggota secara alfabetis (A-Z)
     regularMembers.sort((a, b) => (a.name || '').localeCompare(b.name || '', 'id', { sensitivity: 'base' }));
 
-    // Gabungkan: Profil Kombel teratas (urutan resmi 1-9), disusul Daftar Anggota (A-Z)
+    // Gabungkan: Urutan resmi dari Pengaturan Pengurus teratas, disusul Daftar Anggota (A-Z)
     return [...profilMembers, ...regularMembers];
   };
   
-  // Helper untuk mendapatkan data anggota terpilih pada suatu pertemuan (Profil Kombel + Daftar Anggota)
+  // Helper untuk mendapatkan data anggota terpilih pada suatu pertemuan (Pengurus Terbaru + Daftar Anggota)
   const getSelectedTeachersForEvent = (eventId: string, evtObj?: ActivityEvent): Teacher[] => {
     const allCandidates = getAllCandidateMembers();
     if (!eventId) return allCandidates;
@@ -796,6 +775,7 @@ export const JadwalView: React.FC<JadwalViewProps> = ({
   const handleOpenSelectMembers = (evt: ActivityEvent) => {
     setSelectedEventForMembers(evt);
     const allCandidates = getAllCandidateMembers();
+    const validCandidateIds = new Set(allCandidates.map(t => String(t.id)));
     let initialIds: string[] | null = null;
 
     if (evt && (evt as any).selectedMemberIds && Array.isArray((evt as any).selectedMemberIds)) {
@@ -805,7 +785,7 @@ export const JadwalView: React.FC<JadwalViewProps> = ({
     }
 
     if (initialIds !== null) {
-      setTempSelectedMemberIds([...initialIds]);
+      setTempSelectedMemberIds(initialIds.map(id => String(id)).filter(id => validCandidateIds.has(id)));
     } else {
       setTempSelectedMemberIds(allCandidates.map(t => String(t.id)));
     }
@@ -919,13 +899,21 @@ export const JadwalView: React.FC<JadwalViewProps> = ({
     }
   }, [events]);
 
-  // Muat data mutakhir kegiatan & tugas dari Cloud saat menu Jadwal dibuka (dengan cooldown 60 detik)
+  // Muat data mutakhir kegiatan, tugas & pengaturan kepengurusan dari Cloud saat menu Jadwal dibuka (dengan cooldown 60 detik)
   useEffect(() => {
     let isMounted = true;
     const fetchLatestJadwalData = async () => {
+      let missingLocalKepengurusan = false;
+      try {
+        missingLocalKepengurusan =
+          !localStorage.getItem('kombel-pengurus') ||
+          !localStorage.getItem('kombel-pembina') ||
+          !localStorage.getItem('kombel-penanggungjawab');
+      } catch {}
+
       try {
         const lastJadwalSync = sessionStorage.getItem('kombel_jadwal_sync_ts');
-        if (lastJadwalSync && (Date.now() - Number(lastJadwalSync)) < 60000) {
+        if (!missingLocalKepengurusan && lastJadwalSync && (Date.now() - Number(lastJadwalSync)) < 60000) {
           return;
         }
       } catch (e) {}
@@ -937,19 +925,48 @@ export const JadwalView: React.FC<JadwalViewProps> = ({
 
         const fetchEvents = shouldFetchByVersion('events', cloudVersions);
         const fetchAtt = shouldFetchByVersion('attendanceList', cloudVersions);
+        const fetchSettings = missingLocalKepengurusan || shouldFetchByVersion('settings', cloudVersions);
 
-        if (!fetchEvents && !fetchAtt) {
+        if (!fetchEvents && !fetchAtt && !fetchSettings) {
           try {
             sessionStorage.setItem('kombel_jadwal_sync_ts', String(Date.now()));
           } catch (e) {}
           return;
         }
 
-        const [cloudEventsRes, cloudAttRes] = await Promise.allSettled([
+        const fetchSettingsDoc = async () => {
+          const [{ doc, getDoc, getDocFromServer }, { db }] = await Promise.all([
+            import('firebase/firestore'),
+            import('../../lib/firebase')
+          ]);
+          const docRef = doc(db, 'settings', 'global');
+          try {
+            return await getDocFromServer(docRef);
+          } catch {
+            return await getDoc(docRef);
+          }
+        };
+
+        const [cloudEventsRes, cloudAttRes, cloudSettingsRes] = await Promise.allSettled([
           fetchEvents ? syncFromFirebase('events') : Promise.resolve(null),
-          fetchAtt ? syncFromFirebase('attendanceList') : Promise.resolve(null)
+          fetchAtt ? syncFromFirebase('attendanceList') : Promise.resolve(null),
+          fetchSettings ? fetchSettingsDoc() : Promise.resolve(null)
         ]);
         if (!isMounted) return;
+
+        if (fetchSettings && cloudSettingsRes.status === 'fulfilled' && cloudSettingsRes.value && cloudSettingsRes.value.exists()) {
+          const settingsData = cloudSettingsRes.value.data();
+          Object.entries(settingsData).forEach(([k, v]) => {
+            if (k === 'theme') return;
+            if (v !== undefined && v !== null) {
+              try {
+                localStorage.setItem(k, String(v));
+              } catch (e) {}
+            }
+          });
+          window.dispatchEvent(new Event('kombel-settings-updated'));
+          markLocalVersionSynced('settings', cloudVersions);
+        }
 
         if (fetchEvents && cloudEventsRes.status === 'fulfilled' && Array.isArray(cloudEventsRes.value)) {
           const cloudEvents = cloudEventsRes.value;
@@ -1838,36 +1855,30 @@ export const JadwalView: React.FC<JadwalViewProps> = ({
     setTimeout(() => setToastMessage(null), 3500);
   };
 
-  // Helper cek apakah pengguna mengakses dari perangkat mobile (Ponsel / Tablet)
-  const isMobileDevice = () => {
-    if (typeof window === 'undefined') return false;
-    return /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
-  };
-
-  // Helper memuat library html2pdf khusus saat di ponsel
-  const getHtml2Pdf = async (): Promise<any> => {
-    if (typeof window !== 'undefined' && (window as any).html2pdf) {
-      return (window as any).html2pdf;
-    }
-    return new Promise((resolve, reject) => {
-      const script = document.createElement('script');
-      script.src = 'https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js';
-      script.onload = () => resolve((window as any).html2pdf);
-      script.onerror = () => reject(new Error('Gagal memuat library html2pdf.'));
-      document.head.appendChild(script);
-    });
-  };
-
   const handlePrintRekapKehadiran = async () => {
+    if (isGeneratingAttendancePdf) return;
     const targetEvt = events.find(e => String(e.id) === String(selectedPrintAttendanceEventId));
     if (!targetEvt) return;
+
+    setIsGeneratingAttendancePdf(true);
+    try {
     const printWindow = !isMobileDevice() ? window.open('', '_blank') : null;
 
     const logoPgri = localStorage.getItem('logo-pgri') || localStorage.getItem('logo-kombel') || '';
     const ttdKetua = localStorage.getItem('ttd-ketua') || '';
+    const ttdKetuaScale = Math.max(0.3, Math.min(2.5, (Number(localStorage.getItem('ttd-ketua-size')) || 100) / 100));
     const stempel = localStorage.getItem('logo-stempel') || '';
-    const stempelSize = localStorage.getItem('logo-stempel-size') || '100';
-    const stempelRotation = localStorage.getItem('logo-stempel-rotation') || '0';
+    const stempelScale = Math.max(0.3, Math.min(2.5, (Number(localStorage.getItem('logo-stempel-size')) || 100) / 100));
+    const stempelRotation = Number(localStorage.getItem('logo-stempel-rotation')) || 0;
+    const orgCfg = getOrgConfig();
+    const ketuaSigner = resolveKetuaSigner(teachers);
+    const kopOrg = escapePdfHtml(orgCfg.kopOrganisasi || 'PERSATUAN GURU REPUBLIK INDONESIA');
+    const kopRanting = escapePdfHtml(orgCfg.kopRanting || 'RANTING GELANG');
+    const kopWilayah = escapePdfHtml(orgCfg.kopWilayah || 'KECAMATAN SUMBERBARU - KABUPATEN JEMBER');
+    const kopSekretariat = escapePdfHtml(orgCfg.kopSekretariat || 'Sekretariat : Jl. PTPN XII Gunung Gambir Desa Gelang, Kecamatan Sumberbaru - Kabupaten Jember 68156');
+    const ketuaJabatan = escapePdfHtml(ketuaSigner.jabatan);
+    const ketuaNameSafe = escapePdfHtml(ketuaSigner.name);
+    const ketuaNpaSafe = escapePdfHtml(ketuaSigner.npaLabel);
 
     // Tanggal saat ini dinamis (selalu menyesuaikan tanggal hari ini)
     const todayFormatted = new Date().toLocaleDateString('id-ID', {
@@ -1926,28 +1937,22 @@ export const JadwalView: React.FC<JadwalViewProps> = ({
       }
     });
 
-    // Sort all lists: Profil Kombel teratas (1-9), disusul data anggota umum (A-Z)
-    const profilOrder = [
-      'hanifatul susmiyah',
-      'ghufron atok urrohman',
-      'christian dri firman widodo',
-      'risky firmansyah',
-      'adi saiful rizal',
-      'devy eka safitri',
-      'ninik dwi sunanti',
-      'dewi utami',
-      'siska wahyu purwati'
-    ];
+    // Pertahankan urutan sesuai susunan Pengaturan Kepengurusan terbaru diikuti anggota alfabetis
+    const orderIndexMap = new Map<string, number>();
+    activeTeachers.forEach((t, index) => {
+      const key = (t.name || '').trim().toLowerCase();
+      if (key && !orderIndexMap.has(key)) {
+        orderIndexMap.set(key, index);
+      }
+    });
 
     const sortHierarchical = (a: any, b: any) => {
-      const aLower = (a.name || '').toLowerCase();
-      const bLower = (b.name || '').toLowerCase();
-      const aIdx = profilOrder.findIndex(p => aLower.includes(p));
-      const bIdx = profilOrder.findIndex(p => bLower.includes(p));
+      const aLower = (a.name || '').trim().toLowerCase();
+      const bLower = (b.name || '').trim().toLowerCase();
+      const aIdx = orderIndexMap.has(aLower) ? orderIndexMap.get(aLower)! : Number.MAX_SAFE_INTEGER;
+      const bIdx = orderIndexMap.has(bLower) ? orderIndexMap.get(bLower)! : Number.MAX_SAFE_INTEGER;
 
-      if (aIdx !== -1 && bIdx !== -1) return aIdx - bIdx;
-      if (aIdx !== -1) return -1;
-      if (bIdx !== -1) return 1;
+      if (aIdx !== bIdx) return aIdx - bIdx;
       return (a.name || '').localeCompare(b.name || '', 'id', { sensitivity: 'base' });
     };
 
@@ -1972,15 +1977,11 @@ export const JadwalView: React.FC<JadwalViewProps> = ({
       `).join('');
     };
 
-    // JIKA DI PONSEL ATAU POP-UP DIBLOKIR: Gunakan html2pdf untuk direct download PDF presisi
+    // JIKA DI PONSEL ATAU POP-UP DIBLOKIR: Gunakan html2pdf lokal untuk direct download PDF presisi
     if (!printWindow) {
       let container: HTMLDivElement | null = null;
       try {
-        const html2pdf = await getHtml2Pdf();
         container = document.createElement('div');
-        container.style.position = 'fixed';
-        container.style.left = '-9999px';
-        container.style.top = '0';
         container.style.width = '1050px';
         container.style.backgroundColor = '#ffffff';
         container.style.color = '#000000';
@@ -1989,7 +1990,7 @@ export const JadwalView: React.FC<JadwalViewProps> = ({
         container.style.margin = '0';
 
         container.innerHTML = `
-          <style>
+          <style data-pdf-style="true">
             * { box-sizing: border-box; font-family: 'Times New Roman', Times, serif; }
             .kop-container { display: flex; align-items: center; gap: 14px; padding-bottom: 6px; position: relative; z-index: 2; }
             .kop-logo-wrapper { width: 94px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; }
@@ -2010,8 +2011,8 @@ export const JadwalView: React.FC<JadwalViewProps> = ({
             th { background-color: #f2f2f2; font-weight: bold; text-align: center; border: 1px solid #000; padding: 5px; font-size: 9pt; }
             .signature-container { margin-top: 20px; display: flex; justify-content: flex-end; page-break-inside: avoid; position: relative; z-index: 2; }
             .signature-box { width: 250px; text-align: center; font-size: 10pt; line-height: 1.3; }
-            .signature-space { height: 55px; position: relative; display: flex; align-items: center; justify-content: center; }
-            .signature-img { max-height: 50px; object-fit: contain; position: relative; z-index: 1; }
+            .signature-space { height: 65px; position: relative; display: flex; align-items: center; justify-content: center; overflow: visible; }
+            .signature-img { height: ${Math.round(62 * ttdKetuaScale)}px; width: auto; max-width: ${Math.round(160 * ttdKetuaScale)}px; object-fit: contain; position: relative; z-index: 1; }
             .signature-name { font-weight: bold; text-decoration: underline; }
           </style>
 
@@ -2023,11 +2024,11 @@ export const JadwalView: React.FC<JadwalViewProps> = ({
                   : `<div style="width: 92px; height: 92px; border: 1.5px dashed #94a3b8; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 9pt; color: #64748b; text-align: center;">Logo<br/>PGRI</div>`}
               </div>
               <div class="kop-text-container">
-                <div class="kop-org">PERSATUAN GURU REPUBLIK INDONESIA</div>
+                <div class="kop-org">${kopOrg}</div>
                 <div class="kop-sub-org">(Teachers Association Of Republic Indonesia)</div>
-                <div class="kop-ranting">RANTING GELANG</div>
-                <div class="kop-wilayah">KECAMATAN SUMBERBARU - KABUPATEN JEMBER</div>
-                <div class="kop-sekretariat">Sekretariat : Jl. PTPN XII Gunung Gambir Desa Gelang, Kecamatan Sumberbaru - Kabupaten Jember 68156</div>
+                <div class="kop-ranting">${kopRanting}</div>
+                <div class="kop-wilayah">${kopWilayah}</div>
+                <div class="kop-sekretariat">${kopSekretariat}</div>
               </div>
               <div style="width: 94px; flex-shrink: 0;"></div>
             </div>
@@ -2124,33 +2125,28 @@ export const JadwalView: React.FC<JadwalViewProps> = ({
             <div class="signature-container">
               <div class="signature-box">
                 <p style="margin: 0;">Jember, ${todayFormatted}</p>
-                <p style="margin: 0;">Ketua PGRI Ranting Gelang</p>
+                <p style="margin: 0;">${ketuaJabatan}</p>
                 <p style="margin: 0;">Kecamatan Sumberbaru</p>
                 <div class="signature-space">
                   ${stempel ? `
-                    <img src="${stempel}" alt="Stempel" style="position: absolute; top: 50%; right: 50%; transform: translateY(-50%) rotate(${stempelRotation}deg); width: 3.5cm; max-height: none; opacity: 0.9; z-index: 0; pointer-events: none;" />
+                    <img src="${stempel}" alt="Stempel" style="position: absolute; top: 50%; right: 50%; transform: translateY(-50%) rotate(${stempelRotation}deg); width: ${Math.round(112 * stempelScale)}px; height: ${Math.round(112 * stempelScale)}px; object-fit: contain; max-height: none; opacity: 0.9; z-index: 0; pointer-events: none;" />
                   ` : ''}
                   ${ttdKetua ? `<img src="${ttdKetua}" alt="TTD Ketua" class="signature-img" style="position: relative; z-index: 1;" />` : ''}
                 </div>
-                <p style="margin: 0;" class="signature-name">Umar Ali Kusuma</p>
-                <p style="margin: 0;">NPA. 13301500431</p>
+                <p style="margin: 0;" class="signature-name">${ketuaNameSafe}</p>
+                <p style="margin: 0;">${ketuaNpaSafe}</p>
               </div>
             </div>
           </div>
         `;
 
-        document.body.appendChild(container);
-
-        const opt = {
-          margin: [10, 12, 10, 12],
+        await downloadContainerAsPdf(container, {
           filename: `Rekap_Kehadiran_${targetEvt.title.replace(/[^a-zA-Z0-9]/g, '_')}_${new Date().toISOString().split('T')[0]}.pdf`,
-          image: { type: 'jpeg', quality: 0.98 },
-          html2canvas: { scale: 2, useCORS: true, logging: false },
-          jsPDF: { unit: 'mm', format: 'a4', orientation: 'landscape' }
-        };
-
-        const pdfBlob = await html2pdf().set(opt).from(container).outputPdf('blob');
-        await safeDownloadBlob(pdfBlob, opt.filename);
+          orientation: 'landscape',
+          margin: [10, 12, 10, 12],
+          quality: 0.98,
+          scale: 2
+        });
       } catch (err) {
         console.error('Gagal mengunduh PDF di ponsel:', err);
       } finally {
@@ -2194,8 +2190,8 @@ export const JadwalView: React.FC<JadwalViewProps> = ({
           th { background-color: #f2f2f2; font-weight: bold; text-align: center; border: 1px solid #000; padding: 5px; font-size: 9pt; }
           .signature-container { margin-top: 20px; display: flex; justify-content: flex-end; page-break-inside: avoid; position: relative; z-index: 2; }
           .signature-box { width: 250px; text-align: center; font-size: 10pt; line-height: 1.3; }
-          .signature-space { height: 55px; position: relative; display: flex; align-items: center; justify-content: center; }
-          .signature-img { max-height: 50px; object-fit: contain; position: relative; z-index: 1; } .signature-name { font-weight: bold; text-decoration: underline; }
+          .signature-space { height: 65px; position: relative; display: flex; align-items: center; justify-content: center; overflow: visible; }
+          .signature-img { height: ${Math.round(62 * ttdKetuaScale)}px; width: auto; max-width: ${Math.round(160 * ttdKetuaScale)}px; object-fit: contain; position: relative; z-index: 1; } .signature-name { font-weight: bold; text-decoration: underline; }
         </style>
       </head>
       <body>
@@ -2206,11 +2202,11 @@ export const JadwalView: React.FC<JadwalViewProps> = ({
               : `<div style="width: 92px; height: 92px; border: 1.5px dashed #94a3b8; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 9pt; color: #64748b; text-align: center;">Logo<br/>PGRI</div>`}
           </div>
           <div class="kop-text-container">
-            <div class="kop-org">PERSATUAN GURU REPUBLIK INDONESIA</div>
+            <div class="kop-org">${kopOrg}</div>
             <div class="kop-sub-org">(Teachers Association Of Republic Indonesia)</div>
-            <div class="kop-ranting">RANTING GELANG</div>
-            <div class="kop-wilayah">KECAMATAN SUMBERBARU - KABUPATEN JEMBER</div>
-            <div class="kop-sekretariat">Sekretariat : Jl. PTPN XII Gunung Gambir Desa Gelang, Kecamatan Sumberbaru - Kabupaten Jember 68156</div>
+            <div class="kop-ranting">${kopRanting}</div>
+            <div class="kop-wilayah">${kopWilayah}</div>
+            <div class="kop-sekretariat">${kopSekretariat}</div>
           </div>
           <div style="width: 94px; flex-shrink: 0;"></div>
         </div>
@@ -2307,16 +2303,16 @@ export const JadwalView: React.FC<JadwalViewProps> = ({
         <div class="signature-container">
           <div class="signature-box">
             <p style="margin: 0;">Jember, ${todayFormatted}</p>
-            <p style="margin: 0;">Ketua PGRI Ranting Gelang</p>
+            <p style="margin: 0;">${ketuaJabatan}</p>
             <p style="margin: 0;">Kecamatan Sumberbaru</p>
             <div class="signature-space">
               ${stempel ? `
-                <img src="${stempel}" alt="Stempel" style="position: absolute; top: 50%; right: 50%; transform: translateY(-50%) rotate(${stempelRotation}deg); width: 4.03cm; max-height: none; opacity: 0.9; z-index: 0; pointer-events: none;" />
+                <img src="${stempel}" alt="Stempel" style="position: absolute; top: 50%; right: 50%; transform: translateY(-50%) rotate(${stempelRotation}deg); width: ${Math.round(112 * stempelScale)}px; height: ${Math.round(112 * stempelScale)}px; object-fit: contain; max-height: none; opacity: 0.9; z-index: 0; pointer-events: none;" />
               ` : ''}
               ${ttdKetua ? `<img src="${ttdKetua}" alt="TTD Ketua" class="signature-img" style="position: relative; z-index: 1;" />` : ''}
             </div>
-            <p style="margin: 0;" class="signature-name">Umar Ali Kusuma</p>
-            <p style="margin: 0;">NPA. 13301500431</p>
+            <p style="margin: 0;" class="signature-name">${ketuaNameSafe}</p>
+            <p style="margin: 0;">${ketuaNpaSafe}</p>
           </div>
         </div>
         <script>
@@ -2354,6 +2350,9 @@ export const JadwalView: React.FC<JadwalViewProps> = ({
     printWindow.document.write(htmlContent);
     printWindow.document.close();
     setShowPrintAttendanceModal(false);
+    } finally {
+      setIsGeneratingAttendancePdf(false);
+    }
   };
   
   const getAttendanceSummaryForEvent = (eventId: string) => {
@@ -3617,12 +3616,18 @@ export const JadwalView: React.FC<JadwalViewProps> = ({
               </button>
               <button
                 type="button"
-                disabled={!selectedPrintAttendanceEventId}
+                disabled={!selectedPrintAttendanceEventId || isGeneratingAttendancePdf}
                 onClick={handlePrintRekapKehadiran}
-                className="px-6 py-2.5 rounded-xl bg-red-800 hover:bg-red-700 text-white font-bold text-xs shadow-sm transition-all active:scale-95 flex items-center gap-1.5 cursor-pointer"
+                className={`px-6 py-2.5 rounded-xl bg-red-800 hover:bg-red-700 text-white font-bold text-xs shadow-sm transition-all active:scale-95 flex items-center gap-1.5 ${
+                  !selectedPrintAttendanceEventId || isGeneratingAttendancePdf ? 'opacity-70 cursor-not-allowed' : 'cursor-pointer'
+                }`}
               >
-                <Download className="w-4 h-4 stroke-[2.5]" />
-                <span>Unduh Sekarang</span>
+                {isGeneratingAttendancePdf ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : (
+                  <Download className="w-4 h-4 stroke-[2.5]" />
+                )}
+                <span>{isGeneratingAttendancePdf ? 'Menyiapkan PDF...' : 'Unduh Sekarang'}</span>
               </button>
             </div>
           </div>
@@ -4415,7 +4420,7 @@ export const JadwalView: React.FC<JadwalViewProps> = ({
                   type="text"
                   value={eventPresenter}
                   onChange={(e) => setEventPresenter(e.target.value)}
-                  placeholder="Risky Firmansyah, S.Pd"
+                  placeholder="Contoh: Adi Saiful Rizal, S.Pd"
                   className={`w-full px-3.5 py-2.5 rounded-xl ${isDark ? 'bg-stone-800 border-stone-700 text-stone-100 placeholder:text-stone-500' : 'bg-[#faf8f5] border-stone-200 text-stone-800 placeholder:text-stone-400'} border text-xs font-medium focus:outline-none focus:ring-2 focus:ring-red-800/20 focus:border-red-700`}
                 />
               </div>

@@ -857,11 +857,18 @@ export const BerandaView: React.FC<BerandaViewProps> = ({
 
     let pengurusData = [
       {
-        name: 'Risky Firmansyah, S.Pd',
-        nip: '199202152022211002',
-        school: 'SDN Kaliglagah 01',
+        name: 'Umar Ali Kusuma',
+        nip: '198912092025211092',
+        school: 'SDN Gelang 03',
         role: 'Ketua PGRI Ranting Gelang',
-        phone: '6282245942601'
+        phone: '-'
+      },
+      {
+        name: 'Hartatik, S.Pd',
+        nip: '-',
+        school: 'SDN Gelang 01',
+        role: 'Wakil Ketua',
+        phone: '-'
       },
       {
         name: 'Adi Saiful Rizal, S.Pd',
@@ -871,32 +878,46 @@ export const BerandaView: React.FC<BerandaViewProps> = ({
         phone: '6282292232649'
       },
       {
-        name: 'Devy Eka Safitri, S.Pd',
-        nip: '199703232025212059',
-        school: 'SDN Sumberagung 03',
+        name: 'Atik Andriyati, S.Pd',
+        nip: '-',
+        school: 'SDN Gelang 04',
         role: 'Bendahara',
-        phone: '6282247613463'
+        phone: '-'
       },
       {
-        name: 'Ninik Dwi Sunanti, S.Pd',
-        nip: '199005122019032023',
-        school: 'SDN Rowotengah 04',
-        role: 'Koord. Bid. Perencanaan & Pelaksanaan Program',
-        phone: '6288219851338'
+        name: 'Saiful Arif, S.Pd',
+        nip: '-',
+        school: 'SDN Gelang 05',
+        role: 'Seksi Pembinaan Olahraga',
+        phone: '-'
       },
       {
-        name: 'Dewi Utami, S.Pd',
-        nip: '198501072022212002',
-        school: 'SDN Jatiroto 03',
-        role: 'Koord. Bid. Pengembangan Organisasi, Sarana & Prasarana',
-        phone: '6285856483220'
+        name: 'Siti Oktavia, S.Pd',
+        nip: '-',
+        school: 'SDN Gelang 06',
+        role: 'Seksi Pemberdayaan Perempuan',
+        phone: '-'
       },
       {
-        name: 'Siska Wahyu Purwati, S.Pd',
-        nip: '199110162025212094',
-        school: 'SDN Pringgowirawan 01',
-        role: 'Koord. Bid. Humas & Kerjasama',
-        phone: '6281355629322'
+        name: 'Rohman, S.Pd',
+        nip: '-',
+        school: 'SDN Gelang 07',
+        role: 'Seksi Pengembangan Profesi & Karir',
+        phone: '-'
+      },
+      {
+        name: 'Jasuri Budianto, S.Pd',
+        nip: '-',
+        school: 'SDN Kaliglagah 02',
+        role: 'Seksi Humas',
+        phone: '-'
+      },
+      {
+        name: 'Muhammad Jupri, S.Pd.I',
+        nip: '-',
+        school: 'SD NU 21 Miftahul Ulum',
+        role: 'Seksi Keagamaan',
+        phone: '-'
       }
     ];
     try {
@@ -922,7 +943,7 @@ export const BerandaView: React.FC<BerandaViewProps> = ({
     rawProfilKombel.forEach((p, idx) => {
       const cleanName = (p.name || '').trim();
       const lower = cleanName.toLowerCase();
-      if (!cleanName || seenNames.has(lower)) return;
+      if (!cleanName || cleanName === '-' || lower.startsWith('semua ') || seenNames.has(lower)) return;
       seenNames.add(lower);
 
       const matchInTeachers = (effectiveTeachers || []).find(t =>
@@ -1529,8 +1550,8 @@ export const BerandaView: React.FC<BerandaViewProps> = ({
 
             {/* Kanan: 4 Kartu Mini Rincian Status */}
             <div className="grid grid-cols-2 gap-2.5">
-              <div className={`p-3 rounded-xl border ${isLight ? 'bg-emerald-50/70 border-emerald-200/80' : 'bg-emerald-950/40 border-emerald-800/50'}`}>
-                <div className="flex items-center gap-1.5 mb-1">
+              <div className={`p-3 rounded-xl border text-center sm:text-left ${isLight ? 'bg-emerald-50/70 border-emerald-200/80' : 'bg-emerald-950/40 border-emerald-800/50'}`}>
+                <div className="flex items-center justify-center sm:justify-start gap-1.5 mb-1">
                   <span className="w-2 h-2 rounded-full bg-emerald-500" />
                   <span className={`text-[10px] font-extrabold uppercase tracking-wider ${isLight ? 'text-emerald-800' : 'text-emerald-300'}`}>Hadir</span>
                 </div>
@@ -1538,8 +1559,8 @@ export const BerandaView: React.FC<BerandaViewProps> = ({
                 <p className="text-[10px] text-stone-400 font-medium">Peserta</p>
               </div>
 
-              <div className={`p-3 rounded-xl border ${isLight ? 'bg-amber-50/70 border-amber-200/80' : 'bg-amber-950/40 border-amber-800/50'}`}>
-                <div className="flex items-center gap-1.5 mb-1">
+              <div className={`p-3 rounded-xl border text-center sm:text-left ${isLight ? 'bg-amber-50/70 border-amber-200/80' : 'bg-amber-950/40 border-amber-800/50'}`}>
+                <div className="flex items-center justify-center sm:justify-start gap-1.5 mb-1">
                   <span className="w-2 h-2 rounded-full bg-amber-500" />
                   <span className={`text-[10px] font-extrabold uppercase tracking-wider ${isLight ? 'text-amber-800' : 'text-amber-300'}`}>Sakit</span>
                 </div>
@@ -1547,8 +1568,8 @@ export const BerandaView: React.FC<BerandaViewProps> = ({
                 <p className="text-[10px] text-stone-400 font-medium">Peserta</p>
               </div>
 
-              <div className={`p-3 rounded-xl border ${isLight ? 'bg-blue-50/70 border-blue-200/80' : 'bg-blue-950/40 border-blue-800/50'}`}>
-                <div className="flex items-center gap-1.5 mb-1">
+              <div className={`p-3 rounded-xl border text-center sm:text-left ${isLight ? 'bg-blue-50/70 border-blue-200/80' : 'bg-blue-950/40 border-blue-800/50'}`}>
+                <div className="flex items-center justify-center sm:justify-start gap-1.5 mb-1">
                   <span className="w-2 h-2 rounded-full bg-blue-500" />
                   <span className={`text-[10px] font-extrabold uppercase tracking-wider ${isLight ? 'text-blue-800' : 'text-blue-300'}`}>Izin</span>
                 </div>
@@ -1556,8 +1577,8 @@ export const BerandaView: React.FC<BerandaViewProps> = ({
                 <p className="text-[10px] text-stone-400 font-medium">Peserta</p>
               </div>
 
-              <div className={`p-3 rounded-xl border ${isLight ? 'bg-red-50/70 border-red-200/80' : 'bg-red-950/40 border-red-800/50'}`}>
-                <div className="flex items-center gap-1.5 mb-1">
+              <div className={`p-3 rounded-xl border text-center sm:text-left ${isLight ? 'bg-red-50/70 border-red-200/80' : 'bg-red-950/40 border-red-800/50'}`}>
+                <div className="flex items-center justify-center sm:justify-start gap-1.5 mb-1">
                   <span className="w-2 h-2 rounded-full bg-red-700" />
                   <span className={`text-[10px] font-extrabold uppercase tracking-wider ${isLight ? 'text-red-800' : 'text-red-300'}`}>Alpha</span>
                 </div>
@@ -1667,11 +1688,12 @@ export const BerandaView: React.FC<BerandaViewProps> = ({
                     </div>
                   </div>
 
-                  <div className="flex items-center gap-2 self-end xl:self-center flex-wrap justify-end shrink-0">
+                  <div className="flex items-center gap-2 self-stretch sm:self-end xl:self-center w-full sm:w-auto flex-wrap justify-between sm:justify-end shrink-0">
                     <span className={`text-[10px] font-bold px-2.5 py-1 rounded-lg ${categoryBadgeMap[event.category] || (isLight ? 'bg-stone-100 text-stone-700 border border-stone-200' : 'bg-stone-800 text-stone-300 border border-stone-700')}`}>
                       {event.category}
                     </span>
 
+                    <div className="flex items-center gap-2 flex-wrap justify-end">
                     {/* Countdown / Status Pill */}
                     <div className={`px-2.5 py-1.5 rounded-lg border shadow-sm inline-flex items-center justify-center gap-1.5 leading-none ${
                       statusInfo.isOngoing
@@ -1723,6 +1745,7 @@ export const BerandaView: React.FC<BerandaViewProps> = ({
                         Absen
                       </button>
                     )}
+                    </div>
                   </div>
                 </div>
               );
@@ -1759,7 +1782,7 @@ export const BerandaView: React.FC<BerandaViewProps> = ({
                 </div>
 
                 {/* Filter Tahun, Bulan & Tab Switcher: Belum Lunas vs Sudah Lunas */}
-                <div className="flex flex-wrap items-center gap-2 self-start sm:self-auto">
+                <div className="flex flex-nowrap sm:flex-wrap items-center gap-1.5 sm:gap-2 w-full sm:w-auto overflow-x-auto sm:overflow-visible self-start sm:self-auto">
                   {/* Dropdown Filter Tahun */}
                   <select
                     value={selectedCashYear}
@@ -1776,7 +1799,7 @@ export const BerandaView: React.FC<BerandaViewProps> = ({
                       }
                     }}
                     aria-label="Filter Tahun Kontribusi"
-                    className={`pl-3 pr-7 py-1.5 rounded-xl border text-[11px] font-bold focus:outline-none focus:ring-2 focus:ring-red-800/20 focus:border-red-700 transition-all cursor-pointer ${
+                    className={`pl-2 pr-5 sm:pl-3 sm:pr-7 py-1.5 rounded-xl border text-[10px] sm:text-[11px] font-bold shrink-0 focus:outline-none focus:ring-2 focus:ring-red-800/20 focus:border-red-700 transition-all cursor-pointer ${
                       isLight
                         ? 'bg-[#faf8f5] border-stone-200 text-stone-800'
                         : 'bg-stone-800 border-stone-700 text-stone-200'
@@ -1794,7 +1817,7 @@ export const BerandaView: React.FC<BerandaViewProps> = ({
                     value={selectedCashMonth}
                     onChange={(e) => setSelectedCashMonth(e.target.value)}
                     aria-label="Filter Bulan Kontribusi"
-                    className={`pl-3 pr-7 py-1.5 rounded-xl border text-[11px] font-bold focus:outline-none focus:ring-2 focus:ring-red-800/20 focus:border-red-700 transition-all cursor-pointer ${
+                    className={`pl-2 pr-5 sm:pl-3 sm:pr-7 py-1.5 rounded-xl border text-[10px] sm:text-[11px] font-bold shrink-0 focus:outline-none focus:ring-2 focus:ring-red-800/20 focus:border-red-700 transition-all cursor-pointer ${
                       isLight
                         ? 'bg-[#faf8f5] border-stone-200 text-stone-800'
                         : 'bg-stone-800 border-stone-700 text-stone-200'
@@ -1808,11 +1831,11 @@ export const BerandaView: React.FC<BerandaViewProps> = ({
                   </select>
 
                   {/* Tab Switcher: Belum Lunas vs Sudah Lunas */}
-                  <div className={`inline-flex p-1 rounded-xl border ${isLight ? 'bg-stone-100 border-stone-200/80' : 'bg-stone-800/90 border-stone-700'}`}>
+                  <div className={`inline-flex p-0.5 sm:p-1 rounded-xl border shrink-0 ml-auto sm:ml-0 ${isLight ? 'bg-stone-100 border-stone-200/80' : 'bg-stone-800/90 border-stone-700'}`}>
                     <button
                       type="button"
                       onClick={() => setCashFilterTab('unpaid')}
-                      className={`px-3 py-1.5 rounded-lg text-[11px] font-extrabold tabular-nums transition-all cursor-pointer ${
+                      className={`px-2 py-1 sm:px-3 sm:py-1.5 rounded-lg text-[10px] sm:text-[11px] font-extrabold tabular-nums whitespace-nowrap transition-all cursor-pointer ${
                         cashFilterTab === 'unpaid'
                           ? (isLight ? 'bg-white text-red-800 shadow-sm' : 'bg-red-950 text-amber-300 shadow-sm')
                           : (isLight ? 'text-stone-500 hover:text-stone-800' : 'text-stone-400 hover:text-stone-200')
@@ -1823,7 +1846,7 @@ export const BerandaView: React.FC<BerandaViewProps> = ({
                     <button
                       type="button"
                       onClick={() => setCashFilterTab('paid')}
-                      className={`px-3 py-1.5 rounded-lg text-[11px] font-extrabold tabular-nums transition-all cursor-pointer ${
+                      className={`px-2 py-1 sm:px-3 sm:py-1.5 rounded-lg text-[10px] sm:text-[11px] font-extrabold tabular-nums whitespace-nowrap transition-all cursor-pointer ${
                         cashFilterTab === 'paid'
                           ? (isLight ? 'bg-white text-emerald-700 shadow-sm' : 'bg-emerald-950 text-emerald-300 shadow-sm')
                           : (isLight ? 'text-stone-500 hover:text-stone-800' : 'text-stone-400 hover:text-stone-200')
@@ -1843,7 +1866,12 @@ export const BerandaView: React.FC<BerandaViewProps> = ({
                       const [startY, startM] = duesStartPeriod.split('-');
                       const startMonthName = CASH_MONTH_OPTIONS.find(m => m.id === startM)?.name || startM;
                       const endMonthName = CASH_MONTH_OPTIONS.find(m => m.id === selectedCashMonth)?.name || selectedCashMonth;
-                      return `Progres Kelunasan (${startMonthName} ${startY} - ${endMonthName} ${selectedCashYear})`;
+                      return (
+                        <>
+                          <span className="block sm:inline">Progres Kelunasan</span>{' '}
+                          <span className="block sm:inline">({startMonthName} {startY} - {endMonthName} {selectedCashYear})</span>
+                        </>
+                      );
                     })()}
                   </span>
                   <span className={`shrink-0 ${isLight ? 'text-stone-700' : 'text-stone-200'}`}>{paidTeachersCount}/{totalCashMembersCount} Anggota ({animatedCashPercentage}%)</span>
@@ -1902,7 +1930,7 @@ export const BerandaView: React.FC<BerandaViewProps> = ({
                                 </div>
                               </div>
 
-                              <div className="flex items-center gap-1.5 shrink-0">
+                              <div className="flex flex-col sm:flex-row items-end sm:items-center gap-1 sm:gap-1.5 shrink-0">
                                 {unpaidMonths > 0 && (
                                   <span
                                     title={`Total tunggakan jatuh tempo: ${unpaidMonths} bulan`}
@@ -1964,7 +1992,7 @@ export const BerandaView: React.FC<BerandaViewProps> = ({
                                 </div>
                               </div>
 
-                              <div className="flex items-center gap-1.5 shrink-0">
+                              <div className="flex flex-col sm:flex-row items-end sm:items-center gap-1 sm:gap-1.5 shrink-0">
                                 {unpaidMonths > 0 && (
                                   <span
                                     title={`Total tunggakan jatuh tempo: ${unpaidMonths} bulan`}

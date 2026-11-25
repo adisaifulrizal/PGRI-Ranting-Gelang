@@ -26,20 +26,22 @@ import { canAccessAdminForTab, isPengurusRole, PENGURUS_ROLE_LABELS, resolvePeng
 import { Sidebar } from './components/Sidebar';
 import { Header } from './components/Header';
 import { OfflineIndicator } from './components/OfflineIndicator';
-import { BerandaView } from './components/views/BerandaView';
-import { ProfilKBView } from './components/views/ProfilKBView';
-import { AnggotaView } from './components/views/AnggotaView';
-import { JadwalView, TaskSubmission } from './components/views/JadwalView';
-import { KeuanganView } from './components/views/KeuanganView';
-import { PengumumanView } from './components/views/PengumumanView';
-import { KontakView } from './components/views/KontakView';
-import { PengaturanView } from './components/views/PengaturanView';
-import { BuatUndangan } from './components/views/BuatUndangan';
-import { ProkerView } from './components/views/ProkerView';
-import { SosialAspirasiView } from './components/views/SosialAspirasiView';
-import { SyncModal } from './components/SyncModal';
+import type { TaskSubmission } from './components/views/JadwalView';
 import { MenuTransitionCurtain } from './components/MenuTransitionCurtain';
-import batikKusumaBangsaBg from './assets/images/batik_kusuma_bangsa_1795456604040.jpg';
+import batikKusumaBangsaBg from './assets/images/batik_kusuma_bangsa_1795456604040.webp';
+
+const BerandaView = React.lazy(() => import('./components/views/BerandaView').then((m) => ({ default: m.BerandaView })));
+const ProfilKBView = React.lazy(() => import('./components/views/ProfilKBView').then((m) => ({ default: m.ProfilKBView })));
+const AnggotaView = React.lazy(() => import('./components/views/AnggotaView').then((m) => ({ default: m.AnggotaView })));
+const JadwalView = React.lazy(() => import('./components/views/JadwalView').then((m) => ({ default: m.JadwalView })));
+const KeuanganView = React.lazy(() => import('./components/views/KeuanganView').then((m) => ({ default: m.KeuanganView })));
+const PengumumanView = React.lazy(() => import('./components/views/PengumumanView').then((m) => ({ default: m.PengumumanView })));
+const KontakView = React.lazy(() => import('./components/views/KontakView').then((m) => ({ default: m.KontakView })));
+const PengaturanView = React.lazy(() => import('./components/views/PengaturanView').then((m) => ({ default: m.PengaturanView })));
+const BuatUndangan = React.lazy(() => import('./components/views/BuatUndangan').then((m) => ({ default: m.BuatUndangan })));
+const ProkerView = React.lazy(() => import('./components/views/ProkerView').then((m) => ({ default: m.ProkerView })));
+const SosialAspirasiView = React.lazy(() => import('./components/views/SosialAspirasiView').then((m) => ({ default: m.SosialAspirasiView })));
+const SyncModal = React.lazy(() => import('./components/SyncModal').then((m) => ({ default: m.SyncModal })));
 
 import {
   ActiveTab,
@@ -2735,6 +2737,18 @@ export default function App() {
                   : ''
             }`}
           >
+          <React.Suspense
+            fallback={
+              <div className={`min-h-[320px] flex flex-col items-center justify-center gap-3 rounded-2xl border ${
+                theme === 'dark'
+                  ? 'bg-stone-900/60 border-stone-800 text-stone-300'
+                  : 'bg-white/70 border-stone-200/80 text-stone-600'
+              }`}>
+                <div className="w-8 h-8 rounded-full border-[3px] border-red-800/25 border-t-red-800 dark:border-amber-400/25 dark:border-t-amber-400 animate-spin" />
+                <p className="text-xs font-semibold tracking-wide">Memuat tampilan menu...</p>
+              </div>
+            }
+          >
           {activeTab === 'beranda' && (
             <BerandaView
               onNavigate={(tab) => {
@@ -2852,6 +2866,7 @@ export default function App() {
               activeRole={roleForTab('kontak')}
             />
           )}
+          </React.Suspense>
           </div>
         </main>
 
@@ -2886,14 +2901,18 @@ export default function App() {
     <OfflineIndicator />
 
     {/* Modal Dialog Pemilihan Menu Sinkronisasi Cloud (Hemat Kuota) */}
-    <SyncModal
-      isOpen={isSyncModalOpen}
-      onClose={() => setIsSyncModalOpen(false)}
-      activeTab={activeTab}
-      theme={theme}
-      onExecuteSync={handleExecuteModularSync}
-      isSyncing={isSyncing}
-    />
+    {isSyncModalOpen && (
+      <React.Suspense fallback={null}>
+        <SyncModal
+          isOpen={isSyncModalOpen}
+          onClose={() => setIsSyncModalOpen(false)}
+          activeTab={activeTab}
+          theme={theme}
+          onExecuteSync={handleExecuteModularSync}
+          isSyncing={isSyncing}
+        />
+      </React.Suspense>
+    )}
     </>
   );
 }

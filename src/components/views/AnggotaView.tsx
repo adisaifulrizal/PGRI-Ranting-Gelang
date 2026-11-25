@@ -1,4 +1,3 @@
-import { safeDownloadBlob } from '../../lib/download';
 import {
   mutateCloudCollection,
   savePerDocItem,
@@ -40,6 +39,7 @@ import {
 import { Teacher, ActivityEvent, AttendanceRecord } from '../../types';
 import { getOrgConfig } from '../../lib/orgConfig';
 import { logAuditEvent } from '../../lib/auth';
+import { isMobileDevice, downloadContainerAsPdf, resolveKetuaSigner, escapePdfHtml } from '../../lib/pdfExport';
 
 // Daftar lengkap 45 Sekolah Dasar
 const MASTER_SCHOOLS_LIST = [
@@ -103,6 +103,7 @@ export const AnggotaView: React.FC<AnggotaViewProps> = ({
   const [selectedActiveStatus, setSelectedActiveStatus] = useState('Semua');
   const [selectedGender, setSelectedGender] = useState('Semua');
   const [selectedSchool, setSelectedSchool] = useState('Semua');
+  const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
 
   // Deteksi status dark mode dari DOM class (tanpa flicker awal)
   const [isDark, setIsDark] = useState<boolean>(() => 
@@ -627,6 +628,10 @@ export const AnggotaView: React.FC<AnggotaViewProps> = ({
   };
 
   const handleOpenBarcode = (teacher: Teacher) => {
+    if (activeRole !== 'admin') {
+      handleOpenWarning('Maaf, hanya pengurus/admin yang dapat melihat barcode anggota.');
+      return;
+    }
     setIsClosingBarcodeModal(false);
     setBarcodeModalTab('qr');
     setSelectedBarcodeTeacher(teacher);
@@ -1225,28 +1230,11 @@ export const AnggotaView: React.FC<AnggotaViewProps> = ({
     });
   };
 
-  // Helper cek apakah pengguna mengakses dari perangkat mobile (Ponsel / Tablet)
-  const isMobileDevice = () => {
-    if (typeof window === 'undefined') return false;
-    return /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
-  };
-
-  // Helper memuat library html2pdf khusus saat di ponsel
-  const getHtml2Pdf = async (): Promise<any> => {
-    if (typeof window !== 'undefined' && (window as any).html2pdf) {
-      return (window as any).html2pdf;
-    }
-    return new Promise((resolve, reject) => {
-      const script = document.createElement('script');
-      script.src = 'https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js';
-      script.onload = () => resolve((window as any).html2pdf);
-      script.onerror = () => reject(new Error('Gagal memuat library html2pdf.'));
-      document.head.appendChild(script);
-    });
-  };
-
   // Handler untuk Unduh PDF (PC: Jendela Cetak | Ponsel / Pop-up diblokir: Auto Download PDF)
   const handleDownloadPDF = async () => {
+    if (isGeneratingPdf) return;
+    setIsGeneratingPdf(true);
+    try {
     const printWindow = !isMobileDevice() ? window.open('', '_blank') : null;
     // 1. Pengambilan Data Pengaturan (Logo, TTD, & Stempel)
     let settingsData: Record<string, string> = {};
@@ -1254,7 +1242,7 @@ export const AnggotaView: React.FC<AnggotaViewProps> = ({
       if (typeof window !== 'undefined') {
         const keys = [
           'logo-pgri', 'logo-kombel',
-          'ttd-ketua', 'logo-stempel', 'logo-stempel-rotation'
+          'ttd-ketua', 'ttd-ketua-size', 'logo-stempel', 'logo-stempel-size', 'logo-stempel-rotation'
         ];
         keys.forEach(k => {
           const val = localStorage.getItem(k);
@@ -1265,28 +1253,24 @@ export const AnggotaView: React.FC<AnggotaViewProps> = ({
       console.warn('Gagal memuat setting:', e);
     }
 
-    // 2. Pengambilan Data Nama & NIP Ketua dari Profil Kombel
-    let ketuaName = 'Umar Ali Kusuma';
-    let ketuaNip = '198912092025211092';
-    try {
-      const savedPengurus = localStorage.getItem('kombel-pengurus');
-      if (savedPengurus) {
-        const parsed = JSON.parse(savedPengurus);
-        const ketua = parsed.find((p: any) => p.role && p.role.toLowerCase().includes('ketua'));
-        if (ketua) {
-          ketuaName = ketua.name || ketuaName;
-          ketuaNip = ketua.nip || ketuaNip;
-        }
-      }
-    } catch (e) {
-      console.warn('Gagal memuat profil ketua:', e);
-    }
+    // 2. Pengambilan Data Nama, NPA Ketua & Kop Surat Dinamis
+    const orgCfg = getOrgConfig();
+    const ketuaSigner = resolveKetuaSigner(teachersList);
+    const ketuaName = escapePdfHtml(ketuaSigner.name);
+    const ketuaNpaLabel = escapePdfHtml(ketuaSigner.npaLabel);
+    const ketuaJabatan = escapePdfHtml(ketuaSigner.jabatan);
+    const kopOrg = escapePdfHtml(orgCfg.kopOrganisasi || 'PERSATUAN GURU REPUBLIK INDONESIA');
+    const kopRanting = escapePdfHtml(orgCfg.kopRanting || 'RANTING GELANG');
+    const kopWilayah = escapePdfHtml(orgCfg.kopWilayah || 'KECAMATAN SUMBERBARU - KABUPATEN JEMBER');
+    const kopSekretariat = escapePdfHtml(orgCfg.kopSekretariat || 'Sekretariat : Jl. PTPN XII Gunung Gambir Desa Gelang, Kecamatan Sumberbaru - Kabupaten Jember 68156');
 
     // 3. Konfigurasi Parameter Gambar Logo & Stempel
     const logoPgri = settingsData['logo-pgri'] || settingsData['logo-kombel'] || '';
 
     const ttdKetua = settingsData['ttd-ketua'] || '';
+    const ttdKetuaScale = Math.max(0.3, Math.min(2.5, (Number(settingsData['ttd-ketua-size']) || 100) / 100));
     const logoStempel = settingsData['logo-stempel'] || '';
+    const stempelScale = Math.max(0.3, Math.min(2.5, (Number(settingsData['logo-stempel-size']) || 100) / 100));
     const stempelRotation = settingsData['logo-stempel-rotation'] ? Number(settingsData['logo-stempel-rotation']) : 0;
 
     // Tanggal saat ini dinamis (Contoh: 22 November 2026)
@@ -1320,15 +1304,11 @@ export const AnggotaView: React.FC<AnggotaViewProps> = ({
       </tr>
     `).join('');
 
-    // JIKA DI PONSEL ATAU POP-UP DIBLOKIR: Gunakan html2pdf untuk direct download PDF presisi
+    // JIKA DI PONSEL ATAU POP-UP DIBLOKIR: Gunakan html2pdf lokal untuk direct download PDF presisi
     if (!printWindow) {
       let container: HTMLDivElement | null = null;
       try {
-        const html2pdf = await getHtml2Pdf();
         container = document.createElement('div');
-        container.style.position = 'fixed';
-        container.style.left = '-9999px';
-        container.style.top = '0';
         container.style.width = '1050px';
         container.style.backgroundColor = '#ffffff';
         container.style.color = '#000000';
@@ -1337,7 +1317,7 @@ export const AnggotaView: React.FC<AnggotaViewProps> = ({
         container.style.margin = '0';
 
         container.innerHTML = `
-          <style>
+          <style data-pdf-style="true">
             * { box-sizing: border-box; font-family: 'Times New Roman', Times, serif; }
             .kop-container {
               display: flex;
@@ -1537,11 +1517,13 @@ export const AnggotaView: React.FC<AnggotaViewProps> = ({
               display: flex;
               align-items: center;
               justify-content: center;
+              overflow: visible;
             }
             .ttd-img {
               position: absolute;
-              max-height: 65px;
-              max-width: 120px;
+              height: ${Math.round(62 * ttdKetuaScale)}px;
+              width: auto;
+              max-width: ${Math.round(160 * ttdKetuaScale)}px;
               object-fit: contain;
               z-index: 2;
               left: 50%;
@@ -1550,8 +1532,8 @@ export const AnggotaView: React.FC<AnggotaViewProps> = ({
             }
             .stempel-img {
               position: absolute;
-              width: 3.5cm;
-              height: 3.5cm;
+              width: ${Math.round(112 * stempelScale)}px;
+              height: ${Math.round(112 * stempelScale)}px;
               object-fit: contain;
               z-index: 1;
               left: 10%;
@@ -1580,11 +1562,11 @@ export const AnggotaView: React.FC<AnggotaViewProps> = ({
                   : `<div style="width: 92px; height: 92px; border: 1.5px dashed #94a3b8; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 9pt; color: #64748b; text-align: center;">Logo<br/>PGRI</div>`}
               </div>
               <div class="kop-text-container">
-                <div class="kop-org">PERSATUAN GURU REPUBLIK INDONESIA</div>
+                <div class="kop-org">${kopOrg}</div>
                 <div class="kop-sub-org">(Teachers Association Of Republic Indonesia)</div>
-                <div class="kop-ranting">RANTING GELANG</div>
-                <div class="kop-wilayah">KECAMATAN SUMBERBARU - KABUPATEN JEMBER</div>
-                <div class="kop-sekretariat">Sekretariat : Jl. PTPN XII Gunung Gambir Desa Gelang, Kecamatan Sumberbaru - Kabupaten Jember 68156</div>
+                <div class="kop-ranting">${kopRanting}</div>
+                <div class="kop-wilayah">${kopWilayah}</div>
+                <div class="kop-sekretariat">${kopSekretariat}</div>
               </div>
               <div style="width: 94px; flex-shrink: 0;"></div>
             </div>
@@ -1657,7 +1639,7 @@ export const AnggotaView: React.FC<AnggotaViewProps> = ({
 
                 <div class="ttd-col">
                   <p>Jember, ${todayFormatted}</p>
-                  <p>Ketua PGRI Ranting Gelang</p>
+                  <p>${ketuaJabatan}</p>
                   <p>Kecamatan Sumberbaru</p>
                   
                   <div class="ttd-signature-area">
@@ -1666,25 +1648,20 @@ export const AnggotaView: React.FC<AnggotaViewProps> = ({
                   </div>
 
                   <p class="ttd-name">${ketuaName}</p>
-                  <p class="ttd-nip">NPA. 13301500431</p>
+                  <p class="ttd-nip">${ketuaNpaLabel}</p>
                 </div>
               </div>
             </div>
           </div>
         `;
 
-        document.body.appendChild(container);
-
-        const opt = {
-          margin: [10, 12, 10, 12],
+        await downloadContainerAsPdf(container, {
           filename: `Daftar_Anggota_PGRI_Ranting_Gelang_${new Date().toISOString().split('T')[0]}.pdf`,
-          image: { type: 'jpeg', quality: 0.98 },
-          html2canvas: { scale: 2, useCORS: true, logging: false },
-          jsPDF: { unit: 'mm', format: 'a4', orientation: 'landscape' }
-        };
-
-        const pdfBlob = await html2pdf().set(opt).from(container).outputPdf('blob');
-        await safeDownloadBlob(pdfBlob, opt.filename);
+          orientation: 'landscape',
+          margin: [10, 12, 10, 12],
+          quality: 0.98,
+          scale: 2
+        });
       } catch (err) {
         console.error('Gagal mengunduh PDF di ponsel:', err);
       } finally {
@@ -1944,11 +1921,13 @@ export const AnggotaView: React.FC<AnggotaViewProps> = ({
               display: flex;
               align-items: center;
               justify-content: center;
+              overflow: visible;
             }
             .ttd-img {
               position: absolute;
-              max-height: 75px;
-              max-width: 130px;
+              height: ${Math.round(62 * ttdKetuaScale)}px;
+              width: auto;
+              max-width: ${Math.round(160 * ttdKetuaScale)}px;
               object-fit: contain;
               z-index: 2;
               left: 50%;
@@ -1958,8 +1937,8 @@ export const AnggotaView: React.FC<AnggotaViewProps> = ({
             /* Posisi Stempel: Batas atas & bawah tepat di tengah-tengah area TTD */
             .stempel-img {
               position: absolute;
-              width: 4.03cm;
-              height: 4.03cm;
+              width: ${Math.round(112 * stempelScale)}px;
+              height: ${Math.round(112 * stempelScale)}px;
               object-fit: contain;
               z-index: 1;
               left: 10%;
@@ -1990,11 +1969,11 @@ export const AnggotaView: React.FC<AnggotaViewProps> = ({
                 : `<div style="width: 92px; height: 92px; border: 1.5px dashed #94a3b8; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 9pt; color: #64748b; text-align: center;">Logo<br/>PGRI</div>`}
             </div>
             <div class="kop-text-container">
-              <div class="kop-org">PERSATUAN GURU REPUBLIK INDONESIA</div>
+              <div class="kop-org">${kopOrg}</div>
               <div class="kop-sub-org">(Teachers Association Of Republic Indonesia)</div>
-              <div class="kop-ranting">RANTING GELANG</div>
-              <div class="kop-wilayah">KECAMATAN SUMBERBARU - KABUPATEN JEMBER</div>
-              <div class="kop-sekretariat">Sekretariat : Jl. PTPN XII Gunung Gambir Desa Gelang, Kecamatan Sumberbaru - Kabupaten Jember 68156</div>
+              <div class="kop-ranting">${kopRanting}</div>
+              <div class="kop-wilayah">${kopWilayah}</div>
+              <div class="kop-sekretariat">${kopSekretariat}</div>
             </div>
             <div style="width: 94px; flex-shrink: 0;"></div>
           </div>
@@ -2076,7 +2055,7 @@ export const AnggotaView: React.FC<AnggotaViewProps> = ({
               <!-- Kotak Tanda Tangan Pojok Kanan Bawah -->
               <div class="ttd-col">
                 <p>Jember, ${todayFormatted}</p>
-                <p>Ketua PGRI Ranting Gelang</p>
+                <p>${ketuaJabatan}</p>
                 <p>Kecamatan Sumberbaru</p>
                 
                 <div class="ttd-signature-area">
@@ -2085,7 +2064,7 @@ export const AnggotaView: React.FC<AnggotaViewProps> = ({
                 </div>
 
                 <p class="ttd-name">${ketuaName}</p>
-                <p class="ttd-nip">NPA. 13301500431</p>
+                <p class="ttd-nip">${ketuaNpaLabel}</p>
               </div>
 
             </div>
@@ -2105,6 +2084,9 @@ export const AnggotaView: React.FC<AnggotaViewProps> = ({
 
     printWindow.document.write(htmlContent);
     printWindow.document.close();
+    } finally {
+      setIsGeneratingPdf(false);
+    }
   };
 
   // Filter daftar anggota untuk Popup Kehadiran
@@ -2223,15 +2205,22 @@ export const AnggotaView: React.FC<AnggotaViewProps> = ({
             <button
               type="button"
               onClick={handleDownloadPDF}
+              disabled={isGeneratingPdf}
               title="Unduh Daftar Anggota (PDF)"
-              className={`inline-flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold border shadow-sm transition-colors cursor-pointer ${
+              className={`inline-flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold border shadow-sm transition-colors ${
+                isGeneratingPdf ? 'opacity-70 cursor-not-allowed' : 'cursor-pointer'
+              } ${
                 isDark
                   ? 'bg-stone-800 hover:bg-stone-700 border-stone-700 text-stone-100'
                   : 'bg-white hover:bg-stone-50 border-stone-300 text-stone-800'
               }`}
             >
-              <Download className="w-4 h-4 text-red-800 dark:text-amber-400" />
-              Unduh PDF
+              {isGeneratingPdf ? (
+                <Loader2 className="w-4 h-4 animate-spin text-red-800 dark:text-amber-400" />
+              ) : (
+                <Download className="w-4 h-4 text-red-800 dark:text-amber-400" />
+              )}
+              {isGeneratingPdf ? 'Menyiapkan PDF...' : 'Unduh PDF'}
             </button>
           </div>
         </div>
@@ -2497,7 +2486,9 @@ export const AnggotaView: React.FC<AnggotaViewProps> = ({
                 <th className="py-4 px-4 text-center w-16">L/P</th>
                 <th className="py-4 px-4 text-center">WhatsApp</th>
                 <th className="py-4 px-4 text-center">Nama Sekolah</th>
-                <th className="py-4 px-4 text-center w-28">Barcode</th>
+                {activeRole === 'admin' && (
+                  <th className="py-4 px-4 text-center w-28">Barcode</th>
+                )}
                 <th className="py-4 px-4 text-center w-36">Keterangan</th>
                 <th className="py-4 px-4 text-center w-28 rounded-tr-2xl">Aksi</th>
               </tr>
@@ -2505,7 +2496,7 @@ export const AnggotaView: React.FC<AnggotaViewProps> = ({
             <tbody className="divide-y divide-stone-100 [.dark_&]:divide-stone-800/70 dark:divide-stone-800/70 text-xs sm:text-sm">
               {filteredTeachers.length === 0 ? (
                 <tr>
-                  <td colSpan={11} className="py-12 text-center">
+                  <td colSpan={activeRole === 'admin' ? 11 : 10} className="py-12 text-center">
                     <div className="flex flex-col items-center justify-center gap-2">
                       <div className="w-12 h-12 rounded-xl bg-stone-100 [.dark_&]:bg-stone-800 dark:bg-stone-800 flex items-center justify-center text-stone-400">
                         <SearchX className="w-6 h-6" />
@@ -2584,18 +2575,20 @@ export const AnggotaView: React.FC<AnggotaViewProps> = ({
                         </div>
                       </td>
 
-                      {/* Kolom Barcode (Tombol Lihat Barcode) */}
-                      <td className="py-3.5 px-4 text-center">
-                        <button
-                          type="button"
-                          onClick={() => handleOpenBarcode(teacher)}
-                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-red-50 hover:bg-red-100 [.dark_&]:bg-red-950/50 [.dark_&]:hover:bg-red-900/50 dark:bg-red-950/50 dark:hover:bg-red-900/50 text-red-800 [.dark_&]:text-amber-300 dark:text-amber-300 border border-red-200 [.dark_&]:border-red-800/60 dark:border-red-800/60 text-xs font-bold transition-colors duration-200 active:scale-95 cursor-pointer"
-                          title="Lihat Barcode Guru"
-                        >
-                          <QrCode className="w-3.5 h-3.5" />
-                          <span>Barcode</span>
-                        </button>
-                      </td>
+                      {/* Kolom Barcode (Tombol Lihat Barcode - Khusus Admin/Pengurus) */}
+                      {activeRole === 'admin' && (
+                        <td className="py-3.5 px-4 text-center">
+                          <button
+                            type="button"
+                            onClick={() => handleOpenBarcode(teacher)}
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-red-50 hover:bg-red-100 [.dark_&]:bg-red-950/50 [.dark_&]:hover:bg-red-900/50 dark:bg-red-950/50 dark:hover:bg-red-900/50 text-red-800 [.dark_&]:text-amber-300 dark:text-amber-300 border border-red-200 [.dark_&]:border-red-800/60 dark:border-red-800/60 text-xs font-bold transition-colors duration-200 active:scale-95 cursor-pointer"
+                            title="Lihat Barcode Guru"
+                          >
+                            <QrCode className="w-3.5 h-3.5" />
+                            <span>Barcode</span>
+                          </button>
+                        </td>
+                      )}
 
                       {/* Kolom Keterangan Status Keaktifan */}
                       <td className="py-3.5 px-4 text-center">
@@ -2677,7 +2670,7 @@ export const AnggotaView: React.FC<AnggotaViewProps> = ({
       </div>
 
       {/* Modal Popup Barcode & Preview E-KTA Mini Anggota */}
-      {selectedBarcodeTeacher && (
+      {activeRole === 'admin' && selectedBarcodeTeacher && (
         <div className={`fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm ${isClosingBarcodeModal ? 'modal-backdrop-exit' : 'animate-backdrop-fade'}`}>
           <div className={`bg-white [.dark_&]:bg-stone-900 dark:bg-stone-900 rounded-2xl max-w-md w-full p-6 shadow-2xl border border-stone-200/90 [.dark_&]:border-stone-800 dark:border-stone-800 space-y-4 transition-all ${isClosingBarcodeModal ? 'modal-content-exit' : 'animate-modal-pop'}`}>
             

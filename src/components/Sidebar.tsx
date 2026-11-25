@@ -41,7 +41,7 @@ import {
   signInPengurusWithGoogle,
   signOutPengurus
 } from '../lib/auth';
-import batikKusumaBangsaBg from '../assets/images/batik_kusuma_bangsa_1795456604040.jpg';
+import batikKusumaBangsaBg from '../assets/images/batik_kusuma_bangsa_1795456604040.webp';
 
 interface SidebarProps {
   activeTab: ActiveTab;
