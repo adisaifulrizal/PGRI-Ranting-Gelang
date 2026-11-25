@@ -73,6 +73,13 @@ const escapeHtmlSafe = (val: string) =>
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;');
 
+const formatIsoToDDMMYYYY = (isoDate: string) => {
+  if (!isoDate) return '';
+  const parts = isoDate.split('-');
+  if (parts.length !== 3) return isoDate;
+  return `${parts[2]}/${parts[1]}/${parts[0]}`;
+};
+
 // Helper validasi anggota aktif (sesuai logika pada Jadwal Kegiatan)
 const isMemberActive = (t: Teacher): boolean => {
   if (!t) return false;
@@ -4546,13 +4553,24 @@ export const KeuanganView: React.FC<KeuanganViewProps> = ({
                   <label className="block text-center font-bold text-stone-700 [.dark_&]:text-stone-300 dark:text-stone-300 mb-1">
                     Tanggal Transaksi *
                   </label>
-                  <input
-                    type="date"
-                    required
-                    value={formData.date}
-                    onChange={(e) => setFormData({ ...formData, date: e.target.value })}
-                    className="w-full px-4 py-2.5 rounded-xl bg-[#faf8f5] [.dark_&]:bg-stone-800 dark:bg-stone-800 border border-stone-200 [.dark_&]:border-stone-700 dark:border-stone-700 text-stone-800 [.dark_&]:text-stone-100 dark:text-stone-100 font-medium focus:outline-none focus:ring-2 focus:ring-red-800/20 focus:border-red-700 [color-scheme:light] [.dark_&]:[color-scheme:dark] dark:[color-scheme:dark]"
-                  />
+                  <div className="relative w-full">
+                    <div className="w-full px-4 py-2.5 rounded-xl bg-[#faf8f5] [.dark_&]:bg-stone-800 dark:bg-stone-800 border border-stone-200 [.dark_&]:border-stone-700 dark:border-stone-700 text-stone-800 [.dark_&]:text-stone-100 dark:text-stone-100 font-medium flex items-center justify-between pointer-events-none">
+                      <span>{formData.date ? formatIsoToDDMMYYYY(formData.date) : 'dd/mm/yyyy'}</span>
+                      <Calendar className="w-4 h-4 text-stone-500 [.dark_&]:text-stone-400 dark:text-stone-400 shrink-0" />
+                    </div>
+                    <input
+                      type="date"
+                      required
+                      value={formData.date}
+                      onChange={(e) => setFormData({ ...formData, date: e.target.value })}
+                      onClick={(e) => {
+                        try {
+                          (e.currentTarget as HTMLInputElement).showPicker?.();
+                        } catch {}
+                      }}
+                      className="absolute inset-0 w-full h-full opacity-0 cursor-pointer [color-scheme:light] [.dark_&]:[color-scheme:dark] dark:[color-scheme:dark]"
+                    />
+                  </div>
                 </div>
 
                 <div>
