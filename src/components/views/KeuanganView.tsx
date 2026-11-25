@@ -36,7 +36,8 @@ import {
   SlidersHorizontal,
   QrCode,
   Receipt,
-  Loader2
+  Loader2,
+  Search
 } from 'lucide-react';
 
 const POS_ANGGARAN_OPTIONS: NonNullable<FinancialTransaction['category']>[] = [
@@ -223,11 +224,22 @@ export const KeuanganView: React.FC<KeuanganViewProps> = ({
   const [filterSchool, setFilterSchool] = useState<string>('Semua');
   const [filterYear, setFilterYear] = useState<string>(() => initialActivePeriod.split('-')[0]);
   const [filterMonth, setFilterMonth] = useState<string>(() => initialActivePeriod.split('-')[1]);
+  const [pesertaSearchQuery, setPesertaSearchQuery] = useState<string>('');
+  const [pesertaStatusFilter, setPesertaStatusFilter] = useState<'Semua' | 'Belum' | 'Lunas'>('Semua');
+
+  // Filter State Khusus Tab Buku Kas Umum (Riwayat Transaksi)
+  const [txSearchQuery, setTxSearchQuery] = useState<string>('');
+  const [txFilterCategory, setTxFilterCategory] = useState<string>('Semua');
+  const [txFilterPeriod, setTxFilterPeriod] = useState<string>('Semua');
 
   // Modal State Konfirmasi Transfer ke WhatsApp
   const [isConfirmTransferModalOpen, setIsConfirmTransferModalOpen] = useState(false);
   const [isClosingConfirmTransferModal, setIsClosingConfirmTransferModal] = useState(false);
   const [selectedConfirmTeacherId, setSelectedConfirmTeacherId] = useState<string>('');
+  const [confirmStartMonth, setConfirmStartMonth] = useState<string>(() => initialActivePeriod.split('-')[1]);
+  const [confirmStartYear, setConfirmStartYear] = useState<string>(() => initialActivePeriod.split('-')[0]);
+  const [confirmEndMonth, setConfirmEndMonth] = useState<string>(() => initialActivePeriod.split('-')[1]);
+  const [confirmEndYear, setConfirmEndYear] = useState<string>(() => initialActivePeriod.split('-')[0]);
 
   // Modal State QRIS Pembayaran
   const [isQrisModalOpen, setIsQrisModalOpen] = useState(false);
@@ -856,6 +868,53 @@ export const KeuanganView: React.FC<KeuanganViewProps> = ({
     return `(${kapitalAwal} rupiah)`;
   };
 
+  // Helper normalisasi teks uraian lama ("Dana Masuk Pada Bulan ..." -> "Dana Kontribusi Bulan ...")
+  const formatTransactionDescription = (tx: { id?: string; description?: string }) => {
+    const rawDesc = String(tx.description || '').trim();
+    if (
+      (tx.id && tx.id.startsWith('tx-kas-event-')) ||
+      /^dana masuk pada bulan/i.test(rawDesc)
+    ) {
+      return rawDesc.replace(/^Dana Masuk Pada Bulan/i, 'Dana Kontribusi Bulan');
+    }
+    return rawDesc;
+  };
+
+  // Helper resolusi nominal historis kuitansi (menggunakan amount tersimpan pada payment jika ada, fallback ke orgConfig)
+  const resolveReceiptAmount = (payment?: CashPayment | null) => {
+    const savedAmount = Number((payment as any)?.amount);
+    if (!isNaN(savedAmount) && savedAmount > 0) return savedAmount;
+    const configAmount = Number(orgConfig.monthlyDuesAmount);
+    return !isNaN(configAmount) && configAmount > 0 ? configAmount : 10000;
+  };
+
+  // Helper ekspor Buku Kas Umum ke file CSV (kompatibel Microsoft Excel)
+  const handleExportBkuCsv = () => {
+    const headers = ['No', 'Tanggal', 'Uraian', 'Kategori Anggaran', 'Pemasukan (Rp)', 'Pengeluaran (Rp)', 'Saldo (Rp)'];
+    const csvRows = [
+      headers.join(';'),
+      ...filteredTransactionsForTable.map((tx, idx) => {
+        const d = new Date(tx.date);
+        const isDanaMasuk =
+          tx.id.startsWith('tx-kas-event-') ||
+          /^(dana masuk pada bulan|dana kontribusi bulan)/i.test((tx.description || '').trim());
+        const dateFormatted = isNaN(d.getTime())
+          ? '-'
+          : `${isDanaMasuk ? '02' : String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}/${d.getFullYear()}`;
+        const descSafe = `"${formatTransactionDescription(tx).replace(/"/g, '""')}"`;
+        const catSafe = `"${String(tx.category || '-').replace(/"/g, '""')}"`;
+        const masuk = tx.type === 'Pemasukan' ? tx.amount : 0;
+        const keluar = tx.type === 'Pengeluaran' ? tx.amount : 0;
+        return [idx + 1, dateFormatted, descSafe, catSafe, masuk, keluar, tx.runningBalance].join(';');
+      })
+    ];
+    const bom = '\uFEFF';
+    const blob = new Blob([bom + csvRows.join('\r\n')], { type: 'text/csv;charset=utf-8;' });
+    const periodSuffix = txFilterPeriod !== 'Semua' ? txFilterPeriod : new Date().toISOString().split('T')[0];
+    void safeDownloadBlob(blob, `Buku_Kas_Umum_PGRI_Ranting_Gelang_${periodSuffix}.csv`);
+    void logAuditEvent('Catatan Keuangan', 'Ekspor CSV BKU', `Mengekspor ${filteredTransactionsForTable.length} baris transaksi Buku Kas Umum ke CSV/Excel.`);
+  };
+
   // Helper nomor kuitansi: "KWT.01.08/PGRI.Rtg.Gelang/2026"
   const buildReceiptNumber = (teacher: Teacher, monthId: string, year: string, customSeq?: number) => {
     const idx =
@@ -1034,16 +1093,17 @@ export const KeuanganView: React.FC<KeuanganViewProps> = ({
     ctx.fillRect(36, 392, 430, 104);
     ctx.strokeRect(36, 392, 430, 104);
 
+    const receiptNominal = resolveReceiptAmount(payment);
     ctx.textAlign = 'left';
     ctx.fillStyle = '#991b1b';
     ctx.font = 'bold 13px sans-serif';
     ctx.fillText('Jumlah Kontribusi Diterima', 56, 418);
     ctx.fillStyle = '#1c1917';
     ctx.font = 'bold 28px sans-serif';
-    ctx.fillText(formatRupiah(orgConfig.monthlyDuesAmount), 56, 454);
+    ctx.fillText(formatRupiah(receiptNominal), 56, 454);
     ctx.fillStyle = '#57534e';
     ctx.font = 'italic 600 13px sans-serif';
-    ctx.fillText(formatTerbilangRupiah(orgConfig.monthlyDuesAmount), 56, 480);
+    ctx.fillText(formatTerbilangRupiah(receiptNominal), 56, 480);
 
     // Area Tanda Tangan Bendahara di Kanan Bawah (Tanpa Stempel, Bendahara di atas PGRI Ranting Gelang)
     const signCenterX = 710;
@@ -1179,7 +1239,7 @@ export const KeuanganView: React.FC<KeuanganViewProps> = ({
         const teacher = paidTeachers[i];
         const payment = getPayment(teacher.id, rekapMonth, teacher.name, rekapYear);
         if (!payment) continue;
-        const canvas = await renderReceiptCanvas(teacher, monthObj, rekapYear, payment, i + 1);
+        const canvas = await renderReceiptCanvas(teacher, monthObj, rekapYear, payment);
         imgDataUrls.push(canvas.toDataURL('image/png'));
       }
 
@@ -1351,12 +1411,24 @@ export const KeuanganView: React.FC<KeuanganViewProps> = ({
     const teacherName = selectedConfirmTeacher.name || '-';
     const teacherSchool = selectedConfirmTeacher.school || '-';
 
+    const startMonthName = MONTH_OPTIONS.find(m => m.id === confirmStartMonth)?.name || confirmStartMonth;
+    const endMonthName = MONTH_OPTIONS.find(m => m.id === confirmEndMonth)?.name || confirmEndMonth;
+
+    const startYm = Number(confirmStartYear) * 12 + Number(confirmStartMonth);
+    const endYm = Number(confirmEndYear) * 12 + Number(confirmEndMonth);
+    const isSingleMonth = endYm <= startYm;
+
+    const periodeText = isSingleMonth
+      ? `${startMonthName} ${confirmStartYear} (1 Bulan)`
+      : `${startMonthName} ${confirmStartYear} s.d. ${endMonthName} ${confirmEndYear} (Rapel ${endYm - startYm + 1} Bulan)`;
+
     const message =
       `Mohon untuk mengkonfirmasi pembayaran,\n` +
       `PGRI Ranting Gelang Kecamatan Sumberbaru.\n\n` +
       `Nama : *${teacherName}*\n` +
       `NIP : ${teacherNip}\n` +
-      `Sekolah : ${teacherSchool}\n\n` +
+      `Sekolah : ${teacherSchool}\n` +
+      `Periode : *${periodeText}*\n\n` +
       `Atas waktu dan kerjasamanya, kami ucapkan terimakasih.`;
 
     openWhatsAppShare(message, orgConfig.bendaharaWa);
@@ -1413,9 +1485,21 @@ export const KeuanganView: React.FC<KeuanganViewProps> = ({
 
   // Pengelompokan Data Pembayaran berdasarkan Bulan & Tahun untuk Kotak Pembungkus
   const groupedPaymentItems = useMemo(() => {
+    const q = pesertaSearchQuery.trim().toLowerCase();
     const groups: { month: { id: string; name: string }; year: string; items: typeof paymentItems }[] = [];
 
     paymentItems.forEach(item => {
+      if (q) {
+        const hay = `${item.teacher.name || ''} ${item.teacher.school || ''} ${item.teacher.nip || ''}`.toLowerCase();
+        if (!hay.includes(q)) return;
+      }
+      if (pesertaStatusFilter !== 'Semua') {
+        const p = getPayment(item.teacher.id, item.month.id, item.teacher.name, item.year);
+        const isLunas = p?.status === 'Lunas';
+        if (pesertaStatusFilter === 'Lunas' && !isLunas) return;
+        if (pesertaStatusFilter === 'Belum' && isLunas) return;
+      }
+
       const existingGroup = groups.find(g => g.month.id === item.month.id && g.year === item.year);
       if (existingGroup) {
         existingGroup.items.push(item);
@@ -1429,17 +1513,17 @@ export const KeuanganView: React.FC<KeuanganViewProps> = ({
     });
 
     return groups;
-  }, [paymentItems]);
+  }, [paymentItems, pesertaSearchQuery, pesertaStatusFilter, cashPayments, filterYear, currentYearStr]);
 
   // Kalkulasi Saldo Kumulatif urut dari Tanggal Terlama ke Tanggal Terbaru (Ascending)
   const transactionsWithRunningBalance = useMemo(() => {
     let currentBalance = 0;
     
-    // Simpan index awal & pastikan transaksi Dana Masuk selalu menggunakan tanggal 02 pada bulannya
+    // Simpan index awal & pastikan transaksi Dana Kontribusi selalu menggunakan tanggal 02 pada bulannya
     const itemsWithIndex = transactions.map((tx, idx) => {
       const isDanaMasuk =
         tx.id.startsWith('tx-kas-event-') ||
-        /^dana masuk pada bulan/i.test((tx.description || '').trim());
+        /^(dana masuk pada bulan|dana kontribusi bulan)/i.test((tx.description || '').trim());
       let normalizedDate = tx.date;
       if (isDanaMasuk && typeof tx.date === 'string' && /^\d{4}-\d{2}-\d{2}/.test(tx.date)) {
         normalizedDate = `${tx.date.slice(0, 7)}-02`;
@@ -1486,6 +1570,51 @@ export const KeuanganView: React.FC<KeuanganViewProps> = ({
       return { ...tx, runningBalance: currentBalance };
     });
   }, [transactions]);
+
+  // Daftar opsi periode (YYYY-MM) yang tersedia di Buku Kas Umum
+  const txAvailablePeriods = useMemo(() => {
+    const set = new Set<string>();
+    transactionsWithRunningBalance.forEach(tx => {
+      if (typeof tx.date === 'string' && /^\d{4}-\d{2}/.test(tx.date)) {
+        set.add(tx.date.slice(0, 7));
+      }
+    });
+    return Array.from(set).sort((a, b) => b.localeCompare(a));
+  }, [transactionsWithRunningBalance]);
+
+  // Filter tampilan riwayat transaksi di Buku Kas Umum tanpa mengubah urutan saldo berjalan
+  const filteredTransactionsForTable = useMemo(() => {
+    const q = txSearchQuery.trim().toLowerCase();
+    return transactionsWithRunningBalance.filter(tx => {
+      if (txFilterPeriod !== 'Semua' && !(tx.date || '').startsWith(txFilterPeriod)) {
+        return false;
+      }
+      if (txFilterCategory !== 'Semua') {
+        const normalizedCat = tx.category === 'Iuran Anggota' ? 'Kontribusi Anggota' : (tx.category || 'Lainnya');
+        if (normalizedCat !== txFilterCategory) return false;
+      }
+      if (q) {
+        const displayDesc = formatTransactionDescription(tx);
+        if (!displayDesc.toLowerCase().includes(q) && !(tx.category || '').toLowerCase().includes(q)) {
+          return false;
+        }
+      }
+      return true;
+    });
+  }, [transactionsWithRunningBalance, txSearchQuery, txFilterCategory, txFilterPeriod]);
+
+  const isTxFilterActive =
+    txSearchQuery.trim() !== '' || txFilterCategory !== 'Semua' || txFilterPeriod !== 'Semua';
+
+  const filteredTxSummary = useMemo(() => {
+    let pemasukan = 0;
+    let pengeluaran = 0;
+    filteredTransactionsForTable.forEach(tx => {
+      if (tx.type === 'Pemasukan') pemasukan += tx.amount;
+      else pengeluaran += tx.amount;
+    });
+    return { pemasukan, pengeluaran, selisih: pemasukan - pengeluaran };
+  }, [filteredTransactionsForTable]);
 
   // Stats
   const totalPemasukan = transactions
@@ -1844,10 +1973,11 @@ export const KeuanganView: React.FC<KeuanganViewProps> = ({
             const rowsHtml = grp.items
               .map((tx, idx) => {
                 const detail = parseTxVolumeUnit(tx);
+                const formattedDesc = formatTransactionDescription(tx);
                 return `<tr>
                     <td style="text-align:center">${idx + 2}</td>
                     <td style="text-align:center">${new Date(tx.date).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' })}</td>
-                    <td style="text-transform:capitalize;">${escapeHtmlSafe(tx.description)}</td>
+                    <td style="text-transform:capitalize;">${escapeHtmlSafe(formattedDesc)}</td>
                     <td style="text-align:right; color:#059669; font-weight:bold; font-family:monospace;">${tx.type === 'Pemasukan' ? escapeHtmlSafe(formatRupiah(tx.amount)) : '-'}</td>
                     <td style="text-align:center;">${escapeHtmlSafe(detail.volume)}</td>
                     <td style="text-align:center;">${escapeHtmlSafe(detail.satuan)}</td>
@@ -2217,10 +2347,13 @@ export const KeuanganView: React.FC<KeuanganViewProps> = ({
               year: targetYearStr,
               status
             };
+            const currentDues = Number(orgConfig.monthlyDuesAmount) > 0 ? Number(orgConfig.monthlyDuesAmount) : 10000;
             if (status === 'Lunas') {
               newRec.datePaid = cp.datePaid || isoDate;
+              if (!newRec.amount) newRec.amount = currentDues;
             } else {
               delete newRec.datePaid;
+              delete newRec.amount;
             }
             result.push(newRec);
             updated = true;
@@ -2231,6 +2364,7 @@ export const KeuanganView: React.FC<KeuanganViewProps> = ({
       }
 
       if (!updated) {
+        const currentDues = Number(orgConfig.monthlyDuesAmount) > 0 ? Number(orgConfig.monthlyDuesAmount) : 10000;
         const newRec: any = {
           teacherId: resolvedTeacherId,
           teacherName: resolvedTeacherName,
@@ -2238,7 +2372,7 @@ export const KeuanganView: React.FC<KeuanganViewProps> = ({
           month: yearMonthCode,
           year: targetYearStr,
           status,
-          ...(status === 'Lunas' ? { datePaid: isoDate } : {})
+          ...(status === 'Lunas' ? { datePaid: isoDate, amount: currentDues } : {})
         };
         result.push(newRec);
       }
@@ -2265,7 +2399,7 @@ export const KeuanganView: React.FC<KeuanganViewProps> = ({
         const isTxExist = sourceTransactions.some(t => t.id === autoTxId);
         if (isTxExist) {
           return sourceTransactions.map(t =>
-            t.id === autoTxId ? { ...t, amount: totalAmount, date: danaMasukDate, description: `Dana Masuk Pada Bulan ${monthName} ${targetYearStr}`, category: 'Kontribusi Anggota' } : t
+            t.id === autoTxId ? { ...t, amount: totalAmount, date: danaMasukDate, description: `Dana Kontribusi Bulan ${monthName} ${targetYearStr}`, category: 'Kontribusi Anggota' } : t
           );
         }
         const newTx: FinancialTransaction = {
@@ -2273,7 +2407,7 @@ export const KeuanganView: React.FC<KeuanganViewProps> = ({
           date: danaMasukDate,
           type: 'Pemasukan',
           amount: totalAmount,
-          description: `Dana Masuk Pada Bulan ${monthName} ${targetYearStr}`,
+          description: `Dana Kontribusi Bulan ${monthName} ${targetYearStr}`,
           category: 'Kontribusi Anggota'
         };
         return [newTx, ...sourceTransactions];
@@ -2287,7 +2421,8 @@ export const KeuanganView: React.FC<KeuanganViewProps> = ({
     setVerifikasiToast(`${resolvedTeacherName || 'Anggota'} ditandai ${status === 'Lunas' ? 'Sudah Bayar' : 'Belum Bayar'}`);
     setTimeout(() => setVerifikasiToast(null), 2500);
 
-    const optimisticTotalAmount = computeLunasCount(updatedCashPayments) * 10000;
+    const duesNominal = Number(orgConfig.monthlyDuesAmount) > 0 ? Number(orgConfig.monthlyDuesAmount) : 10000;
+    const optimisticTotalAmount = computeLunasCount(updatedCashPayments) * duesNominal;
     const updatedTransactions = applyAutoTxMutation(transactions, optimisticTotalAmount);
     onTransactionsChange(updatedTransactions);
 
@@ -2308,7 +2443,7 @@ export const KeuanganView: React.FC<KeuanganViewProps> = ({
     );
     onCashPaymentsChange(cashRes.items);
 
-    const latestTotalAmount = computeLunasCount(cashRes.items) * 10000;
+    const latestTotalAmount = computeLunasCount(cashRes.items) * duesNominal;
     const txRes = await mutateCloudCollection<FinancialTransaction>(
       'financialTransactions',
       ['kombel-financialTransactions'],
@@ -2372,10 +2507,13 @@ export const KeuanganView: React.FC<KeuanganViewProps> = ({
                 year: targetYearStr,
                 status
               };
+              const currentDues = Number(orgConfig.monthlyDuesAmount) > 0 ? Number(orgConfig.monthlyDuesAmount) : 10000;
               if (status === 'Lunas') {
                 updatedRec.datePaid = cp.datePaid || isoDate;
+                if (!updatedRec.amount) updatedRec.amount = currentDues;
               } else {
                 delete updatedRec.datePaid;
+                delete updatedRec.amount;
               }
               return updatedRec;
             }
@@ -2383,6 +2521,7 @@ export const KeuanganView: React.FC<KeuanganViewProps> = ({
           });
 
           if (!found) {
+            const currentDues = Number(orgConfig.monthlyDuesAmount) > 0 ? Number(orgConfig.monthlyDuesAmount) : 10000;
             const newRec: any = {
               teacherId: resolvedTeacherId,
               teacherName: resolvedTeacherName,
@@ -2390,7 +2529,7 @@ export const KeuanganView: React.FC<KeuanganViewProps> = ({
               month: yearMonthCode,
               year: targetYearStr,
               status,
-              ...(status === 'Lunas' ? { datePaid: isoDate } : {})
+              ...(status === 'Lunas' ? { datePaid: isoDate, amount: currentDues } : {})
             };
             nextList.push(newRec);
           }
@@ -2418,7 +2557,7 @@ export const KeuanganView: React.FC<KeuanganViewProps> = ({
           const isTxExist = sourceTransactions.some(t => t.id === autoTxId);
           if (isTxExist) {
             return sourceTransactions.map(t =>
-              t.id === autoTxId ? { ...t, amount: totalAmount, date: danaMasukDate, description: `Dana Masuk Pada Bulan ${monthName} ${targetYearStr}`, category: 'Kontribusi Anggota' } : t
+              t.id === autoTxId ? { ...t, amount: totalAmount, date: danaMasukDate, description: `Dana Kontribusi Bulan ${monthName} ${targetYearStr}`, category: 'Kontribusi Anggota' } : t
             );
           }
           const newTx: FinancialTransaction = {
@@ -2426,7 +2565,7 @@ export const KeuanganView: React.FC<KeuanganViewProps> = ({
             date: danaMasukDate,
             type: 'Pemasukan',
             amount: totalAmount,
-            description: `Dana Masuk Pada Bulan ${monthName} ${targetYearStr}`,
+            description: `Dana Kontribusi Bulan ${monthName} ${targetYearStr}`,
             category: 'Kontribusi Anggota'
           };
           return [newTx, ...sourceTransactions];
@@ -2444,7 +2583,8 @@ export const KeuanganView: React.FC<KeuanganViewProps> = ({
       setVerifikasiToast(`${labelTarget} ditandai ${status === 'Lunas' ? 'Sudah Bayar' : 'Belum Bayar'}`);
       setTimeout(() => setVerifikasiToast(null), 2800);
 
-      const optimisticTotalAmount = computeLunasCount(updatedCashPayments) * 10000;
+      const duesNominal = Number(orgConfig.monthlyDuesAmount) > 0 ? Number(orgConfig.monthlyDuesAmount) : 10000;
+      const optimisticTotalAmount = computeLunasCount(updatedCashPayments) * duesNominal;
       const updatedTransactions = applyAutoTxMutation(transactions, optimisticTotalAmount);
       onTransactionsChange(updatedTransactions);
 
@@ -2464,7 +2604,7 @@ export const KeuanganView: React.FC<KeuanganViewProps> = ({
       );
       onCashPaymentsChange(cashRes.items);
 
-      const latestTotalAmount = computeLunasCount(cashRes.items) * 10000;
+      const latestTotalAmount = computeLunasCount(cashRes.items) * duesNominal;
       const txRes = await mutateCloudCollection<FinancialTransaction>(
         'financialTransactions',
         ['kombel-financialTransactions'],
@@ -3589,7 +3729,19 @@ export const KeuanganView: React.FC<KeuanganViewProps> = ({
                     <span>Rekap Sekolah</span>
                   </button>
 
-                  {/* 4. Tombol LPJ Resmi PGRI */}
+                  {/* 4. Tombol Ekspor CSV / Excel */}
+                  <button
+                    type="button"
+                    onClick={handleExportBkuCsv}
+                    disabled={filteredTransactionsForTable.length === 0}
+                    title="Unduh Data Buku Kas Umum dalam Format CSV / Excel"
+                    className="flex-1 sm:flex-initial sm:w-auto px-3.5 sm:px-4 py-2.5 rounded-xl bg-[#faf8f5] [.dark_&]:bg-stone-800 dark:bg-stone-800 border border-stone-300 [.dark_&]:border-stone-700 dark:border-stone-700 hover:border-emerald-500/50 disabled:opacity-50 disabled:cursor-not-allowed text-stone-800 [.dark_&]:text-stone-200 dark:text-stone-200 font-semibold text-xs sm:text-sm hover:bg-stone-100 [.dark_&]:hover:bg-stone-700 dark:hover:bg-stone-700 active:scale-95 flex items-center justify-center gap-1.5 cursor-pointer shrink-0 shadow-sm transition-colors"
+                  >
+                    <Download className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+                    <span>Excel / CSV</span>
+                  </button>
+
+                  {/* 5. Tombol LPJ Resmi PGRI */}
                   <button
                     type="button"
                     onClick={handleExportOfficialLPJ}
@@ -3607,6 +3759,88 @@ export const KeuanganView: React.FC<KeuanganViewProps> = ({
                     <span>{isExportingLpj ? 'Menyiapkan PDF...' : 'Cetak LPJ'}</span>
                   </button>
                 </div>
+              </div>
+
+              {/* Baris Pencarian & Filter Riwayat Transaksi */}
+              <div className="space-y-2.5 mb-4">
+                <div className="flex flex-col sm:flex-row gap-2.5">
+                  <input
+                    type="text"
+                    value={txSearchQuery}
+                    onChange={(e) => setTxSearchQuery(e.target.value)}
+                    placeholder="Cari uraian transaksi..."
+                    className="flex-1 px-3.5 py-2.5 rounded-xl bg-[#faf8f5] [.dark_&]:bg-stone-800 dark:bg-stone-800 border border-stone-200 [.dark_&]:border-stone-700 dark:border-stone-700 text-stone-800 [.dark_&]:text-stone-100 dark:text-stone-100 text-xs font-medium focus:outline-none focus:ring-2 focus:ring-red-800/20 focus:border-red-700"
+                  />
+
+                  <select
+                    value={txFilterCategory}
+                    onChange={(e) => setTxFilterCategory(e.target.value)}
+                    className="sm:w-52 px-3.5 py-2.5 rounded-xl bg-[#faf8f5] [.dark_&]:bg-stone-800 dark:bg-stone-800 border border-stone-200 [.dark_&]:border-stone-700 dark:border-stone-700 text-stone-800 [.dark_&]:text-stone-100 dark:text-stone-100 text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-red-800/20 focus:border-red-700 cursor-pointer"
+                  >
+                    <option value="Semua" className={isDark ? 'bg-stone-800 text-stone-100' : 'bg-white text-stone-800'}>
+                      Semua Kategori Anggaran
+                    </option>
+                    {POS_ANGGARAN_OPTIONS.map((opt) => (
+                      <option key={opt} value={opt} className={isDark ? 'bg-stone-800 text-stone-100' : 'bg-white text-stone-800'}>
+                        {opt}
+                      </option>
+                    ))}
+                  </select>
+
+                  <select
+                    value={txFilterPeriod}
+                    onChange={(e) => setTxFilterPeriod(e.target.value)}
+                    className="sm:w-44 px-3.5 py-2.5 rounded-xl bg-[#faf8f5] [.dark_&]:bg-stone-800 dark:bg-stone-800 border border-stone-200 [.dark_&]:border-stone-700 dark:border-stone-700 text-stone-800 [.dark_&]:text-stone-100 dark:text-stone-100 text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-red-800/20 focus:border-red-700 cursor-pointer"
+                  >
+                    <option value="Semua" className={isDark ? 'bg-stone-800 text-stone-100' : 'bg-white text-stone-800'}>
+                      Semua Periode Bulan
+                    </option>
+                    {txAvailablePeriods.map((ym) => {
+                      const [yr, mId] = ym.split('-');
+                      const mName = MONTH_OPTIONS.find((m) => m.id === mId)?.name || mId;
+                      return (
+                        <option key={ym} value={ym} className={isDark ? 'bg-stone-800 text-stone-100' : 'bg-white text-stone-800'}>
+                          {mName} {yr}
+                        </option>
+                      );
+                    })}
+                  </select>
+
+                  {isTxFilterActive && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setTxSearchQuery('');
+                        setTxFilterCategory('Semua');
+                        setTxFilterPeriod('Semua');
+                      }}
+                      title="Reset Semua Filter"
+                      className="px-3.5 py-2.5 rounded-xl bg-red-50 [.dark_&]:bg-red-950/60 dark:bg-red-950/60 border border-red-200 [.dark_&]:border-red-800/60 dark:border-red-800/60 text-red-700 [.dark_&]:text-red-300 dark:text-red-300 hover:bg-red-100 [.dark_&]:hover:bg-red-900/60 font-bold text-xs flex items-center justify-center gap-1.5 cursor-pointer shrink-0 transition-colors"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                      <span>Reset</span>
+                    </button>
+                  )}
+                </div>
+
+                {isTxFilterActive && (
+                  <div className="px-4 py-2.5 rounded-xl bg-[#faf8f5] [.dark_&]:bg-stone-800/70 dark:bg-stone-800/70 border border-stone-200/80 [.dark_&]:border-stone-700/70 dark:border-stone-700/70 flex flex-wrap items-center justify-between gap-2 text-xs">
+                    <span className="font-semibold text-stone-600 [.dark_&]:text-stone-300 dark:text-stone-300">
+                      Menampilkan <strong>{filteredTransactionsForTable.length}</strong> transaksi terfilter:
+                    </span>
+                    <div className="flex flex-wrap items-center gap-3 font-mono font-bold">
+                      <span className="text-emerald-600 [.dark_&]:text-emerald-400 dark:text-emerald-400">
+                        Masuk: {formatRupiah(filteredTxSummary.pemasukan)}
+                      </span>
+                      <span className="text-red-700 [.dark_&]:text-red-400 dark:text-red-400">
+                        Keluar: {formatRupiah(filteredTxSummary.pengeluaran)}
+                      </span>
+                      <span className="text-stone-800 [.dark_&]:text-amber-300 dark:text-amber-300">
+                        Selisih: {formatRupiah(filteredTxSummary.selisih)}
+                      </span>
+                    </div>
+                  </div>
+                )}
               </div>
 
               {/* Tabel Riwayat Transaksi */}
@@ -3627,8 +3861,8 @@ export const KeuanganView: React.FC<KeuanganViewProps> = ({
                     </tr>
                   </thead>
                   <tbody className="text-sm">
-                    {transactionsWithRunningBalance.length > 0 ? (
-                      transactionsWithRunningBalance.map((tx, index) => (
+                    {filteredTransactionsForTable.length > 0 ? (
+                      filteredTransactionsForTable.map((tx, index) => (
                         <tr key={tx.id} className="border-b border-stone-100 [.dark_&]:border-stone-800/60 dark:border-stone-800/60 hover:bg-[#faf8f5] [.dark_&]:hover:bg-stone-800/60 dark:hover:bg-stone-800/60 transition-colors duration-150 group">
                           <td className="py-3.5 px-2 text-center font-bold text-stone-500 [.dark_&]:text-stone-400 dark:text-stone-400">
                             {index + 1}
@@ -3639,7 +3873,7 @@ export const KeuanganView: React.FC<KeuanganViewProps> = ({
                               if (isNaN(d.getTime())) return '-';
                               const isDanaMasuk =
                                 tx.id.startsWith('tx-kas-event-') ||
-                                /^dana masuk pada bulan/i.test((tx.description || '').trim());
+                                /^(dana masuk pada bulan|dana kontribusi bulan)/i.test((tx.description || '').trim());
                               const day = isDanaMasuk ? '02' : String(d.getDate()).padStart(2, '0');
                               const month = String(d.getMonth() + 1).padStart(2, '0');
                               const year = d.getFullYear();
@@ -3647,7 +3881,9 @@ export const KeuanganView: React.FC<KeuanganViewProps> = ({
                             })()}
                           </td>
                           <td className="py-3.5 px-4 text-stone-800 [.dark_&]:text-stone-200 dark:text-stone-200 font-medium">
-                            <span className="capitalize block truncate max-w-[260px]">{tx.description}</span>
+                            <span className="capitalize block">
+                              {formatTransactionDescription(tx)}
+                            </span>
                           </td>
                           <td className="py-3.5 px-4 text-center">
                             <div className="flex items-center justify-center gap-2">
@@ -3751,6 +3987,41 @@ export const KeuanganView: React.FC<KeuanganViewProps> = ({
 
                 {/* Filter Controls di Sebelah Kanan + Tombol Unduh PDF */}
                 <div className="flex flex-wrap items-center gap-2.5 w-full xl:w-auto">
+                  {/* Cari Nama Anggota */}
+                  <div className="relative w-full sm:w-48">
+                    <Search className="w-3.5 h-3.5 text-stone-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                    <input
+                      type="text"
+                      value={pesertaSearchQuery}
+                      onChange={(e) => setPesertaSearchQuery(e.target.value)}
+                      placeholder="Cari nama anggota..."
+                      className="w-full pl-8 pr-7 py-2.5 rounded-xl bg-[#faf8f5] [.dark_&]:bg-stone-800 dark:bg-stone-800 border border-stone-200 [.dark_&]:border-stone-700 dark:border-stone-700 text-stone-800 [.dark_&]:text-stone-100 dark:text-stone-100 text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-red-800/20 focus:border-red-700"
+                    />
+                    {pesertaSearchQuery && (
+                      <button
+                        type="button"
+                        onClick={() => setPesertaSearchQuery('')}
+                        className="absolute right-2.5 top-1/2 -translate-y-1/2 text-stone-400 hover:text-stone-600 cursor-pointer"
+                        title="Hapus pencarian"
+                      >
+                        <X className="w-3 h-3" />
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Filter Status Pembayaran */}
+                  <div className="flex-1 sm:flex-initial sm:w-36">
+                    <select
+                      value={pesertaStatusFilter}
+                      onChange={(e) => setPesertaStatusFilter(e.target.value as 'Semua' | 'Belum' | 'Lunas')}
+                      className="w-full px-3.5 py-2.5 rounded-xl bg-[#faf8f5] [.dark_&]:bg-stone-800 dark:bg-stone-800 border border-stone-200 [.dark_&]:border-stone-700 dark:border-stone-700 text-stone-800 [.dark_&]:text-stone-100 dark:text-stone-100 text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-red-800/20 focus:border-red-700 cursor-pointer truncate"
+                    >
+                      <option value="Semua" className={isDark ? "bg-stone-800 text-stone-100" : "bg-white text-stone-800"}>Semua Status</option>
+                      <option value="Belum" className={isDark ? "bg-stone-800 text-stone-100" : "bg-white text-stone-800"}>Belum Bayar</option>
+                      <option value="Lunas" className={isDark ? "bg-stone-800 text-stone-100" : "bg-white text-stone-800"}>Sudah Lunas</option>
+                    </select>
+                  </div>
+
                   {/* 4. Filter Tahun Pembayaran */}
                   <div className="flex-1 sm:flex-initial sm:w-32">
                     <select
@@ -3932,12 +4203,17 @@ export const KeuanganView: React.FC<KeuanganViewProps> = ({
                                     <p className="text-xs text-stone-500 [.dark_&]:text-stone-400 dark:text-stone-400 truncate">
                                       {teacher.school}
                                     </p>
+                                    {isLunas && payment?.datePaid && (
+                                      <p className="text-[10px] font-semibold text-emerald-700 [.dark_&]:text-emerald-400 dark:text-emerald-400 mt-0.5 truncate">
+                                        Lunas • {formatIsoToDDMMYYYY(payment.datePaid)}
+                                      </p>
+                                    )}
                                   </div>
                                 </div>
 
-                                {/* Badge + Icon Indikator Status + Tombol Kuitansi */}
+                                {/* Badge + Icon Indikator Status + Tombol Kuitansi / Pengingat WA */}
                                 <div className="flex items-center gap-1.5 shrink-0">
-                                  {isLunas && payment && (
+                                  {isLunas && payment ? (
                                     <button
                                       type="button"
                                       onClick={() => {
@@ -3949,6 +4225,31 @@ export const KeuanganView: React.FC<KeuanganViewProps> = ({
                                     >
                                       <Receipt className="w-4 h-4" />
                                     </button>
+                                  ) : (
+                                    isAdmin && (
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          const rawPhone = String(teacher.phone || '').replace(/[^0-9]/g, '');
+                                          const cleanPhone = rawPhone.startsWith('08') ? `62${rawPhone.slice(1)}` : rawPhone;
+                                          const msg =
+                                            `Assalamu'alaikum Wr. Wb.\n` +
+                                            `Yth. Bapak/Ibu *${teacher.name}* (${teacher.school || '-'})\n\n` +
+                                            `Mengingatkan dengan hormat untuk pembayaran kontribusi kas PGRI Ranting Gelang periode *${month.name} ${year}* sebesar *${formatRupiah(orgConfig.monthlyDuesAmount)}*.\n\n` +
+                                            `Transfer ke: *${orgConfig.bankName} ${orgConfig.bankAccountNumber}* a.n. ${orgConfig.bankAccountHolder}.\n` +
+                                            `Terima kasih atas perhatian dan kerjasamanya.`;
+                                          if (cleanPhone.length >= 9) {
+                                            openWhatsAppShare(msg, cleanPhone);
+                                          } else {
+                                            openWhatsAppShare(msg);
+                                          }
+                                        }}
+                                        title="Kirim Pengingat Pembayaran via WhatsApp"
+                                        className="w-8 h-8 flex items-center justify-center rounded-xl bg-emerald-100/80 hover:bg-emerald-200/80 text-emerald-700 [.dark_&]:bg-emerald-500/20 dark:bg-emerald-500/20 [.dark_&]:hover:bg-emerald-500/30 dark:hover:bg-emerald-500/30 [.dark_&]:text-emerald-300 dark:text-emerald-300 border border-emerald-200/70 [.dark_&]:border-emerald-700/40 dark:border-emerald-700/40 transition-all cursor-pointer active:scale-95"
+                                      >
+                                        <Send className="w-3.5 h-3.5" />
+                                      </button>
+                                    )
                                   )}
 
                                   <span className={`hidden sm:inline-block text-[10px] font-bold px-2 py-0.5 rounded-md transition-colors duration-300 ${isLunas
@@ -4163,6 +4464,100 @@ export const KeuanganView: React.FC<KeuanganViewProps> = ({
                     value={selectedConfirmTeacher?.school || '-'}
                     className="w-full px-3.5 py-2.5 rounded-xl bg-stone-100/80 [.dark_&]:bg-stone-800/50 dark:bg-stone-800/50 border border-stone-200 [.dark_&]:border-stone-700/60 dark:border-stone-700/60 text-stone-600 [.dark_&]:text-stone-400 dark:text-stone-400 font-medium cursor-not-allowed select-none truncate"
                   />
+                </div>
+              </div>
+
+              {/* Periode Bulan Pembayaran (Mendukung 1 Bulan maupun Rapel) */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block font-bold text-stone-700 [.dark_&]:text-stone-300 dark:text-stone-300 mb-1">
+                    Dari Bulan
+                  </label>
+                  <div className="grid grid-cols-2 gap-1.5">
+                    <select
+                      value={confirmStartMonth}
+                      onChange={(e) => {
+                        const m = e.target.value;
+                        setConfirmStartMonth(m);
+                        if (Number(confirmEndYear) * 12 + Number(confirmEndMonth) < Number(confirmStartYear) * 12 + Number(m)) {
+                          setConfirmEndMonth(m);
+                          setConfirmEndYear(confirmStartYear);
+                        }
+                      }}
+                      className="w-full px-2.5 py-2 rounded-xl bg-[#faf8f5] [.dark_&]:bg-stone-800 dark:bg-stone-800 border border-stone-200 [.dark_&]:border-stone-700 dark:border-stone-700 text-stone-800 [.dark_&]:text-stone-100 dark:text-stone-100 text-xs font-semibold cursor-pointer"
+                    >
+                      {MONTH_OPTIONS.filter(m => isPeriodActive(confirmStartYear, m.id)).map((m) => (
+                        <option key={m.id} value={m.id} className={isDark ? 'bg-stone-800 text-stone-100' : 'bg-white text-stone-800'}>
+                          {m.name}
+                        </option>
+                      ))}
+                    </select>
+                    <select
+                      value={confirmStartYear}
+                      onChange={(e) => {
+                        const y = e.target.value;
+                        setConfirmStartYear(y);
+                        let m = confirmStartMonth;
+                        if (!isPeriodActive(y, m)) {
+                          const firstValid = MONTH_OPTIONS.find(opt => isPeriodActive(y, opt.id));
+                          if (firstValid) {
+                            m = firstValid.id;
+                            setConfirmStartMonth(m);
+                          }
+                        }
+                        if (Number(confirmEndYear) * 12 + Number(confirmEndMonth) < Number(y) * 12 + Number(m)) {
+                          setConfirmEndYear(y);
+                          setConfirmEndMonth(m);
+                        }
+                      }}
+                      className="w-full px-2.5 py-2 rounded-xl bg-[#faf8f5] [.dark_&]:bg-stone-800 dark:bg-stone-800 border border-stone-200 [.dark_&]:border-stone-700 dark:border-stone-700 text-stone-800 [.dark_&]:text-stone-100 dark:text-stone-100 text-xs font-semibold cursor-pointer"
+                    >
+                      {YEAR_OPTIONS.map((yr) => (
+                        <option key={yr} value={yr} className={isDark ? 'bg-stone-800 text-stone-100' : 'bg-white text-stone-800'}>
+                          {yr}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block font-bold text-stone-700 [.dark_&]:text-stone-300 dark:text-stone-300 mb-1">
+                    Sampai Bulan
+                  </label>
+                  <div className="grid grid-cols-2 gap-1.5">
+                    <select
+                      value={confirmEndMonth}
+                      onChange={(e) => setConfirmEndMonth(e.target.value)}
+                      className="w-full px-2.5 py-2 rounded-xl bg-[#faf8f5] [.dark_&]:bg-stone-800 dark:bg-stone-800 border border-stone-200 [.dark_&]:border-stone-700 dark:border-stone-700 text-stone-800 [.dark_&]:text-stone-100 dark:text-stone-100 text-xs font-semibold cursor-pointer"
+                    >
+                      {MONTH_OPTIONS.filter(m =>
+                        isPeriodActive(confirmEndYear, m.id) &&
+                        Number(confirmEndYear) * 12 + Number(m.id) >= Number(confirmStartYear) * 12 + Number(confirmStartMonth)
+                      ).map((m) => (
+                        <option key={m.id} value={m.id} className={isDark ? 'bg-stone-800 text-stone-100' : 'bg-white text-stone-800'}>
+                          {m.name}
+                        </option>
+                      ))}
+                    </select>
+                    <select
+                      value={confirmEndYear}
+                      onChange={(e) => {
+                        const y = e.target.value;
+                        setConfirmEndYear(y);
+                        if (Number(y) * 12 + Number(confirmEndMonth) < Number(confirmStartYear) * 12 + Number(confirmStartMonth)) {
+                          setConfirmEndMonth(confirmStartMonth);
+                        }
+                      }}
+                      className="w-full px-2.5 py-2 rounded-xl bg-[#faf8f5] [.dark_&]:bg-stone-800 dark:bg-stone-800 border border-stone-200 [.dark_&]:border-stone-700 dark:border-stone-700 text-stone-800 [.dark_&]:text-stone-100 dark:text-stone-100 text-xs font-semibold cursor-pointer"
+                    >
+                      {YEAR_OPTIONS.filter(yr => Number(yr) >= Number(confirmStartYear)).map((yr) => (
+                        <option key={yr} value={yr} className={isDark ? 'bg-stone-800 text-stone-100' : 'bg-white text-stone-800'}>
+                          {yr}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
                 </div>
               </div>
 
@@ -4678,27 +5073,40 @@ export const KeuanganView: React.FC<KeuanganViewProps> = ({
                 const volParsed = volRaw ? parseFloat(volRaw.replace(',', '.')) : 1;
                 const effectiveVol = !isNaN(volParsed) && volParsed > 0 ? volParsed : 1;
                 const totalComputed = nominalVal > 0 ? Math.round(nominalVal * effectiveVol) : 0;
+                const availableBalanceForTx = saldoAkhir + (editingTx && editingTx.type === 'Pengeluaran' ? editingTx.amount : 0);
+                const isOverdraft = formData.type === 'Pengeluaran' && totalComputed > availableBalanceForTx;
 
                 return (
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 items-end">
-                    <div>
-                      <label className="block text-center font-bold text-stone-700 [.dark_&]:text-stone-300 dark:text-stone-300 mb-1">
-                        Total (Rp)
-                      </label>
-                      <input
-                        type="text"
-                        readOnly
-                        disabled
-                        value={totalComputed > 0 ? `Rp. ${totalComputed.toLocaleString('id-ID')}` : 'Rp. 0'}
-                        className="w-full px-4 py-2.5 rounded-xl bg-stone-100/90 [.dark_&]:bg-stone-800/60 dark:bg-stone-800/60 border border-stone-200 [.dark_&]:border-stone-700/70 dark:border-stone-700/70 text-stone-900 [.dark_&]:text-amber-300 dark:text-amber-300 font-bold font-mono cursor-not-allowed select-none"
-                      />
+                  <div className="space-y-2">
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 items-end">
+                      <div>
+                        <label className="block text-center font-bold text-stone-700 [.dark_&]:text-stone-300 dark:text-stone-300 mb-1">
+                          Total (Rp)
+                        </label>
+                        <input
+                          type="text"
+                          readOnly
+                          disabled
+                          value={totalComputed > 0 ? `Rp. ${totalComputed.toLocaleString('id-ID')}` : 'Rp. 0'}
+                          className="w-full px-4 py-2.5 rounded-xl bg-stone-100/90 [.dark_&]:bg-stone-800/60 dark:bg-stone-800/60 border border-stone-200 [.dark_&]:border-stone-700/70 dark:border-stone-700/70 text-stone-900 [.dark_&]:text-amber-300 dark:text-amber-300 font-bold font-mono cursor-not-allowed select-none"
+                        />
+                      </div>
+
+                      <div className="sm:col-span-2 py-2.5 flex items-center">
+                        <p className="text-xs sm:text-sm italic font-medium text-stone-600 [.dark_&]:text-stone-300 dark:text-stone-300 leading-snug">
+                          {totalComputed > 0 ? formatTerbilangRupiah(totalComputed) : '(Nol rupiah)'}
+                        </p>
+                      </div>
                     </div>
 
-                    <div className="sm:col-span-2 py-2.5 flex items-center">
-                      <p className="text-xs sm:text-sm italic font-medium text-stone-600 [.dark_&]:text-stone-300 dark:text-stone-300 leading-snug">
-                        {totalComputed > 0 ? formatTerbilangRupiah(totalComputed) : '(Nol rupiah)'}
-                      </p>
-                    </div>
+                    {isOverdraft && (
+                      <div className="p-2.5 rounded-xl bg-amber-50 [.dark_&]:bg-amber-950/50 dark:bg-amber-950/50 border border-amber-300 [.dark_&]:border-amber-700/60 dark:border-amber-700/60 flex items-center gap-2 text-amber-800 [.dark_&]:text-amber-300 dark:text-amber-300 text-xs font-semibold">
+                        <AlertCircle className="w-4 h-4 shrink-0 text-amber-600 dark:text-amber-400" />
+                        <span>
+                          Perhatian: Total pengeluaran melebihi saldo kas tersedia ({formatRupiah(availableBalanceForTx)}). Pastikan nominal sudah benar.
+                        </span>
+                      </div>
+                    )}
                   </div>
                 );
               })()}
@@ -5027,7 +5435,8 @@ export const KeuanganView: React.FC<KeuanganViewProps> = ({
               const bendaharaNpa = receiptSigners.bendaharaNpaLabel;
               const nipOrNpa = (teacher as any).nip || (teacher as any).npa || '-';
               const formattedPaidDate = formatReceiptPaidDate(payment?.datePaid);
-              const terbilangText = formatTerbilangRupiah(orgConfig.monthlyDuesAmount);
+              const receiptNominal = resolveReceiptAmount(payment);
+              const terbilangText = formatTerbilangRupiah(receiptNominal);
 
               return (
                 <div className="p-6 space-y-4">
@@ -5086,7 +5495,7 @@ export const KeuanganView: React.FC<KeuanganViewProps> = ({
                     </span>
                     <div className="text-right">
                       <span className="block font-display text-lg font-black text-stone-900 [.dark_&]:text-white dark:text-white">
-                        {formatRupiah(orgConfig.monthlyDuesAmount)}
+                        {formatRupiah(receiptNominal)}
                       </span>
                       <span className="block text-[11px] italic font-medium text-stone-600 [.dark_&]:text-stone-300 dark:text-stone-300">
                         {terbilangText}
@@ -5107,7 +5516,7 @@ export const KeuanganView: React.FC<KeuanganViewProps> = ({
                           `NIP/NPA: ${nipOrNpa}\n` +
                           `Sekolah: ${teacher.school || '-'}\n` +
                           `Periode: *${month.name} ${year}*\n` +
-                          `Nominal: *${formatRupiah(orgConfig.monthlyDuesAmount)}* ${terbilangText}\n` +
+                          `Nominal: *${formatRupiah(receiptNominal)}* ${terbilangText}\n` +
                           `Tanggal Bayar: ${formattedPaidDate}\n` +
                           `Status: *LUNAS*\n` +
                           `Bendahara PGRI Ranting Gelang: ${bendaharaName} (${bendaharaNpa})\n\n` +

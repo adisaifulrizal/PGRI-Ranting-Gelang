@@ -259,19 +259,23 @@ service cloud.firestore {
 
     function isValidSuratAgenda(data) {
       return data.keys().hasAll(['id', 'direction', 'nomorSurat', 'tanggalSurat', 'asalTujuan', 'perihal']) &&
-        data.keys().hasOnly(['id', 'direction', 'nomorSurat', 'tanggalSurat', 'asalTujuan', 'perihal', 'lampiranUrl', 'catatan']) &&
+        data.keys().hasOnly(['id', 'direction', 'nomorAgenda', 'nomorSurat', 'tanggalSurat', 'tanggalTerima', 'asalTujuan', 'perihal', 'disposisi', 'statusTindakLanjut', 'lampiranUrl', 'catatan']) &&
         isValidId(data.id) &&
         data.direction in ['Masuk', 'Keluar'] &&
+        (!('nomorAgenda' in data) || (data.nomorAgenda is string && data.nomorAgenda.size() <= 60)) &&
         data.nomorSurat is string && data.nomorSurat.size() >= 1 && data.nomorSurat.size() <= 120 &&
         data.tanggalSurat is string && data.tanggalSurat.size() <= 32 &&
+        (!('tanggalTerima' in data) || (data.tanggalTerima is string && data.tanggalTerima.size() <= 32)) &&
         data.asalTujuan is string && data.asalTujuan.size() >= 1 && data.asalTujuan.size() <= 200 &&
         data.perihal is string && data.perihal.size() >= 1 && data.perihal.size() <= 300 &&
+        (!('disposisi' in data) || (data.disposisi is string && data.disposisi.size() <= 300)) &&
+        (!('statusTindakLanjut' in data) || data.statusTindakLanjut in ['Baru', 'Diproses', 'Selesai']) &&
         (!('lampiranUrl' in data) || (data.lampiranUrl is string && data.lampiranUrl.size() <= 600)) &&
         (!('catatan' in data) || (data.catatan is string && data.catatan.size() <= 500));
     }
 
     function isValidMemberRegistration(data) {
-      return data.keys().hasAll(['id', 'name', 'school', 'npa', 'isActive', 'activeStatus', 'createdAt']) &&
+      return data.keys().hasAll(['id', 'name', 'school', 'isActive', 'activeStatus', 'createdAt']) &&
         data.keys().hasOnly([
           'id', 'name', 'nickname', 'gender', 'school', 'nip', 'npa', 'role',
           'avatar', 'phone', 'email', 'employmentStatus', 'certificationStatus',
@@ -283,7 +287,7 @@ service cloud.firestore {
         (!('gender' in data) || data.gender in ['L', 'P']) &&
         data.school is string && data.school.size() >= 1 && data.school.size() <= 160 &&
         (!('nip' in data) || (data.nip is string && data.nip.size() <= 40)) &&
-        data.npa is string && data.npa.matches('^\\d{11}$') &&
+        (!('npa' in data) || (data.npa is string && (data.npa.size() == 0 || (data.npa.size() == 11 && data.npa.matches('^\\d{11}$'))))) &&
         (!('role' in data) || (data.role is string && data.role.size() <= 80)) &&
         (!('avatar' in data) || (data.avatar is string && data.avatar.size() <= 500)) &&
         (!('phone' in data) || (data.phone is string && data.phone.size() <= 40)) &&

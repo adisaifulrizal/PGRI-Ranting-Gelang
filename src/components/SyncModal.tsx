@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   X, 
   RefreshCw, 
@@ -12,8 +12,53 @@ import {
   ClipboardList,
   HeartHandshake,
   FileText,
-  Phone
+  Phone,
+  Clock
 } from 'lucide-react';
+import { getLocalVersions, SyncVersionKey } from '../lib/sync';
+
+const MODULE_LAST_SYNC_KEY = 'pgri-module-last-sync';
+
+const MODULE_VERSION_KEYS: Record<string, SyncVersionKey[]> = {
+  anggota: ['teachers'],
+  jadwal: ['events', 'attendanceList'],
+  keuangan: ['financialTransactions', 'cashPayments'],
+  sosial: ['dana_sosial', 'aspirasi_items'],
+  proker: ['proker_items'],
+  forum_pengumuman: ['announcements'],
+  undangan: ['invitations', 'suratAgenda', 'notulen'],
+  kontak: ['kontakFeedback'],
+  pengaturan: ['settings']
+};
+
+function readModuleLastSyncMap(): Record<string, number> {
+  if (typeof window === 'undefined') return {};
+  try {
+    const raw = localStorage.getItem(MODULE_LAST_SYNC_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        return parsed;
+      }
+    }
+  } catch {}
+  return {};
+}
+
+function formatSyncTimestamp(ts: number): string {
+  if (!ts || ts <= 1000000000000) return '';
+  const d = new Date(ts);
+  if (isNaN(d.getTime())) return '';
+  const now = new Date();
+  const isToday =
+    d.getDate() === now.getDate() &&
+    d.getMonth() === now.getMonth() &&
+    d.getFullYear() === now.getFullYear();
+  const timeStr = d.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
+  if (isToday) return `Hari ini, ${timeStr}`;
+  const dateStr = d.toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' });
+  return `${dateStr} • ${timeStr}`;
+}
 
 export interface SyncModuleOption {
   id: string;
@@ -129,8 +174,38 @@ export const SyncModal: React.FC<SyncModalProps> = ({
   const isDark = theme === 'dark';
   const [syncingModuleId, setSyncingModuleId] = useState<string | null>(null);
   const [successModuleId, setSuccessModuleId] = useState<string | null>(null);
+  const [moduleLastSyncMap, setModuleLastSyncMap] = useState<Record<string, number>>(() => readModuleLastSyncMap());
+
+  useEffect(() => {
+    if (isOpen) {
+      setModuleLastSyncMap(readModuleLastSyncMap());
+    }
+  }, [isOpen]);
 
   if (!isOpen) return null;
+
+  const localVersions = getLocalVersions();
+
+  const getModuleSyncStatusText = (moduleId: string): string => {
+    const explicitTs = moduleLastSyncMap[moduleId] || 0;
+    if (explicitTs > 0) {
+      const formatted = formatSyncTimestamp(explicitTs);
+      if (formatted) return `Terakhir ditarik: ${formatted}`;
+    }
+    const vKeys = MODULE_VERSION_KEYS[moduleId] || [];
+    const maxVersionTs = vKeys.reduce((acc, k) => {
+      const val = Number(localVersions[k] || 0);
+      return val > acc ? val : acc;
+    }, 0);
+    if (maxVersionTs > 1000000000000) {
+      const formatted = formatSyncTimestamp(maxVersionTs);
+      if (formatted) return `Versi lokal: ${formatted}`;
+    }
+    if (maxVersionTs > 0) {
+      return 'Data lokal tersedia';
+    }
+    return 'Belum pernah ditarik manual';
+  };
 
   const handleSyncSingleModule = async (moduleId: string) => {
     if (isSyncing || syncingModuleId) return;
@@ -138,6 +213,19 @@ export const SyncModal: React.FC<SyncModalProps> = ({
     setSuccessModuleId(null);
     try {
       await onExecuteSync([moduleId]);
+      const nowTs = Date.now();
+      const nextMap = { ...readModuleLastSyncMap() };
+      if (moduleId === 'semua') {
+        SYNC_MODULES.forEach((m) => {
+          nextMap[m.id] = nowTs;
+        });
+      } else {
+        nextMap[moduleId] = nowTs;
+      }
+      try {
+        localStorage.setItem(MODULE_LAST_SYNC_KEY, JSON.stringify(nextMap));
+      } catch {}
+      setModuleLastSyncMap(nextMap);
       setSuccessModuleId(moduleId);
       setTimeout(() => {
         setSyncingModuleId(null);
@@ -257,6 +345,16 @@ export const SyncModal: React.FC<SyncModalProps> = ({
                     }`}>
                       {mod.description}
                     </p>
+                    <p className={`text-[10px] mt-1 inline-flex items-center gap-1 font-medium ${
+                      isSuccess
+                        ? 'text-white/90'
+                        : isDark
+                        ? 'text-stone-500'
+                        : 'text-stone-400'
+                    }`}>
+                      <Clock className="w-2.5 h-2.5 shrink-0" />
+                      <span>{getModuleSyncStatusText(mod.id)}</span>
+                    </p>
                   </div>
                 </div>
 
@@ -288,23 +386,51 @@ export const SyncModal: React.FC<SyncModalProps> = ({
           })}
         </div>
 
-        {/* Footer Info */}
-        <div className={`px-5 py-3.5 border-t flex items-center justify-between gap-3 shrink-0 ${
+        {/* Footer Info & Aksi Tarik Semua */}
+        <div className={`px-5 py-3.5 border-t flex flex-wrap items-center justify-between gap-2.5 shrink-0 ${
           isDark ? 'border-stone-800 bg-stone-900' : 'border-stone-100 bg-[#faf8f5]'
         }`}>
-          <p className={`text-[11px] ${isDark ? 'text-stone-400' : 'text-stone-500'}`}>
-            Hanya menarik data pada <strong>menu yang dipilih</strong> agar hemat kuota Cloud.
+          <p className={`text-[11px] flex-1 min-w-[160px] ${isDark ? 'text-stone-400' : 'text-stone-500'}`}>
+            Tarik per menu untuk hemat kuota, atau gunakan <strong>Tarik Semua</strong> bila perlu sinkron penuh.
           </p>
 
-          <button
-            onClick={onClose}
-            disabled={isSyncing || syncingModuleId !== null}
-            className={`px-4 py-1.5 rounded-lg text-xs font-semibold border transition-colors active:scale-95 disabled:opacity-50 cursor-pointer ${
-              isDark ? 'border-stone-700 hover:bg-stone-800 text-stone-300' : 'border-stone-300 hover:bg-stone-100 text-stone-700'
-            }`}
-          >
-            Tutup
-          </button>
+          <div className="flex items-center gap-2 ml-auto">
+            <button
+              type="button"
+              onClick={() => handleSyncSingleModule('semua')}
+              disabled={isSyncing || syncingModuleId !== null}
+              className={`px-3.5 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all active:scale-95 disabled:opacity-60 cursor-pointer shadow-sm ${
+                successModuleId === 'semua'
+                  ? 'bg-emerald-700 text-white'
+                  : 'bg-red-800 hover:bg-red-700 text-white'
+              }`}
+            >
+              {syncingModuleId === 'semua' ? (
+                <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+              ) : successModuleId === 'semua' ? (
+                <Check className="w-3.5 h-3.5 stroke-[3]" />
+              ) : (
+                <ArrowDownToLine className="w-3.5 h-3.5" />
+              )}
+              <span>
+                {syncingModuleId === 'semua'
+                  ? 'Menarik Semua...'
+                  : successModuleId === 'semua'
+                  ? 'Semua Tersinkron'
+                  : 'Tarik Semua'}
+              </span>
+            </button>
+
+            <button
+              onClick={onClose}
+              disabled={isSyncing || syncingModuleId !== null}
+              className={`px-4 py-1.5 rounded-lg text-xs font-semibold border transition-colors active:scale-95 disabled:opacity-50 cursor-pointer ${
+                isDark ? 'border-stone-700 hover:bg-stone-800 text-stone-300' : 'border-stone-300 hover:bg-stone-100 text-stone-700'
+              }`}
+            >
+              Tutup
+            </button>
+          </div>
         </div>
       </div>
     </div>

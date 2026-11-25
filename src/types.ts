@@ -170,10 +170,14 @@ export interface AspirasiItem {
 export interface SuratAgendaItem {
   id: string;
   direction: 'Masuk' | 'Keluar';
+  nomorAgenda?: string;
   nomorSurat: string;
   tanggalSurat: string;
+  tanggalTerima?: string;
   asalTujuan: string;
   perihal: string;
+  disposisi?: string;
+  statusTindakLanjut?: 'Baru' | 'Diproses' | 'Selesai';
   lampiranUrl?: string;
   catatan?: string;
 }

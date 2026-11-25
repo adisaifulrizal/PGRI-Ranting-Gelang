@@ -438,6 +438,8 @@ export const PengaturanView: React.FC<{
   const [newRolePosition, setNewRolePosition] = useState('');
   const [editingRoleEmail, setEditingRoleEmail] = useState<string | null>(null);
   const [isSavingRole, setIsSavingRole] = useState(false);
+  const [pendingRemoveRole, setPendingRemoveRole] = useState<PengurusAssignment | null>(null);
+  const [isRemovingRole, setIsRemovingRole] = useState(false);
 
   const isRoleFormComplete =
     newRoleEmail.trim() !== '' &&
@@ -886,7 +888,7 @@ export const PengaturanView: React.FC<{
 
   const handleRestore = () => {
     if (pengurusRole !== 'ketua') {
-      showSystemNotice('warning', 'Fitur Restore Data penuh hanya dapat dilakukan oleh Ketua / Super Admin.');
+      showSystemNotice('warning', 'Fitur Restore Data penuh hanya dapat dilakukan oleh Admin Aplikasi.');
       return;
     }
     if (isBackingUp || isRestoring) return;
@@ -1859,7 +1861,7 @@ export const PengaturanView: React.FC<{
                     onChange={(e) => setNewRoleType(e.target.value as PengurusRole)}
                     className={`w-full px-3 py-2.5 rounded-xl border text-xs font-bold focus:outline-none focus:border-red-700 ${isDark ? 'bg-stone-900 border-stone-700 text-white' : 'bg-white border-stone-200 text-stone-800'}`}
                   >
-                    <option value="ketua">Ketua / Super Admin</option>
+                    <option value="ketua">Admin Aplikasi</option>
                     <option value="sekretaris">Sekretaris</option>
                     <option value="bendahara">Bendahara</option>
                     <option value="seksi">Pengurus Seksi</option>
@@ -1918,7 +1920,7 @@ export const PengaturanView: React.FC<{
                     <p className="text-[11px] text-stone-400 font-mono">{SUPER_ADMIN_EMAIL}</p>
                   </div>
                   <span className={`px-3 py-1 rounded-md text-[10px] font-extrabold uppercase self-start sm:self-center border ${isDark ? 'bg-red-950/80 border-red-800/60 text-amber-300' : 'bg-red-100 border-red-200 text-red-900'}`}>
-                    Ketua / Super Admin
+                    Admin Aplikasi
                   </span>
                 </div>
 
@@ -1957,7 +1959,7 @@ export const PengaturanView: React.FC<{
                             </button>
                             <button
                               type="button"
-                              onClick={() => handleRemoveRole(item.email)}
+                              onClick={() => setPendingRemoveRole(item)}
                               className="p-1.5 rounded-lg text-red-500 hover:bg-red-500/15 cursor-pointer"
                               title="Cabut hak akses"
                             >
@@ -2150,7 +2152,7 @@ export const PengaturanView: React.FC<{
                 isDark ? 'bg-stone-800/50 border-stone-700 text-stone-400' : 'bg-stone-50 border-stone-200 text-stone-500'
               }`}>
                 <ShieldCheck className="w-4 h-4 shrink-0 text-amber-500" />
-                <span>Restore Data penuh khusus Ketua / Super Admin</span>
+                <span>Restore Data penuh khusus Admin Aplikasi</span>
               </div>
             )}
           </div>
@@ -2192,6 +2194,62 @@ export const PengaturanView: React.FC<{
               >
                 {isRestoring ? <Loader2 className="w-4 h-4 animate-spin" /> : <UploadCloud className="w-4 h-4" />}
                 <span>{isRestoring ? 'Memproses...' : 'Ya, Restore'}</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Konfirmasi Cabut Hak Akses Pengurus */}
+      {pendingRemoveRole && (
+        <div
+          className="fixed inset-0 z-[95] flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm animate-in fade-in duration-200"
+          onClick={() => !isRemovingRole && setPendingRemoveRole(null)}
+        >
+          <div
+            className={`${isDark ? 'bg-stone-900 border-stone-800' : 'bg-white border-stone-200'} rounded-2xl max-w-md w-full p-6 shadow-2xl border space-y-4 animate-in zoom-in-95 duration-200`}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-start gap-3">
+              <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 border ${isDark ? 'bg-red-950/60 border-red-800/50 text-red-400' : 'bg-red-50 border-red-200 text-red-700'}`}>
+                <AlertTriangle className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className={`font-display font-bold text-base ${isDark ? 'text-white' : 'text-stone-900'}`}>
+                  Cabut Hak Akses Pengurus?
+                </h3>
+                <p className={`text-xs mt-1 leading-relaxed ${isDark ? 'text-stone-300' : 'text-stone-600'}`}>
+                  Akun <strong>{pendingRemoveRole.name || pendingRemoveRole.email}</strong> ({pendingRemoveRole.email}) dengan peran <strong>{PENGURUS_ROLE_LABELS[pendingRemoveRole.role]}</strong> akan langsung kehilangan akses Admin / Pengurus.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex gap-3 pt-2">
+              <button
+                type="button"
+                disabled={isRemovingRole}
+                onClick={() => setPendingRemoveRole(null)}
+                className={`flex-1 px-4 py-2.5 rounded-xl font-bold text-xs transition-colors cursor-pointer disabled:opacity-60 border ${isDark ? 'bg-stone-800 border-stone-700 hover:bg-stone-700 text-stone-300' : 'bg-stone-100 border-stone-200 hover:bg-stone-200 text-stone-700'}`}
+              >
+                Batal
+              </button>
+              <button
+                type="button"
+                disabled={isRemovingRole}
+                onClick={async () => {
+                  const targetEmail = pendingRemoveRole.email;
+                  setIsRemovingRole(true);
+                  try {
+                    await handleRemoveRole(targetEmail);
+                  } finally {
+                    setIsRemovingRole(false);
+                    setPendingRemoveRole(null);
+                  }
+                }}
+                className="flex-1 px-4 py-2.5 rounded-xl bg-red-800 hover:bg-red-700 disabled:opacity-60 text-white font-bold text-xs uppercase tracking-wider flex items-center justify-center gap-2 shadow-sm transition-all active:scale-95 cursor-pointer"
+              >
+                {isRemovingRole ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
+                <span>{isRemovingRole ? 'Mencabut...' : 'Ya, Cabut Akses'}</span>
               </button>
             </div>
           </div>

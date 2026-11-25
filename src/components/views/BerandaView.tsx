@@ -32,6 +32,34 @@ interface BerandaViewProps {
   isEntryReady?: boolean;
 }
 
+// Komponen countdown terisolasi agar timer 1 detik tidak me-render ulang seluruh BerandaView
+const EventCountdownDisplay: React.FC<{ startMs: number; isLight: boolean }> = ({ startMs, isLight }) => {
+  const [nowMs, setNowMs] = useState(() => Date.now());
+
+  useEffect(() => {
+    const id = setInterval(() => {
+      setNowMs(Date.now());
+    }, 1000);
+    return () => clearInterval(id);
+  }, []);
+
+  const totalSeconds = Math.max(0, Math.floor((startMs - nowMs) / 1000));
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  const pad = (n: number) => String(n).padStart(2, '0');
+
+  return (
+    <span className={`text-[11px] font-bold font-mono tabular-nums tracking-wide leading-none ${isLight ? 'text-amber-900' : 'text-amber-300'} inline-flex items-center`}>
+      <span className="leading-none">{pad(hours)}</span>
+      <span className="animate-colon mx-0.5 leading-none">:</span>
+      <span className="leading-none">{pad(minutes)}</span>
+      <span className="animate-colon mx-0.5 leading-none">:</span>
+      <span className="leading-none">{pad(seconds)}</span>
+    </span>
+  );
+};
+
 // Fallback kosong jika data anggota belum tersedia (menghindari tampilan sekolah fiktif di luar Ranting Gelang)
 const DEFAULT_TEACHERS_SAMPLE: Teacher[] = [];
 
@@ -214,7 +242,7 @@ export const BerandaView: React.FC<BerandaViewProps> = ({
 
     const timer = setInterval(() => {
       setCurrentTime(new Date());
-    }, 1000);
+    }, 30000);
 
     return () => {
       clearInterval(timer);
@@ -391,6 +419,7 @@ export const BerandaView: React.FC<BerandaViewProps> = ({
         h: pad(hours),
         m: pad(minutes),
         s: pad(seconds),
+        startMs: start.getTime(),
         text: `${pad(hours)}:${pad(minutes)}:${pad(seconds)}`, 
         isFinished: false, 
         isOngoing: false, 
@@ -1646,14 +1675,8 @@ export const BerandaView: React.FC<BerandaViewProps> = ({
                       ) : (
                         <Clock className={`w-3.5 h-3.5 shrink-0 ${isLight ? 'text-amber-700' : 'text-amber-400'}`} />
                       )}
-                      {statusInfo.isCountdown ? (
-                        <span className={`text-[11px] font-bold font-mono tabular-nums tracking-wide leading-none ${isLight ? 'text-amber-900' : 'text-amber-300'} inline-flex items-center`}>
-                          <span className="leading-none">{statusInfo.h}</span>
-                          <span className="animate-colon mx-0.5 leading-none">:</span>
-                          <span className="leading-none">{statusInfo.m}</span>
-                          <span className="animate-colon mx-0.5 leading-none">:</span>
-                          <span className="leading-none">{statusInfo.s}</span>
-                        </span>
+                      {statusInfo.isCountdown && statusInfo.startMs ? (
+                        <EventCountdownDisplay startMs={statusInfo.startMs} isLight={isLight} />
                       ) : (
                         <span className={`text-[11px] font-bold font-mono tracking-wide leading-none inline-flex items-center ${
                           statusInfo.isOngoing

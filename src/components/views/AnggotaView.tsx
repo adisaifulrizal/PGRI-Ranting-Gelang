@@ -30,7 +30,8 @@ import {
   AlertCircle,
   CreditCard,
   Upload,
-  FileSpreadsheet
+  FileSpreadsheet,
+  SlidersHorizontal
 } from 'lucide-react';
 import { Teacher, ActivityEvent, AttendanceRecord } from '../../types';
 import { getOrgConfig, openWhatsAppShare } from '../../lib/orgConfig';
@@ -100,6 +101,7 @@ export const AnggotaView: React.FC<AnggotaViewProps> = ({
   const [selectedActiveStatus, setSelectedActiveStatus] = useState('Semua');
   const [selectedGender, setSelectedGender] = useState('Semua');
   const [selectedSchool, setSelectedSchool] = useState('Semua');
+  const [showMobileFilters, setShowMobileFilters] = useState(false);
   const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
 
   // Deteksi status dark mode dari DOM class (tanpa flicker awal)
@@ -2339,21 +2341,21 @@ export const AnggotaView: React.FC<AnggotaViewProps> = ({
         {/* Kotak 3: KEAKTIFAN ANGGOTA */}
         <div 
           onClick={handleOpenInactiveModal}
-          className="hidden md:flex w-full bg-white [.dark_&]:bg-stone-900 dark:bg-stone-900 border border-stone-200/90 [.dark_&]:border-stone-800 dark:border-stone-800 hover:border-amber-400 [.dark_&]:hover:border-amber-700/60 dark:hover:border-amber-700/60 rounded-2xl p-6 shadow-sm items-center gap-5 relative overflow-hidden cursor-pointer active:scale-95 group transition-colors"
+          className="flex col-span-2 md:col-span-1 w-full bg-white [.dark_&]:bg-stone-900 dark:bg-stone-900 border border-stone-200/90 [.dark_&]:border-stone-800 dark:border-stone-800 hover:border-amber-400 [.dark_&]:hover:border-amber-700/60 dark:hover:border-amber-700/60 rounded-2xl p-3.5 sm:p-6 shadow-sm items-center gap-3 sm:gap-5 relative overflow-hidden cursor-pointer active:scale-95 group transition-colors"
           title="Klik untuk melihat detail keaktifan"
         >
-          <div className="w-14 h-14 rounded-xl bg-amber-50 [.dark_&]:bg-amber-950/60 dark:bg-amber-950/60 border border-amber-200 [.dark_&]:border-amber-800/50 dark:border-amber-800/50 flex items-center justify-center shrink-0">
-            <UserX className="w-7 h-7 text-amber-700 [.dark_&]:text-amber-400 dark:text-amber-400" />
+          <div className="w-10 sm:w-14 h-10 sm:h-14 rounded-xl bg-amber-50 [.dark_&]:bg-amber-950/60 dark:bg-amber-950/60 border border-amber-200 [.dark_&]:border-amber-800/50 dark:border-amber-800/50 flex items-center justify-center shrink-0">
+            <UserX className="w-5 sm:w-7 h-5 sm:h-7 text-amber-700 [.dark_&]:text-amber-400 dark:text-amber-400" />
           </div>
-          <div className="space-y-1">
-            <p className="text-[11px] font-extrabold tracking-widest uppercase text-amber-700 [.dark_&]:text-amber-400 dark:text-amber-400 flex items-center gap-1.5">
-              KEAKTIFAN ANGGOTA
-              <span className="text-[9px] bg-amber-100 [.dark_&]:bg-amber-950/80 dark:bg-amber-950/80 text-amber-800 [.dark_&]:text-amber-300 dark:text-amber-300 px-2 py-0.5 rounded-md font-bold">Detail</span>
+          <div className="space-y-0.5 sm:space-y-1 min-w-0">
+            <p className="text-[10px] sm:text-[11px] font-extrabold tracking-widest uppercase text-amber-700 [.dark_&]:text-amber-400 dark:text-amber-400 flex items-center gap-1.5">
+              <span>KEAKTIFAN ANGGOTA</span>
+              <span className="text-[8px] sm:text-[9px] bg-amber-100 [.dark_&]:bg-amber-950/80 dark:bg-amber-950/80 text-amber-800 [.dark_&]:text-amber-300 dark:text-amber-300 px-1.5 sm:px-2 py-0.5 rounded-md font-bold">Detail</span>
             </p>
-            <p className="font-display text-3xl font-extrabold text-stone-900 [.dark_&]:text-white dark:text-white leading-none">
+            <p className="font-display text-2xl sm:text-3xl font-extrabold text-stone-900 [.dark_&]:text-white dark:text-white leading-none">
               {activeTeachers.length}
             </p>
-            <p className="text-[11px] font-semibold text-stone-500 [.dark_&]:text-stone-400 dark:text-stone-400 pt-0.5">
+            <p className="text-[10px] sm:text-[11px] font-semibold text-stone-500 [.dark_&]:text-stone-400 dark:text-stone-400 pt-0.5 truncate">
               {activeTeachers.length} Aktif • {inactiveTeachers.length} Tidak Aktif
             </p>
           </div>
@@ -2362,21 +2364,49 @@ export const AnggotaView: React.FC<AnggotaViewProps> = ({
       </div>
 
       {/* Search & Filter Bar */}
-      <div className="w-full bg-white [.dark_&]:bg-stone-900 dark:bg-stone-900 rounded-2xl p-4 sm:p-5 shadow-sm border border-stone-200/90 [.dark_&]:border-stone-800 dark:border-stone-800 flex flex-col sm:flex-row items-center gap-3">
-        {/* Search Input */}
-        <div className="relative flex-[2] w-full">
-          <Search className="w-4 h-4 text-stone-400 absolute left-4 top-1/2 -translate-y-1/2" />
-          <input
-            type="text"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Cari data guru ..."
-            className="w-full pl-11 pr-4 py-2.5 rounded-xl bg-[#faf8f5] [.dark_&]:bg-stone-800/80 dark:bg-stone-800/80 border border-stone-200 [.dark_&]:border-stone-700 dark:border-stone-700 text-stone-800 [.dark_&]:text-stone-100 dark:text-stone-100 text-xs sm:text-sm font-medium focus:outline-none focus:ring-2 focus:ring-red-800/20 focus:border-red-700"
-          />
+      <div className="w-full bg-white [.dark_&]:bg-stone-900 dark:bg-stone-900 rounded-2xl p-4 sm:p-5 shadow-sm border border-stone-200/90 [.dark_&]:border-stone-800 dark:border-stone-800 flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
+        {/* Search Input + Mobile Filter Toggle */}
+        <div className="flex items-center gap-2 flex-[2] w-full">
+          <div className="relative flex-1">
+            <Search className="w-4 h-4 text-stone-400 absolute left-4 top-1/2 -translate-y-1/2" />
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Cari data guru ..."
+              className="w-full pl-11 pr-4 py-2.5 rounded-xl bg-[#faf8f5] [.dark_&]:bg-stone-800/80 dark:bg-stone-800/80 border border-stone-200 [.dark_&]:border-stone-700 dark:border-stone-700 text-stone-800 [.dark_&]:text-stone-100 dark:text-stone-100 text-xs sm:text-sm font-medium focus:outline-none focus:ring-2 focus:ring-red-800/20 focus:border-red-700"
+            />
+          </div>
+          {(() => {
+            const activeMobileFilterCount =
+              (selectedActiveStatus !== 'Semua' ? 1 : 0) +
+              (selectedGender !== 'Semua' ? 1 : 0) +
+              (selectedSchool !== 'Semua' ? 1 : 0);
+            return (
+              <button
+                type="button"
+                onClick={() => setShowMobileFilters((prev) => !prev)}
+                className={`sm:hidden inline-flex items-center gap-1.5 px-3 py-2.5 rounded-xl border text-xs font-bold shrink-0 transition-colors cursor-pointer active:scale-95 ${
+                  showMobileFilters || activeMobileFilterCount > 0
+                    ? 'bg-red-50 border-red-300 text-red-800 [.dark_&]:bg-red-950/60 [.dark_&]:border-red-800 [.dark_&]:text-amber-300 dark:bg-red-950/60 dark:border-red-800 dark:text-amber-300'
+                    : 'bg-[#faf8f5] border-stone-200 text-stone-700 [.dark_&]:bg-stone-800 [.dark_&]:border-stone-700 [.dark_&]:text-stone-200 dark:bg-stone-800 dark:border-stone-700 dark:text-stone-200'
+                }`}
+                title="Tampilkan Filter"
+              >
+                <SlidersHorizontal className="w-3.5 h-3.5" />
+                <span>Filter</span>
+                {activeMobileFilterCount > 0 && (
+                  <span className="px-1.5 py-0.2 rounded-full bg-red-800 text-white text-[10px] leading-tight">
+                    {activeMobileFilterCount}
+                  </span>
+                )}
+              </button>
+            );
+          })()}
         </div>
 
-        {/* Filter Keaktifan (Hidden on Mobile) */}
-        <div className="hidden sm:block flex-1 w-full sm:w-auto relative">
+        {/* Filter Keaktifan */}
+        <div className={`${showMobileFilters ? 'block' : 'hidden sm:block'} flex-1 w-full sm:w-auto relative`}>
           <ShieldCheck className="w-4 h-4 text-red-800 [.dark_&]:text-amber-400 dark:text-amber-400 absolute left-4 top-1/2 -translate-y-1/2 pointer-events-none" />
           <select
             value={selectedActiveStatus}
@@ -2396,8 +2426,8 @@ export const AnggotaView: React.FC<AnggotaViewProps> = ({
           <ChevronDown className="w-4 h-4 text-stone-400 absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none" />
         </div>
 
-        {/* Filter Gender (Hidden on Mobile) */}
-        <div className="hidden sm:block flex-1 w-full sm:w-auto relative">
+        {/* Filter Gender */}
+        <div className={`${showMobileFilters ? 'block' : 'hidden sm:block'} flex-1 w-full sm:w-auto relative`}>
           <User className="w-4 h-4 text-red-800 [.dark_&]:text-amber-400 dark:text-amber-400 absolute left-4 top-1/2 -translate-y-1/2 pointer-events-none" />
           <select
             value={selectedGender}
@@ -2417,8 +2447,8 @@ export const AnggotaView: React.FC<AnggotaViewProps> = ({
           <ChevronDown className="w-4 h-4 text-stone-400 absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none" />
         </div>
 
-        {/* Filter School (Hidden on Mobile) */}
-        <div className="hidden sm:block flex-1 w-full sm:w-auto relative">
+        {/* Filter School */}
+        <div className={`${showMobileFilters ? 'block' : 'hidden sm:block'} flex-1 w-full sm:w-auto relative`}>
           <School className="w-4 h-4 text-red-800 [.dark_&]:text-amber-400 dark:text-amber-400 absolute left-4 top-1/2 -translate-y-1/2 pointer-events-none" />
           <select
             value={selectedSchool}
@@ -2449,9 +2479,7 @@ export const AnggotaView: React.FC<AnggotaViewProps> = ({
                 <th className="py-4 px-4 text-center w-16">L/P</th>
                 <th className="py-4 px-4 text-center">WhatsApp</th>
                 <th className="py-4 px-4 text-center">Nama Sekolah</th>
-                {activeRole === 'admin' && (
-                  <th className="py-4 px-4 text-center w-28">Barcode</th>
-                )}
+                <th className="py-4 px-4 text-center w-28">Barcode</th>
                 <th className="py-4 px-4 text-center w-36">Keterangan</th>
                 <th className="py-4 px-4 text-center w-28 rounded-tr-2xl">Aksi</th>
               </tr>
@@ -2459,7 +2487,7 @@ export const AnggotaView: React.FC<AnggotaViewProps> = ({
             <tbody className="divide-y divide-stone-100 [.dark_&]:divide-stone-800/70 dark:divide-stone-800/70 text-xs sm:text-sm">
               {filteredTeachers.length === 0 ? (
                 <tr>
-                  <td colSpan={activeRole === 'admin' ? 11 : 10} className="py-12 text-center">
+                  <td colSpan={11} className="py-12 text-center">
                     <div className="flex flex-col items-center justify-center gap-2">
                       <div className="w-12 h-12 rounded-xl bg-stone-100 [.dark_&]:bg-stone-800 dark:bg-stone-800 flex items-center justify-center text-stone-400">
                         <SearchX className="w-6 h-6" />
@@ -2538,20 +2566,18 @@ export const AnggotaView: React.FC<AnggotaViewProps> = ({
                         </div>
                       </td>
 
-                      {/* Kolom Barcode (Tombol Lihat Barcode - Khusus Admin/Pengurus) */}
-                      {activeRole === 'admin' && (
-                        <td className="py-3.5 px-4 text-center">
-                          <button
-                            type="button"
-                            onClick={() => handleOpenBarcode(teacher)}
-                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-red-50 hover:bg-red-100 [.dark_&]:bg-red-950/50 [.dark_&]:hover:bg-red-900/50 dark:bg-red-950/50 dark:hover:bg-red-900/50 text-red-800 [.dark_&]:text-amber-300 dark:text-amber-300 border border-red-200 [.dark_&]:border-red-800/60 dark:border-red-800/60 text-xs font-bold transition-colors duration-200 active:scale-95 cursor-pointer"
-                            title="Lihat Barcode Guru"
-                          >
-                            <QrCode className="w-3.5 h-3.5" />
-                            <span>Barcode</span>
-                          </button>
-                        </td>
-                      )}
+                      {/* Kolom Barcode (Tombol Lihat Barcode & E-KTA untuk Anggota & Pengurus) */}
+                      <td className="py-3.5 px-4 text-center">
+                        <button
+                          type="button"
+                          onClick={() => handleOpenBarcode(teacher)}
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-red-50 hover:bg-red-100 [.dark_&]:bg-red-950/50 [.dark_&]:hover:bg-red-900/50 dark:bg-red-950/50 dark:hover:bg-red-900/50 text-red-800 [.dark_&]:text-amber-300 dark:text-amber-300 border border-red-200 [.dark_&]:border-red-800/60 dark:border-red-800/60 text-xs font-bold transition-colors duration-200 active:scale-95 cursor-pointer"
+                          title="Lihat Barcode & E-KTA Anggota"
+                        >
+                          <QrCode className="w-3.5 h-3.5" />
+                          <span>Barcode</span>
+                        </button>
+                      </td>
 
                       {/* Kolom Keterangan Status Keaktifan */}
                       <td className="py-3.5 px-4 text-center">
@@ -2633,7 +2659,7 @@ export const AnggotaView: React.FC<AnggotaViewProps> = ({
       </div>
 
       {/* Modal Popup Barcode & Preview E-KTA Mini Anggota */}
-      {activeRole === 'admin' && selectedBarcodeTeacher && (
+      {selectedBarcodeTeacher && (
         <div className={`fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm ${isClosingBarcodeModal ? 'modal-backdrop-exit' : 'animate-backdrop-fade'}`}>
           <div className={`bg-white [.dark_&]:bg-stone-900 dark:bg-stone-900 rounded-2xl max-w-md w-full p-6 shadow-2xl border border-stone-200/90 [.dark_&]:border-stone-800 dark:border-stone-800 space-y-4 transition-all ${isClosingBarcodeModal ? 'modal-content-exit' : 'animate-modal-pop'}`}>
             

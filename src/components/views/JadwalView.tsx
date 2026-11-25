@@ -24,7 +24,8 @@ import {
   SwitchCamera,
   Share2,
   School,
-  Loader2
+  Loader2,
+  Search
 } from 'lucide-react';
 import { doc, getDoc, getDocFromServer } from 'firebase/firestore';
 import { ActivityEvent, AttendanceRecord, Teacher } from '../../types';
@@ -159,6 +160,9 @@ export const JadwalView: React.FC<JadwalViewProps> = ({
   // Real-time current time for countdown & validation
   const [currentTime, setCurrentTime] = useState<Date>(new Date());
   const [isGeneratingAttendancePdf, setIsGeneratingAttendancePdf] = useState(false);
+  const [eventSearchQuery, setEventSearchQuery] = useState('');
+  const [eventCategoryFilter, setEventCategoryFilter] = useState('Semua');
+  const [eventStatusFilter, setEventStatusFilter] = useState<'Semua' | 'Akan Datang' | 'Sedang Berlangsung' | 'Selesai'>('Semua');
 
   useEffect(() => {
     const timer = setInterval(() => {
@@ -2422,6 +2426,38 @@ export const JadwalView: React.FC<JadwalViewProps> = ({
     return timeB - timeA;
   });
 
+  const getEventStatusLabel = (evt: ActivityEvent): 'Akan Datang' | 'Sedang Berlangsung' | 'Selesai' => {
+    const startDt = getEventStartDateTime(evt);
+    const endDt = getEventEndDateTime(evt);
+    const nowMs = currentTime.getTime();
+    if (startDt && nowMs < startDt.getTime()) return 'Akan Datang';
+    if (endDt && nowMs > endDt.getTime()) return 'Selesai';
+    return 'Sedang Berlangsung';
+  };
+
+  const eventCategoryOptions = Array.from(
+    new Set((events || []).map((e) => String(e.category || '').trim()).filter(Boolean))
+  ).sort((a, b) => a.localeCompare(b, 'id'));
+
+  const filteredEvents = sortedEvents.filter((evt) => {
+    if (eventCategoryFilter !== 'Semua' && String(evt.category || '').trim() !== eventCategoryFilter) {
+      return false;
+    }
+    if (eventStatusFilter !== 'Semua' && getEventStatusLabel(evt) !== eventStatusFilter) {
+      return false;
+    }
+    const q = eventSearchQuery.trim().toLowerCase();
+    if (q) {
+      const presenterText = Array.isArray(evt.presenters) ? evt.presenters.join(' ') : String(evt.presenters || '');
+      const haystack = `${evt.title || ''} ${evt.description || ''} ${evt.location || ''} ${evt.category || ''} ${evt.fullDate || ''} ${presenterText}`.toLowerCase();
+      if (!haystack.includes(q)) return false;
+    }
+    return true;
+  });
+
+  const isEventFilterActive =
+    eventSearchQuery.trim() !== '' || eventCategoryFilter !== 'Semua' || eventStatusFilter !== 'Semua';
+
   return (
     <div className="font-sans space-y-6 relative">
 
@@ -2568,9 +2604,104 @@ export const JadwalView: React.FC<JadwalViewProps> = ({
         </div>
       </div>
 
+      {/* BAR PENCARIAN & FILTER KEGIATAN */}
+      <div className={`w-full rounded-2xl p-4 shadow-sm border flex flex-col md:flex-row items-stretch md:items-center gap-3 ${
+        isDark ? 'bg-stone-900 border-stone-800' : 'bg-white border-stone-200/90'
+      }`}>
+        <div className="relative flex-[2]">
+          <Search className="w-4 h-4 text-stone-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+          <input
+            type="text"
+            value={eventSearchQuery}
+            onChange={(e) => setEventSearchQuery(e.target.value)}
+            placeholder="Cari judul kegiatan, lokasi, atau narasumber..."
+            className={`w-full pl-10 pr-8 py-2.5 rounded-xl border text-xs sm:text-sm font-medium focus:outline-none focus:ring-2 focus:ring-red-800/20 focus:border-red-700 ${
+              isDark
+                ? 'bg-stone-800/80 border-stone-700 text-stone-100 placeholder-stone-500'
+                : 'bg-[#faf8f5] border-stone-200 text-stone-800 placeholder-stone-400'
+            }`}
+          />
+          {eventSearchQuery && (
+            <button
+              type="button"
+              onClick={() => setEventSearchQuery('')}
+              className="absolute right-2.5 top-1/2 -translate-y-1/2 text-stone-400 hover:text-stone-600 cursor-pointer"
+              title="Hapus pencarian"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          )}
+        </div>
+
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5 flex-[1.5]">
+          <select
+            value={eventCategoryFilter}
+            onChange={(e) => setEventCategoryFilter(e.target.value)}
+            className={`flex-1 px-3.5 py-2.5 rounded-xl border text-xs sm:text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-red-800/20 focus:border-red-700 cursor-pointer ${
+              isDark
+                ? 'bg-stone-800/80 border-stone-700 text-stone-100'
+                : 'bg-[#faf8f5] border-stone-200 text-stone-800'
+            }`}
+          >
+            <option value="Semua">Semua Kategori</option>
+            {eventCategoryOptions.map((cat) => (
+              <option key={cat} value={cat}>
+                {cat}
+              </option>
+            ))}
+          </select>
+
+          <select
+            value={eventStatusFilter}
+            onChange={(e) => setEventStatusFilter(e.target.value as 'Semua' | 'Akan Datang' | 'Sedang Berlangsung' | 'Selesai')}
+            className={`flex-1 px-3.5 py-2.5 rounded-xl border text-xs sm:text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-red-800/20 focus:border-red-700 cursor-pointer ${
+              isDark
+                ? 'bg-stone-800/80 border-stone-700 text-stone-100'
+                : 'bg-[#faf8f5] border-stone-200 text-stone-800'
+            }`}
+          >
+            <option value="Semua">Semua Status</option>
+            <option value="Akan Datang">Akan Datang</option>
+            <option value="Sedang Berlangsung">Sedang Berlangsung</option>
+            <option value="Selesai">Selesai</option>
+          </select>
+
+          {isEventFilterActive && (
+            <button
+              type="button"
+              onClick={() => {
+                setEventSearchQuery('');
+                setEventCategoryFilter('Semua');
+                setEventStatusFilter('Semua');
+              }}
+              className={`px-3 py-2.5 rounded-xl border text-xs font-bold shrink-0 cursor-pointer transition-colors ${
+                isDark
+                  ? 'border-stone-700 bg-stone-800 text-amber-400 hover:bg-stone-700'
+                  : 'border-red-200 bg-red-50 text-red-800 hover:bg-red-100'
+              }`}
+            >
+              Reset
+            </button>
+          )}
+        </div>
+      </div>
+
       {/* DAFTAR JADWAL KEGIATAN */}
       <div className="space-y-4">
-        {sortedEvents.map((evt) => {
+        {filteredEvents.length === 0 ? (
+          <div className={`rounded-2xl border p-12 text-center flex flex-col items-center justify-center gap-2 ${
+            isDark ? 'bg-stone-900 border-stone-800 text-stone-300' : 'bg-white border-stone-200/90 text-stone-700'
+          }`}>
+            <CalendarIcon className="w-8 h-8 text-stone-400 mb-1" />
+            <p className="font-display font-bold text-sm">Tidak Ada Agenda yang Sesuai</p>
+            <p className="text-xs text-stone-400 max-w-xs">
+              {isEventFilterActive
+                ? 'Coba ubah kata kunci pencarian, kategori, atau status kegiatan.'
+                : 'Belum ada jadwal kegiatan yang ditambahkan.'}
+            </p>
+          </div>
+        ) : (
+        filteredEvents.map((evt) => {
             const summary = getAttendanceSummaryForEvent(evt.id);
             const currentDeadline = (eventDeadlines[evt.id] && eventDeadlines[evt.id].trim() !== '') ? eventDeadlines[evt.id] : formatToDDMMYYYY(evt.uploadDeadline || '');
             const badgeParts = getBadgeDateParts(evt);
@@ -2929,7 +3060,7 @@ export const JadwalView: React.FC<JadwalViewProps> = ({
 
               </div>
             );
-        })}
+        }))}
       </div>
 
       {/* MODAL SCANNER BARCODE ABSENSI (Hanya Admin) */}

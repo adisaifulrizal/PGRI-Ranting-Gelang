@@ -54,35 +54,8 @@ export const ProfilKBView: React.FC<{ activeRole?: 'guru' | 'admin' }> = ({ acti
     typeof document !== 'undefined' ? document.documentElement.classList.contains('dark') : false
   );
 
-  // Status Hak Akses Admin (Sinkronisasi dari props dan localStorage)
-  const [isAdmin, setIsAdmin] = useState<boolean>(() => {
-    if (activeRole) return activeRole === 'admin';
-    if (typeof window !== 'undefined') {
-      return localStorage.getItem('activeRole') === 'admin';
-    }
-    return false;
-  });
-
-  useEffect(() => {
-    if (activeRole) {
-      setIsAdmin(activeRole === 'admin');
-    }
-  }, [activeRole]);
-
-  useEffect(() => {
-    const handleStorageChange = () => {
-      const storedRole = localStorage.getItem('activeRole');
-      setIsAdmin(storedRole === 'admin');
-    };
-
-    window.addEventListener('storage', handleStorageChange);
-    window.addEventListener('kombel-settings-updated', handleStorageChange);
-
-    return () => {
-      window.removeEventListener('storage', handleStorageChange);
-      window.removeEventListener('kombel-settings-updated', handleStorageChange);
-    };
-  }, []);
+  // Hak akses Admin murni mengikuti prop activeRole per tab dari App.tsx
+  const isAdmin = activeRole === 'admin';
 
   // State Animasi Pembuka Khusus Menu Kepengurusan
   const [entryPhase, setEntryPhase] = useState<'intro' | 'revealing' | 'done'>(() => {

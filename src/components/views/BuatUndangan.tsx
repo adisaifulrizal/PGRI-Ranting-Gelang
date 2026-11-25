@@ -26,7 +26,11 @@ import {
   ExternalLink,
   Calendar,
   MapPin,
-  ShieldCheck
+  ShieldCheck,
+  X,
+  Inbox,
+  Send,
+  Clock
 } from 'lucide-react';
 import { doc, getDoc, getDocFromServer } from 'firebase/firestore';
 import { auth, db } from '../../lib/firebase';
@@ -120,6 +124,12 @@ export interface InvitationData {
   timPutri: InvitationParticipant[];
   lampiranTanggal: string;
   lampiranPenandatanganJabatan: string;
+  // Tipe & Data Khusus Arsip Surat Tugas / Pengawas Ujian
+  docCategory?: 'undangan' | 'surat_tugas' | 'pengawas_ujian';
+  stSelectedIds?: string[];
+  stManualNama?: string;
+  puRows?: PengawasUjianRow[];
+  puWaktu?: string;
 }
 
 interface OrgAssets {
@@ -187,6 +197,53 @@ const readSignersFromKepengurusan = (): {
     }
   } catch {}
   return { ketuaNama, sekretarisNama };
+};
+
+const resolveSignerNpasFromData = (
+  ketuaNama: string,
+  sekretarisNama: string
+): { ketuaNpa: string; sekretarisNpa: string } => {
+  const saved = loadSavedNpa();
+  let ketuaNpa = saved.ketuaNpa;
+  let sekretarisNpa = saved.sekretarisNpa;
+  try {
+    let teachersList: any[] = [];
+    const rawTeachers = localStorage.getItem('kombel-teachers');
+    if (rawTeachers) {
+      const parsedT = JSON.parse(rawTeachers);
+      if (Array.isArray(parsedT)) teachersList = parsedT;
+    }
+    const findNpa = (name: string): string => {
+      const norm = (name || '').trim().toLowerCase();
+      if (!norm) return '';
+      const match = teachersList.find(
+        (t: any) => String(t?.name || '').trim().toLowerCase() === norm
+      );
+      return match && match.npa ? String(match.npa).trim() : '';
+    };
+    const rawPengurus = localStorage.getItem('kombel-pengurus');
+    if (rawPengurus) {
+      const list = JSON.parse(rawPengurus);
+      if (Array.isArray(list)) {
+        const kObj = list.find((p: any) => {
+          const r = String(p?.role || '').toLowerCase();
+          return r.includes('ketua') && !r.includes('wakil');
+        });
+        if (kObj) {
+          const foundK = (kObj.npa ? String(kObj.npa).trim() : '') || findNpa(kObj.name || ketuaNama);
+          if (foundK) ketuaNpa = foundK;
+        }
+        const sObj = list.find((p: any) =>
+          String(p?.role || '').toLowerCase().includes('sekretaris')
+        );
+        if (sObj) {
+          const foundS = (sObj.npa ? String(sObj.npa).trim() : '') || findNpa(sObj.name || sekretarisNama);
+          if (foundS) sekretarisNpa = foundS;
+        }
+      }
+    }
+  } catch {}
+  return { ketuaNpa, sekretarisNpa };
 };
 
 const resolveEOfficeSigners = (): {
@@ -428,7 +485,7 @@ const buildKopSuratHtml = (data: InvitationData, assets: OrgAssets): string => {
 const buildInvitationPdfHtml = (data: InvitationData, assets: OrgAssets): string => {
 
   const stempelScale = Math.max(0.3, Math.min(2.5, (assets.stempelSize || 100) / 100));
-  const stempelImgStyle = `width: ${Math.round(112 * stempelScale)}px; height: ${Math.round(112 * stempelScale)}px; object-fit: contain; transform: rotate(${assets.stempelRotation || 0}deg); opacity: 0.92; display: block;`;
+  const stempelImgStyle = `width: ${Math.round(112 * stempelScale)}px; height: ${Math.round(112 * stempelScale)}px; object-fit: contain; transform: rotate(${assets.stempelRotation || 0}deg); opacity: 0.92; mix-blend-mode: multiply; display: block;`;
   const ttdKetuaScale = Math.max(0.3, Math.min(2.5, (assets.ttdKetuaSize || 100) / 100));
   const ttdSekretarisScale = Math.max(0.3, Math.min(2.5, (assets.ttdSekretarisSize || 100) / 100));
 
@@ -613,12 +670,124 @@ const isSafeHttpUrl = (url?: string) => Boolean(url && /^https?:\/\//i.test(url.
 
 const ROMAN_MONTHS = ['I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X', 'XI', 'XII'];
 
-export const buildAutoLetterNumber = (codeType: 'Und' | 'ST' | 'BA', existingCount: number): string => {
+export type OutgoingLetterCode = 'Und' | 'ST' | 'Ed' | 'Perm' | 'BA' | 'SK';
+
+export const OUTGOING_CODE_OPTIONS: { code: OutgoingLetterCode; label: string }[] = [
+  { code: 'Und', label: 'Und — Undangan' },
+  { code: 'ST', label: 'ST — Surat Tugas' },
+  { code: 'Ed', label: 'Ed — Surat Edaran' },
+  { code: 'Perm', label: 'Perm — Permohonan' },
+  { code: 'BA', label: 'BA — Berita Acara' },
+  { code: 'SK', label: 'SK — Surat Keputusan' }
+];
+
+export const buildAutoLetterNumber = (codeType: OutgoingLetterCode, existingCount: number): string => {
   const cfg = getOrgConfig();
   const now = new Date();
   const seq = String(existingCount + 1).padStart(3, '0');
   const roman = ROMAN_MONTHS[now.getMonth()] || 'I';
   return `${seq}/${codeType}/${cfg.letterCodePrefix}/${roman}/${now.getFullYear()}`;
+};
+
+export const buildAutoAgendaNumber = (direction: 'Masuk' | 'Keluar', existingCount: number): string => {
+  const now = new Date();
+  const prefix = direction === 'Masuk' ? 'SM' : 'SK';
+  const seq = String(existingCount + 1).padStart(3, '0');
+  return `${prefix}-${seq}/${now.getFullYear()}`;
+};
+
+const formatAgendaDateShort = (dateStr?: string): string => {
+  if (!dateStr) return '-';
+  const match = String(dateStr).trim().match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (match) return `${match[3]}/${match[2]}/${match[1]}`;
+  return dateStr;
+};
+
+const readLocalAgendaList = (): SuratAgendaItem[] => {
+  try {
+    const raw = localStorage.getItem(AGENDA_STORAGE_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+};
+
+const quickRecordOutgoingAgenda = async (payload: {
+  nomorSurat: string;
+  tanggalSurat?: string;
+  asalTujuan: string;
+  perihal: string;
+  catatan?: string;
+}): Promise<{ ok: boolean; updatedExisting: boolean; item?: SuratAgendaItem; error?: string }> => {
+  const cleanNomor = (payload.nomorSurat || '').trim().slice(0, 120);
+  const cleanPerihal = (payload.perihal || '').trim().slice(0, 300);
+  const cleanTujuan = ((payload.asalTujuan || '').trim() || 'Seluruh Anggota PGRI Ranting Gelang').slice(0, 200);
+  if (!cleanNomor || !cleanPerihal) {
+    return { ok: false, updatedExisting: false, error: 'Nomor surat dan perihal wajib diisi terlebih dahulu.' };
+  }
+
+  const currentList = readLocalAgendaList();
+  const existing = currentList.find(
+    (x) => x.direction === 'Keluar' && x.nomorSurat.trim().toLowerCase() === cleanNomor.toLowerCase()
+  );
+  const keluarCount = currentList.filter((x) => x.direction === 'Keluar').length;
+  const todayIso = new Date().toISOString().split('T')[0];
+  const cleanCatatan = (payload.catatan || '').trim().slice(0, 500);
+
+  const item: SuratAgendaItem = {
+    id: existing ? existing.id : `surat-${Date.now()}`,
+    direction: 'Keluar',
+    nomorAgenda: (existing?.nomorAgenda || buildAutoAgendaNumber('Keluar', keluarCount)).slice(0, 60),
+    nomorSurat: cleanNomor,
+    tanggalSurat: (payload.tanggalSurat || existing?.tanggalSurat || todayIso).slice(0, 32),
+    asalTujuan: cleanTujuan,
+    perihal: cleanPerihal,
+    ...(existing?.lampiranUrl ? { lampiranUrl: existing.lampiranUrl.slice(0, 600) } : {}),
+    ...(cleanCatatan ? { catatan: cleanCatatan } : existing?.catatan ? { catatan: existing.catatan.slice(0, 500) } : {})
+  };
+
+  const nextLocal = existing
+    ? currentList.map((x) => (x.id === existing.id ? item : x))
+    : [item, ...currentList];
+
+  try {
+    localStorage.setItem(AGENDA_STORAGE_KEY, JSON.stringify(nextLocal));
+    window.dispatchEvent(new Event('pgri-eoffice-synced'));
+  } catch {}
+
+  const [colRes, perDocRes] = await Promise.all([
+    mutateCloudCollection<SuratAgendaItem>(
+      'suratAgenda',
+      [AGENDA_STORAGE_KEY],
+      (latest) =>
+        latest.some((x) => x.id === item.id)
+          ? latest.map((x) => (x.id === item.id ? item : x))
+          : [item, ...latest],
+      nextLocal,
+      'Buku Agenda Surat'
+    ),
+    savePerDocItem('surat_agenda', item.id, item as unknown as Record<string, unknown>)
+  ]);
+
+  window.dispatchEvent(new Event('pgri-eoffice-synced'));
+
+  await logAuditEvent(
+    'Buku Agenda Surat',
+    existing ? 'Perbarui Surat Keluar (1-Klik)' : 'Catat Surat Keluar (1-Klik)',
+    `${item.nomorSurat} — ${item.perihal}`
+  );
+
+  if (!colRes.success || !perDocRes.success) {
+    return {
+      ok: true,
+      updatedExisting: Boolean(existing),
+      item,
+      error: colRes.error || perDocRes.error
+    };
+  }
+  return { ok: true, updatedExisting: Boolean(existing), item };
 };
 
 export interface PengawasUjianRow {
@@ -641,6 +810,7 @@ interface EOfficeProps {
   onSaveArchiveItem?: (item: InvitationData) => Promise<void>;
   isSavingCloud?: boolean;
   archiveCount?: number;
+  loadedArchiveItem?: InvitationData | null;
 }
 
 export const EOfficeSubPanels: React.FC<EOfficeProps> = ({
@@ -653,7 +823,8 @@ export const EOfficeSubPanels: React.FC<EOfficeProps> = ({
   onNotice,
   onSaveArchiveItem,
   isSavingCloud = false,
-  archiveCount = 0
+  archiveCount = 0,
+  loadedArchiveItem = null
 }) => {
   const orgConfig = useMemo(() => getOrgConfig(), []);
   const cardClass = isDark
@@ -686,6 +857,43 @@ export const EOfficeSubPanels: React.FC<EOfficeProps> = ({
     'Ketua PGRI Cabang Sumberbaru',
     'Arsip'
   ]);
+  const [stShowTtdStempel, setStShowTtdStempel] = useState(true);
+
+  useEffect(() => {
+    if (!loadedArchiveItem) return;
+    if (loadedArchiveItem.docCategory === 'surat_tugas') {
+      setStNomor(loadedArchiveItem.nomorSurat || '');
+      setStDasar(loadedArchiveItem.paragrafPembuka || '');
+      setStKeperluan(loadedArchiveItem.acara || '');
+      setStHari(loadedArchiveItem.hari || '');
+      setStTanggal(loadedArchiveItem.tanggalAcara || '');
+      setStTempat(loadedArchiveItem.tempatAcara || '');
+      if (Array.isArray(loadedArchiveItem.stSelectedIds)) {
+        setStSelectedIds(loadedArchiveItem.stSelectedIds);
+      }
+      if (typeof loadedArchiveItem.stManualNama === 'string') {
+        setStManualNama(loadedArchiveItem.stManualNama);
+      }
+      if (Array.isArray(loadedArchiveItem.tembusanList)) {
+        setStTembusanList(loadedArchiveItem.tembusanList);
+      }
+      setStShowTtdStempel(loadedArchiveItem.showTtdImages !== false);
+    } else if (loadedArchiveItem.docCategory === 'pengawas_ujian') {
+      setPuNomor(loadedArchiveItem.nomorSurat || '');
+      setPuNamaUjian(loadedArchiveItem.acara || '');
+      setPuDasar(loadedArchiveItem.paragrafPembuka || '');
+      setPuHari(loadedArchiveItem.hari || '');
+      setPuTanggalPelaksanaan(loadedArchiveItem.tanggalAcara || '');
+      setPuWaktu(loadedArchiveItem.puWaktu || loadedArchiveItem.pukul || '');
+      if (Array.isArray(loadedArchiveItem.puRows)) {
+        setPuRows(loadedArchiveItem.puRows);
+      }
+      if (Array.isArray(loadedArchiveItem.tembusanList)) {
+        setPuTembusanList(loadedArchiveItem.tembusanList);
+      }
+      setPuShowTtdStempel(loadedArchiveItem.showTtdImages !== false);
+    }
+  }, [loadedArchiveItem]);
 
   const selectedDelegates = useMemo(
     () => teachers.filter((t) => stSelectedIds.includes(t.id)),
@@ -775,7 +983,7 @@ export const EOfficeSubPanels: React.FC<EOfficeProps> = ({
         .ttd-grid { display: flex; justify-content: space-between; align-items: flex-end; position: relative; }
         .ttd-col { width: 220px; text-align: center; position: relative; }
         .ttd-space { height: 68px; position: relative; display: flex; align-items: center; justify-content: center; overflow: visible; }
-        .stempel-center { position: absolute; left: 50%; transform: translateX(-50%); bottom: 6px; width: 96px; opacity: 0.88; mix-blend-mode: multiply; pointer-events: none; }
+        .stempel-center { position: absolute; left: 50%; transform: translateX(-50%); bottom: 6px; opacity: 0.88; mix-blend-mode: multiply; pointer-events: none; }
         @media print {
           html, body { background: #ffffff; }
           .sheet-a4 { width: 210mm; min-height: 297mm; margin: 0; box-shadow: none; }
@@ -905,6 +1113,7 @@ export const EOfficeSubPanels: React.FC<EOfficeProps> = ({
     'Kepala SD Negeri / Swasta Se-Ranting Gelang',
     'Arsip'
   ]);
+  const [puShowTtdStempel, setPuShowTtdStempel] = useState(true);
 
   const schoolOptions = useMemo(() => {
     const set = new Set<string>();
@@ -956,10 +1165,12 @@ export const EOfficeSubPanels: React.FC<EOfficeProps> = ({
     const logoPgri = localStorage.getItem('logo-pgri') || localStorage.getItem('logo-kombel') || '';
     const ttdKetua = localStorage.getItem('ttd-ketua') || '';
     const ttdKetuaScale = Math.max(0.3, Math.min(2.5, (Number(localStorage.getItem('ttd-ketua-size')) || 100) / 100));
+    const ttdSekretaris = localStorage.getItem('ttd-sekretaris') || '';
+    const ttdSekretarisScale = Math.max(0.3, Math.min(2.5, (Number(localStorage.getItem('ttd-sekretaris-size')) || 100) / 100));
     const stempel = localStorage.getItem('logo-stempel') || '';
     const stempelScale = Math.max(0.3, Math.min(2.5, (Number(localStorage.getItem('logo-stempel-size')) || 100) / 100));
     const stempelRotation = Number(localStorage.getItem('logo-stempel-rotation')) || 0;
-    const { namaKetua, npaKetua } = resolveEOfficeSigners();
+    const { namaKetua, npaKetua, namaSekretaris, npaSekretaris } = resolveEOfficeSigners();
     const todayStr = new Date().toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' });
 
     const puTembusanItemsHtml = (puTembusanList || [])
@@ -1006,10 +1217,10 @@ export const EOfficeSubPanels: React.FC<EOfficeProps> = ({
         table.pengawas th, table.pengawas td { border: 1px solid #000; padding: 5px 7px; vertical-align: middle; }
         table.pengawas th { background: #f3f4f6; text-align: center; font-weight: bold; }
         .footer-wrap { margin-top: 18px; padding-top: 6px; }
-        .ttd-single-wrap { display: flex; justify-content: flex-end; }
-        .ttd-col { width: 240px; text-align: center; position: relative; }
+        .ttd-grid { display: flex; justify-content: space-between; align-items: flex-end; position: relative; }
+        .ttd-col { width: 220px; text-align: center; position: relative; }
         .ttd-space { height: 64px; position: relative; display: flex; align-items: center; justify-content: center; overflow: visible; }
-        .stempel-ketua { position: absolute; left: -34px; top: 50%; width: 96px; opacity: 0.88; mix-blend-mode: multiply; pointer-events: none; }
+        .stempel-center { position: absolute; left: 50%; transform: translateX(-50%); bottom: 6px; opacity: 0.88; mix-blend-mode: multiply; pointer-events: none; }
         @media print {
           html, body { background: #ffffff; }
           .sheet-a4 { width: 210mm; min-height: 297mm; margin: 0; box-shadow: none; }
@@ -1074,17 +1285,26 @@ export const EOfficeSubPanels: React.FC<EOfficeProps> = ({
           <p style="margin: 0; text-align: justify;">Demikian Surat Tugas Pengawas Ujian Silang ini dibuat untuk dilaksanakan dengan penuh tanggung jawab dan integritas sesuai tata tertib pengawas ujian.</p>
         </div>
         <div class="footer-wrap">
-          <div class="ttd-single-wrap">
+          <div style="text-align:right; margin-bottom:6px; padding-right:24px;">Sumberbaru, ${escapeHtml(todayStr)}</div>
+          <div class="ttd-grid">
             <div class="ttd-col">
-              <div style="margin-bottom:4px;">Sumberbaru, ${escapeHtml(todayStr)}</div>
               <div>Ketua</div>
               <div>PGRI Ranting Gelang</div>
               <div class="ttd-space">
-                ${stempel ? `<img src="${stempel}" class="stempel-ketua" style="width:${Math.round(112 * stempelScale)}px; height:${Math.round(112 * stempelScale)}px; object-fit:contain; transform:translateY(-50%) rotate(${stempelRotation}deg);" alt="Stempel" />` : ''}
-                ${ttdKetua ? `<img src="${ttdKetua}" style="height:${Math.round(62 * ttdKetuaScale)}px; width:auto; max-width:${Math.round(160 * ttdKetuaScale)}px; object-fit:contain; position:relative; z-index:2;" alt="TTD Ketua" />` : ''}
+                ${puShowTtdStempel && ttdKetua ? `<img src="${ttdKetua}" style="height:${Math.round(62 * ttdKetuaScale)}px; width:auto; max-width:${Math.round(160 * ttdKetuaScale)}px; object-fit:contain;" alt="TTD Ketua" />` : ''}
               </div>
               <div style="font-weight:bold; text-decoration:underline;">${escapeHtml(namaKetua)}</div>
               <div style="font-size:10pt;">NPA. ${escapeHtml(npaKetua)}</div>
+            </div>
+            ${puShowTtdStempel && stempel ? `<img src="${stempel}" class="stempel-center" style="width:${Math.round(112 * stempelScale)}px; height:${Math.round(112 * stempelScale)}px; object-fit:contain; transform:translateX(-50%) rotate(${stempelRotation}deg);" alt="Stempel" />` : ''}
+            <div class="ttd-col">
+              <div>Sekretaris</div>
+              <div>PGRI Ranting Gelang</div>
+              <div class="ttd-space">
+                ${puShowTtdStempel && ttdSekretaris ? `<img src="${ttdSekretaris}" style="height:${Math.round(62 * ttdSekretarisScale)}px; width:auto; max-width:${Math.round(160 * ttdSekretarisScale)}px; object-fit:contain;" alt="TTD Sekretaris" />` : ''}
+              </div>
+              <div style="font-weight:bold; text-decoration:underline;">${escapeHtml(namaSekretaris)}</div>
+              <div style="font-size:10pt;">NPA. ${escapeHtml(npaSekretaris)}</div>
             </div>
           </div>
           <div style="margin-top:14px; display:flex; justify-content:space-between; align-items:flex-end; gap:12px;">
@@ -1136,25 +1356,40 @@ export const EOfficeSubPanels: React.FC<EOfficeProps> = ({
   // =========================================================================
   // 2. BUKU AGENDA SURAT (MASUK & KELUAR)
   // =========================================================================
-  const [agendaList, setAgendaList] = useState<SuratAgendaItem[]>(() => {
-    try {
-      const raw = localStorage.getItem(AGENDA_STORAGE_KEY);
-      return raw ? JSON.parse(raw) : [];
-    } catch {
-      return [];
-    }
-  });
+  const [agendaList, setAgendaList] = useState<SuratAgendaItem[]>(() => readLocalAgendaList());
   const [agendaFilter, setAgendaFilter] = useState<'Semua' | 'Masuk' | 'Keluar'>('Semua');
+  const [agendaStatusFilter, setAgendaStatusFilter] = useState<'Semua' | 'Baru' | 'Diproses' | 'Selesai'>('Semua');
+  const [agendaMonthFilter, setAgendaMonthFilter] = useState<string>('');
   const [agendaSearch, setAgendaSearch] = useState('');
-  const [newAgenda, setNewAgenda] = useState<Omit<SuratAgendaItem, 'id'>>({
-    direction: 'Keluar',
-    nomorSurat: buildAutoLetterNumber('Und', 0),
-    tanggalSurat: new Date().toISOString().split('T')[0],
-    perihal: '',
-    asalTujuan: '',
-    catatan: '',
-    lampiranUrl: ''
-  });
+  const [editingAgendaId, setEditingAgendaId] = useState<string | null>(null);
+  const [keluarCodeType, setKeluarCodeType] = useState<OutgoingLetterCode>('Und');
+  const [isRecordingQuickAgenda, setIsRecordingQuickAgenda] = useState(false);
+
+  const createEmptyAgendaForm = (
+    dir: 'Masuk' | 'Keluar',
+    list: SuratAgendaItem[],
+    codeType: OutgoingLetterCode = 'Und'
+  ): Omit<SuratAgendaItem, 'id'> => {
+    const todayIso = new Date().toISOString().split('T')[0];
+    const dirCount = list.filter((x) => x.direction === dir).length;
+    return {
+      direction: dir,
+      nomorAgenda: buildAutoAgendaNumber(dir, dirCount),
+      nomorSurat: dir === 'Keluar' ? buildAutoLetterNumber(codeType, dirCount) : '',
+      tanggalSurat: todayIso,
+      tanggalTerima: dir === 'Masuk' ? todayIso : '',
+      perihal: '',
+      asalTujuan: '',
+      disposisi: '',
+      statusTindakLanjut: dir === 'Masuk' ? 'Baru' : undefined,
+      catatan: '',
+      lampiranUrl: ''
+    };
+  };
+
+  const [newAgenda, setNewAgenda] = useState<Omit<SuratAgendaItem, 'id'>>(() =>
+    createEmptyAgendaForm('Keluar', readLocalAgendaList(), 'Und')
+  );
 
   useEffect(() => {
     try {
@@ -1183,51 +1418,189 @@ export const EOfficeSubPanels: React.FC<EOfficeProps> = ({
     return () => window.removeEventListener('pgri-eoffice-synced', syncSubPanelsFromStorage);
   }, []);
 
+  const agendaStats = useMemo(() => {
+    let totalMasuk = 0;
+    let totalKeluar = 0;
+    let pendingMasuk = 0;
+    agendaList.forEach((item) => {
+      if (item.direction === 'Masuk') {
+        totalMasuk += 1;
+        if ((item.statusTindakLanjut || 'Baru') !== 'Selesai') {
+          pendingMasuk += 1;
+        }
+      } else {
+        totalKeluar += 1;
+      }
+    });
+    return { totalMasuk, totalKeluar, pendingMasuk };
+  }, [agendaList]);
+
+  const handleAgendaDirectionChange = (nextDir: 'Masuk' | 'Keluar') => {
+    if (editingAgendaId) {
+      setNewAgenda((prev) => ({
+        ...prev,
+        direction: nextDir,
+        ...(nextDir === 'Masuk'
+          ? {
+              tanggalTerima: prev.tanggalTerima || new Date().toISOString().split('T')[0],
+              statusTindakLanjut: prev.statusTindakLanjut || 'Baru'
+            }
+          : {})
+      }));
+      return;
+    }
+    const dirCount = agendaList.filter((x) => x.direction === nextDir).length;
+    const todayIso = new Date().toISOString().split('T')[0];
+    setNewAgenda((prev) => ({
+      ...prev,
+      direction: nextDir,
+      nomorAgenda: buildAutoAgendaNumber(nextDir, dirCount),
+      nomorSurat: nextDir === 'Keluar' ? buildAutoLetterNumber(keluarCodeType, dirCount) : '',
+      tanggalTerima: nextDir === 'Masuk' ? prev.tanggalTerima || todayIso : '',
+      statusTindakLanjut: nextDir === 'Masuk' ? prev.statusTindakLanjut || 'Baru' : undefined
+    }));
+  };
+
+  const handleEditAgenda = (item: SuratAgendaItem) => {
+    setEditingAgendaId(item.id);
+    setNewAgenda({
+      direction: item.direction,
+      nomorAgenda: item.nomorAgenda || '',
+      nomorSurat: item.nomorSurat,
+      tanggalSurat: item.tanggalSurat,
+      tanggalTerima: item.tanggalTerima || (item.direction === 'Masuk' ? item.tanggalSurat : ''),
+      asalTujuan: item.asalTujuan,
+      perihal: item.perihal,
+      disposisi: item.disposisi || '',
+      statusTindakLanjut: item.direction === 'Masuk' ? item.statusTindakLanjut || 'Baru' : undefined,
+      lampiranUrl: item.lampiranUrl || '',
+      catatan: item.catatan || ''
+    });
+  };
+
+  const handleCancelEditAgenda = () => {
+    setEditingAgendaId(null);
+    setNewAgenda(createEmptyAgendaForm('Keluar', agendaList, keluarCodeType));
+  };
+
+  const handleQuickStatusChange = async (
+    item: SuratAgendaItem,
+    nextStatus: 'Baru' | 'Diproses' | 'Selesai'
+  ) => {
+    if (!isAdmin || item.direction !== 'Masuk') return;
+    const updatedItem: SuratAgendaItem = {
+      ...item,
+      statusTindakLanjut: nextStatus
+    };
+    const updated = agendaList.map((x) => (x.id === item.id ? updatedItem : x));
+    setAgendaList(updated);
+
+    const [colRes, perDocRes] = await Promise.all([
+      mutateCloudCollection<SuratAgendaItem>(
+        'suratAgenda',
+        [AGENDA_STORAGE_KEY],
+        (latest) => latest.map((x) => (x.id === item.id ? updatedItem : x)),
+        updated,
+        'Buku Agenda Surat'
+      ),
+      savePerDocItem('surat_agenda', updatedItem.id, updatedItem as unknown as Record<string, unknown>)
+    ]);
+
+    if (colRes.success && perDocRes.success) {
+      await logAuditEvent(
+        'Buku Agenda Surat',
+        'Ubah Status Disposisi',
+        `${updatedItem.nomorSurat} — Status: ${nextStatus}`
+      );
+      onNotice('success', `Status Surat Masuk diperbarui menjadi "${nextStatus}".`);
+    } else {
+      onNotice('error', colRes.error || perDocRes.error || 'Status tersimpan lokal, gagal sinkron ke Cloud.');
+    }
+  };
+
   const handleAddAgenda = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!isAdmin || !newAgenda.nomorSurat.trim() || !newAgenda.perihal.trim()) return;
+    if (!isAdmin || !newAgenda.nomorSurat.trim() || !newAgenda.perihal.trim() || !newAgenda.asalTujuan.trim()) return;
     if (newAgenda.lampiranUrl && !isSafeHttpUrl(newAgenda.lampiranUrl)) {
       onNotice('error', 'URL lampiran harus diawali https:// atau http://');
       return;
     }
 
+    const isEditing = Boolean(editingAgendaId);
+    const dirCount = agendaList.filter((x) => x.direction === newAgenda.direction).length;
+    const cleanNomorAgenda = (
+      newAgenda.nomorAgenda?.trim() || buildAutoAgendaNumber(newAgenda.direction, dirCount)
+    ).slice(0, 60);
+    const cleanTanggalTerima =
+      newAgenda.direction === 'Masuk'
+        ? (newAgenda.tanggalTerima?.trim() || newAgenda.tanggalSurat || new Date().toISOString().split('T')[0]).slice(0, 32)
+        : '';
+    const cleanDisposisi =
+      newAgenda.direction === 'Masuk' ? (newAgenda.disposisi || '').trim().slice(0, 300) : '';
+    const cleanStatus: 'Baru' | 'Diproses' | 'Selesai' | undefined =
+      newAgenda.direction === 'Masuk' ? newAgenda.statusTindakLanjut || 'Baru' : undefined;
+    const cleanLampiran = (newAgenda.lampiranUrl || '').trim().slice(0, 600);
+    const cleanCatatan = (newAgenda.catatan || '').trim().slice(0, 500);
+
     const item: SuratAgendaItem = {
-      id: `surat-${Date.now()}`,
+      id: editingAgendaId || `surat-${Date.now()}`,
       direction: newAgenda.direction,
-      nomorSurat: newAgenda.nomorSurat.trim(),
-      tanggalSurat: newAgenda.tanggalSurat,
-      asalTujuan: newAgenda.asalTujuan.trim(),
-      perihal: newAgenda.perihal.trim(),
-      ...(newAgenda.lampiranUrl?.trim() ? { lampiranUrl: newAgenda.lampiranUrl.trim() } : {}),
-      ...(newAgenda.catatan?.trim() ? { catatan: newAgenda.catatan.trim() } : {})
+      ...(cleanNomorAgenda ? { nomorAgenda: cleanNomorAgenda } : {}),
+      nomorSurat: newAgenda.nomorSurat.trim().slice(0, 120),
+      tanggalSurat: (newAgenda.tanggalSurat || new Date().toISOString().split('T')[0]).slice(0, 32),
+      ...(cleanTanggalTerima ? { tanggalTerima: cleanTanggalTerima } : {}),
+      asalTujuan: newAgenda.asalTujuan.trim().slice(0, 200),
+      perihal: newAgenda.perihal.trim().slice(0, 300),
+      ...(cleanDisposisi ? { disposisi: cleanDisposisi } : {}),
+      ...(cleanStatus ? { statusTindakLanjut: cleanStatus } : {}),
+      ...(cleanLampiran ? { lampiranUrl: cleanLampiran } : {}),
+      ...(cleanCatatan ? { catatan: cleanCatatan } : {})
     };
-    const updated = [item, ...agendaList];
+
+    const updated = isEditing
+      ? agendaList.map((x) => (x.id === item.id ? item : x))
+      : [item, ...agendaList];
     setAgendaList(updated);
 
-    await mutateCloudCollection<SuratAgendaItem>(
-      'suratAgenda',
-      [AGENDA_STORAGE_KEY],
-      (latest) => [item, ...latest.filter((x) => x.id !== item.id)],
-      updated,
-      'Buku Agenda Surat'
-    );
-    await savePerDocItem('surat_agenda', item.id, item as unknown as Record<string, unknown>);
-    await logAuditEvent('Buku Agenda Surat', `Catat Surat ${item.direction}`, `${item.nomorSurat} — ${item.perihal}`);
+    const [colRes, perDocRes] = await Promise.all([
+      mutateCloudCollection<SuratAgendaItem>(
+        'suratAgenda',
+        [AGENDA_STORAGE_KEY],
+        (latest) =>
+          isEditing
+            ? latest.map((x) => (x.id === item.id ? item : x))
+            : [item, ...latest.filter((x) => x.id !== item.id)],
+        updated,
+        'Buku Agenda Surat'
+      ),
+      savePerDocItem('surat_agenda', item.id, item as unknown as Record<string, unknown>)
+    ]);
 
-    setNewAgenda({
-      direction: 'Keluar',
-      nomorSurat: buildAutoLetterNumber('Und', updated.length),
-      tanggalSurat: new Date().toISOString().split('T')[0],
-      perihal: '',
-      asalTujuan: '',
-      catatan: '',
-      lampiranUrl: ''
-    });
-    onNotice('success', 'Surat berhasil dicatat di Buku Agenda & Cloud.');
+    await logAuditEvent(
+      'Buku Agenda Surat',
+      isEditing ? `Edit Surat ${item.direction}` : `Catat Surat ${item.direction}`,
+      `${item.nomorAgenda ? `[${item.nomorAgenda}] ` : ''}${item.nomorSurat} — ${item.perihal}`
+    );
+
+    setEditingAgendaId(null);
+    setNewAgenda(createEmptyAgendaForm(item.direction, updated, keluarCodeType));
+    if (colRes.success && perDocRes.success) {
+      onNotice(
+        'success',
+        isEditing
+          ? `Perubahan catatan Surat ${item.direction} berhasil disimpan.`
+          : `Surat ${item.direction} berhasil dicatat di Buku Agenda & Cloud.`
+      );
+    } else {
+      onNotice('error', colRes.error || perDocRes.error || 'Tersimpan di perangkat lokal, namun gagal sinkron ke Cloud.');
+    }
   };
 
   const handleDeleteAgenda = async (id: string) => {
     if (!isAdmin) return;
+    if (editingAgendaId === id) {
+      setEditingAgendaId(null);
+    }
     const deletedAgenda = agendaList.find((x) => x.id === id);
     const updated = agendaList.filter((x) => x.id !== id);
     setAgendaList(updated);
@@ -1259,15 +1632,69 @@ export const EOfficeSubPanels: React.FC<EOfficeProps> = ({
   const filteredAgenda = useMemo(() => {
     return agendaList.filter((item) => {
       const matchDir = agendaFilter === 'Semua' || item.direction === agendaFilter;
+      const matchStatus =
+        agendaFilter !== 'Masuk' ||
+        agendaStatusFilter === 'Semua' ||
+        (item.statusTindakLanjut || 'Baru') === agendaStatusFilter;
+      const matchMonth =
+        !agendaMonthFilter ||
+        (item.tanggalSurat || '').startsWith(agendaMonthFilter) ||
+        (item.tanggalTerima || '').startsWith(agendaMonthFilter);
       const q = agendaSearch.toLowerCase();
       const matchQ =
         !q ||
+        (item.nomorAgenda || '').toLowerCase().includes(q) ||
         item.nomorSurat.toLowerCase().includes(q) ||
         item.perihal.toLowerCase().includes(q) ||
-        item.asalTujuan.toLowerCase().includes(q);
-      return matchDir && matchQ;
+        item.asalTujuan.toLowerCase().includes(q) ||
+        (item.disposisi || '').toLowerCase().includes(q) ||
+        (item.catatan || '').toLowerCase().includes(q);
+      return matchDir && matchStatus && matchMonth && matchQ;
     });
-  }, [agendaList, agendaFilter, agendaSearch]);
+  }, [agendaList, agendaFilter, agendaStatusFilter, agendaMonthFilter, agendaSearch]);
+
+  const handleExportAgendaCsv = () => {
+    const headers = [
+      'No',
+      'Jenis',
+      'No Agenda',
+      'Nomor Surat',
+      'Tanggal Surat',
+      'Tanggal Terima',
+      'Asal / Tujuan',
+      'Perihal',
+      'Disposisi',
+      'Status',
+      'Catatan'
+    ];
+    const escapeCsv = (val?: string) => `"${String(val || '').replace(/"/g, '""')}"`;
+    const rows = filteredAgenda.map((item, idx) =>
+      [
+        idx + 1,
+        escapeCsv(item.direction),
+        escapeCsv(item.nomorAgenda),
+        escapeCsv(item.nomorSurat),
+        escapeCsv(item.tanggalSurat),
+        escapeCsv(item.tanggalTerima),
+        escapeCsv(item.asalTujuan),
+        escapeCsv(item.perihal),
+        escapeCsv(item.disposisi),
+        escapeCsv(item.statusTindakLanjut),
+        escapeCsv(item.catatan)
+      ].join(',')
+    );
+    const csvContent = '\uFEFF' + [headers.join(','), ...rows].join('\n');
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `Buku_Agenda_Surat_${agendaFilter}_${agendaMonthFilter || 'Semua'}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+    onNotice('success', 'File Excel/CSV Buku Agenda Surat berhasil diunduh.');
+  };
 
   const buildAgendaRekapHtml = () => {
     const logoPgri = localStorage.getItem('logo-pgri') || localStorage.getItem('logo-kombel') || '';
@@ -1280,9 +1707,92 @@ export const EOfficeSubPanels: React.FC<EOfficeProps> = ({
     const stempelRotation = Number(localStorage.getItem('logo-stempel-rotation')) || 0;
     const { namaKetua, npaKetua, namaSekretaris, npaSekretaris } = resolveEOfficeSigners();
     const todayStr = new Date().toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' });
-    const verifyText = `BUKU AGENDA SURAT PGRI RANTING GELANG | Filter: ${agendaFilter} | Total: ${filteredAgenda.length} | Cetak: ${todayStr}`;
+    const rekapHeading =
+      agendaFilter === 'Masuk'
+        ? 'BUKU AGENDA SURAT MASUK'
+        : agendaFilter === 'Keluar'
+          ? 'BUKU AGENDA SURAT KELUAR'
+          : 'BUKU AGENDA SURAT (MASUK & KELUAR)';
+    const verifyText = `${rekapHeading} PGRI RANTING GELANG | Total: ${filteredAgenda.length} | Cetak: ${todayStr}`;
     const qrUrl = generateQrSvgDataUrl(verifyText, 140);
-    return `<!DOCTYPE html><html lang="id"><head><meta charset="UTF-8"><title>Buku Agenda Surat</title>
+
+    const tableHeadHtml =
+      agendaFilter === 'Masuk'
+        ? `<tr>
+            <th style="width:28px">No</th>
+            <th style="width:74px">No. Agenda</th>
+            <th style="width:74px">Tgl. Terima</th>
+            <th style="width:120px">No. &amp; Tgl. Surat</th>
+            <th>Pengirim</th>
+            <th>Perihal</th>
+            <th style="width:120px">Disposisi / Status</th>
+          </tr>`
+        : agendaFilter === 'Keluar'
+          ? `<tr>
+              <th style="width:28px">No</th>
+              <th style="width:76px">No. Agenda</th>
+              <th style="width:76px">Tgl. Surat</th>
+              <th style="width:130px">Nomor Surat</th>
+              <th>Tujuan Surat</th>
+              <th>Perihal</th>
+              <th style="width:110px">Keterangan</th>
+            </tr>`
+          : `<tr>
+              <th style="width:28px">No</th>
+              <th style="width:58px">Jenis</th>
+              <th style="width:76px">Tgl. Surat</th>
+              <th style="width:125px">Nomor Surat</th>
+              <th>Asal / Tujuan</th>
+              <th>Perihal</th>
+              <th style="width:110px">Ket. / Disposisi</th>
+            </tr>`;
+
+    const tableBodyHtml =
+      filteredAgenda.length > 0
+        ? filteredAgenda
+            .map((item, idx) => {
+              if (agendaFilter === 'Masuk') {
+                const statusBadge = item.statusTindakLanjut || 'Baru';
+                const dispText = [item.disposisi, item.catatan].filter(Boolean).join(' • ');
+                return `<tr>
+                  <td style="text-align:center">${idx + 1}</td>
+                  <td style="text-align:center">${escapeHtml(item.nomorAgenda || '-')}</td>
+                  <td style="text-align:center">${escapeHtml(formatAgendaDateShort(item.tanggalTerima || item.tanggalSurat))}</td>
+                  <td><div>${escapeHtml(item.nomorSurat)}</div><div style="font-size:8.5pt;color:#444;">Tgl: ${escapeHtml(formatAgendaDateShort(item.tanggalSurat))}</div></td>
+                  <td>${escapeHtml(item.asalTujuan)}</td>
+                  <td>${escapeHtml(item.perihal)}</td>
+                  <td><div><strong>[${escapeHtml(statusBadge)}]</strong></div>${dispText ? `<div style="font-size:8.5pt;margin-top:2px;">${escapeHtml(dispText)}</div>` : ''}</td>
+                </tr>`;
+              }
+              if (agendaFilter === 'Keluar') {
+                return `<tr>
+                  <td style="text-align:center">${idx + 1}</td>
+                  <td style="text-align:center">${escapeHtml(item.nomorAgenda || '-')}</td>
+                  <td style="text-align:center">${escapeHtml(formatAgendaDateShort(item.tanggalSurat))}</td>
+                  <td>${escapeHtml(item.nomorSurat)}</td>
+                  <td>${escapeHtml(item.asalTujuan)}</td>
+                  <td>${escapeHtml(item.perihal)}</td>
+                  <td>${escapeHtml(item.catatan || '-')}</td>
+                </tr>`;
+              }
+              const ketText =
+                item.direction === 'Masuk'
+                  ? `[${item.statusTindakLanjut || 'Baru'}] ${[item.disposisi, item.catatan].filter(Boolean).join(' • ')}`.trim()
+                  : item.catatan || '-';
+              return `<tr>
+                <td style="text-align:center">${idx + 1}</td>
+                <td style="text-align:center">${escapeHtml(item.direction)}</td>
+                <td style="text-align:center">${escapeHtml(formatAgendaDateShort(item.tanggalSurat))}</td>
+                <td>${escapeHtml(item.nomorSurat)}</td>
+                <td>${escapeHtml(item.asalTujuan)}</td>
+                <td>${escapeHtml(item.perihal)}</td>
+                <td style="font-size:8.5pt;">${escapeHtml(ketText || '-')}</td>
+              </tr>`;
+            })
+            .join('')
+        : `<tr><td colspan="7" style="text-align:center; color:#666;">(Belum ada data surat pada filter ini)</td></tr>`;
+
+    return `<!DOCTYPE html><html lang="id"><head><meta charset="UTF-8"><title>${escapeHtml(rekapHeading)}</title>
       <style>
         @page { size: A4 portrait; margin: 0; }
         * { box-sizing: border-box; }
@@ -1293,10 +1803,10 @@ export const EOfficeSubPanels: React.FC<EOfficeProps> = ({
           margin: 0 auto;
           background: #ffffff;
           color: #000000;
-          padding: 14mm 18mm 14mm 18mm;
+          padding: 14mm 15mm 14mm 15mm;
           font-family: 'Times New Roman', Times, serif;
-          font-size: 11pt;
-          line-height: 1.45;
+          font-size: 10.5pt;
+          line-height: 1.4;
           display: flex;
           flex-direction: column;
         }
@@ -1311,11 +1821,11 @@ export const EOfficeSubPanels: React.FC<EOfficeProps> = ({
         .kop-text .ranting-main { font-size: 16.5pt; font-weight: bold; text-transform: uppercase; letter-spacing: 0.5px; margin-top: 1px; }
         .kop-text .wilayah { font-size: 12pt; font-weight: bold; text-transform: uppercase; letter-spacing: 0.3px; margin-top: 1px; }
         .kop-text .sekretariat { font-size: 8.5pt; font-style: italic; margin-top: 2px; }
-        .kop-divider { border-top: 2px solid #000000; border-bottom: 1px solid #000000; height: 2px; margin-bottom: 18px; position: relative; z-index: 2; }
-        h3 { text-align: center; text-decoration: underline; margin: 12px 0 4px; font-size: 12.5pt; }
-        .sub { text-align: center; font-size: 10pt; margin-bottom: 14px; }
-        table { width: 100%; border-collapse: collapse; font-size: 10pt; }
-        th, td { border: 1px solid #000; padding: 6px 8px; vertical-align: top; }
+        .kop-divider { border-top: 2px solid #000000; border-bottom: 1px solid #000000; height: 2px; margin-bottom: 16px; position: relative; z-index: 2; }
+        h3 { text-align: center; text-decoration: underline; margin: 10px 0 4px; font-size: 12.5pt; }
+        .sub { text-align: center; font-size: 9.5pt; margin-bottom: 12px; }
+        table { width: 100%; border-collapse: collapse; font-size: 9pt; }
+        th, td { border: 1px solid #000; padding: 5px 6px; vertical-align: top; word-break: break-word; }
         th { background: #f3f4f6; text-align: center; }
         .ttd-grid { display: flex; justify-content: space-between; align-items: flex-end; position: relative; margin-top: 24px; }
         .ttd-col { width: 220px; text-align: center; position: relative; }
@@ -1341,30 +1851,14 @@ export const EOfficeSubPanels: React.FC<EOfficeProps> = ({
             </div>
           </div>
           <div class="kop-divider"></div>
-          <h3>BUKU AGENDA SURAT (${escapeHtml(agendaFilter.toUpperCase())})</h3>
-          <div class="sub">Dicetak pada: ${escapeHtml(todayStr)} • Total: ${filteredAgenda.length} Surat</div>
+          <h3>${escapeHtml(rekapHeading)}</h3>
+          <div class="sub">Dicetak pada: ${escapeHtml(todayStr)} • Total: ${filteredAgenda.length} Surat${agendaFilter === 'Masuk' && agendaStatusFilter !== 'Semua' ? ` • Status: ${escapeHtml(agendaStatusFilter)}` : ''}</div>
           <table>
             <thead>
-              <tr>
-                <th style="width:32px">No</th>
-                <th style="width:65px">Jenis</th>
-                <th style="width:90px">Tanggal</th>
-                <th>Nomor Surat</th>
-                <th>Asal / Tujuan</th>
-                <th>Perihal</th>
-              </tr>
+              ${tableHeadHtml}
             </thead>
             <tbody>
-              ${
-                filteredAgenda.length > 0
-                  ? filteredAgenda
-                      .map(
-                        (item, idx) =>
-                          `<tr><td style="text-align:center">${idx + 1}</td><td style="text-align:center">${escapeHtml(item.direction)}</td><td>${escapeHtml(item.tanggalSurat)}</td><td>${escapeHtml(item.nomorSurat)}</td><td>${escapeHtml(item.asalTujuan)}</td><td>${escapeHtml(item.perihal)}</td></tr>`
-                      )
-                      .join('')
-                  : `<tr><td colspan="6" style="text-align:center; color:#666;">(Belum ada data surat pada filter ini)</td></tr>`
-              }
+              ${tableBodyHtml}
             </tbody>
           </table>
         </div>
@@ -1413,7 +1907,13 @@ export const EOfficeSubPanels: React.FC<EOfficeProps> = ({
       return [];
     }
   });
-  const [notulenForm, setNotulenForm] = useState({
+  const [editingNotulenId, setEditingNotulenId] = useState<string | null>(null);
+  const [confirmDeleteTarget, setConfirmDeleteTarget] = useState<
+    | { type: 'agenda'; item: SuratAgendaItem }
+    | { type: 'notulen'; item: NotulenItem }
+    | null
+  >(null);
+  const createEmptyNotulenForm = () => ({
     eventId: '',
     eventTitle: '',
     tanggal: new Date().toISOString().split('T')[0],
@@ -1426,6 +1926,7 @@ export const EOfficeSubPanels: React.FC<EOfficeProps> = ({
     keputusan: '',
     tindakLanjut: ''
   });
+  const [notulenForm, setNotulenForm] = useState(createEmptyNotulenForm);
 
   useEffect(() => {
     try {
@@ -1456,44 +1957,165 @@ export const EOfficeSubPanels: React.FC<EOfficeProps> = ({
     }));
   };
 
+  const handleEditNotulen = (item: NotulenItem) => {
+    if (!isAdmin) return;
+    setEditingNotulenId(item.id);
+    setNotulenForm({
+      eventId: item.eventId || '',
+      eventTitle: item.eventTitle || '',
+      tanggal: item.tanggal || new Date().toISOString().split('T')[0],
+      waktu: item.waktu || '08.00 - Selesai WIB',
+      tempat: item.tempat || 'SDN Gelang 03',
+      pimpinanRapat: item.pimpinanRapat || 'Ketua PGRI Ranting Gelang',
+      notulis: item.notulis || 'Sekretaris PGRI Ranting Gelang',
+      jumlahHadir: item.jumlahHadir || 0,
+      agenda: item.agenda || '',
+      keputusan: item.keputusan || '',
+      tindakLanjut: item.tindakLanjut || ''
+    });
+    setPreviewNotulenId(null);
+    onNotice('success', `Mode edit aktif untuk notulen "${item.eventTitle}".`);
+  };
+
+  const handleCancelEditNotulen = () => {
+    setEditingNotulenId(null);
+    setNotulenForm(createEmptyNotulenForm());
+  };
+
+  const handleDeleteNotulen = async (item: NotulenItem) => {
+    if (!isAdmin) return;
+    if (editingNotulenId === item.id) {
+      setEditingNotulenId(null);
+      setNotulenForm(createEmptyNotulenForm());
+    }
+    if (previewNotulenId === item.id) {
+      setPreviewNotulenId(null);
+    }
+    const updated = notulenList.filter((x) => x.id !== item.id);
+    setNotulenList(updated);
+
+    const res = await mutateCloudCollection<NotulenItem>(
+      'notulen',
+      [NOTULEN_STORAGE_KEY],
+      (latest) => latest.filter((x) => x.id !== item.id),
+      updated,
+      'Notulen Rapat'
+    );
+    setNotulenList(res.items);
+    if (res.success) {
+      void logAuditEvent('Notulen Rapat', 'Hapus Berita Acara', `Menghapus notulen "${item.eventTitle}" (${item.tanggal}).`);
+      onNotice('success', `Notulen "${item.eventTitle}" berhasil dihapus.`);
+    } else {
+      onNotice('error', res.error || 'Notulen terhapus lokal, namun gagal sinkron ke Cloud.');
+    }
+  };
+
   const handleAddNotulen = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!isAdmin || !notulenForm.eventTitle.trim() || !notulenForm.keputusan.trim()) return;
 
+    const isEditing = Boolean(editingNotulenId);
     const item: NotulenItem = {
       ...notulenForm,
-      id: `notulen-${Date.now()}`,
+      id: editingNotulenId || `notulen-${Date.now()}`,
       updatedAt: new Date().toISOString()
     };
-    const updated = [item, ...notulenList];
+    const updated = isEditing
+      ? notulenList.map((x) => (x.id === item.id ? item : x))
+      : [item, ...notulenList];
     setNotulenList(updated);
 
-    await mutateCloudCollection<NotulenItem>(
+    const res = await mutateCloudCollection<NotulenItem>(
       'notulen',
       [NOTULEN_STORAGE_KEY],
-      (latest) => [item, ...latest.filter((x) => x.id !== item.id)],
+      (latest) =>
+        isEditing
+          ? latest.some((x) => x.id === item.id)
+            ? latest.map((x) => (x.id === item.id ? item : x))
+            : [item, ...latest]
+          : [item, ...latest.filter((x) => x.id !== item.id)],
       updated,
       'Notulen Rapat'
     );
-    await logAuditEvent('Notulen Rapat', 'Simpan Berita Acara', `Menyimpan notulen "${item.eventTitle}" (${item.jumlahHadir} hadir).`);
+    setNotulenList(res.items);
+    await logAuditEvent(
+      'Notulen Rapat',
+      isEditing ? 'Edit Berita Acara' : 'Simpan Berita Acara',
+      `${isEditing ? 'Memperbarui' : 'Menyimpan'} notulen "${item.eventTitle}" (${item.jumlahHadir} hadir).`
+    );
 
-    setNotulenForm({
-      eventId: '',
-      eventTitle: '',
-      tanggal: new Date().toISOString().split('T')[0],
-      waktu: '08.00 - Selesai WIB',
-      tempat: 'SDN Gelang 03',
-      pimpinanRapat: 'Ketua PGRI Ranting Gelang',
-      notulis: 'Sekretaris PGRI Ranting Gelang',
-      jumlahHadir: 0,
-      agenda: '',
-      keputusan: '',
-      tindakLanjut: ''
-    });
-    onNotice('success', 'Notulen & Berita Acara Rapat berhasil disimpan.');
+    setEditingNotulenId(null);
+    setNotulenForm(createEmptyNotulenForm());
+    onNotice(
+      'success',
+      isEditing
+        ? 'Perubahan Notulen & Berita Acara Rapat berhasil disimpan.'
+        : 'Notulen & Berita Acara Rapat berhasil disimpan.'
+    );
   };
 
   const [previewNotulenId, setPreviewNotulenId] = useState<string | null>(null);
+
+  const renderEofficeDeleteModal = () => {
+    if (!confirmDeleteTarget) return null;
+    const isAgenda = confirmDeleteTarget.type === 'agenda';
+    const titleLabel = isAgenda
+      ? `Surat ${confirmDeleteTarget.item.direction} No. ${confirmDeleteTarget.item.nomorSurat}`
+      : confirmDeleteTarget.item.eventTitle;
+    return (
+      <div
+        className="fixed inset-0 z-[95] flex items-center justify-center p-4 bg-stone-950/75 backdrop-blur-sm animate-in fade-in duration-200"
+        onClick={() => setConfirmDeleteTarget(null)}
+      >
+        <div
+          className={`w-full max-w-md rounded-2xl p-6 border shadow-2xl space-y-4 ${cardClass}`}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="flex items-center gap-3 text-red-700 dark:text-red-400">
+            <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${isDark ? 'bg-red-950/70 border border-red-800/60' : 'bg-red-50 border border-red-200'}`}>
+              <Trash2 className="w-5 h-5" />
+            </div>
+            <div>
+              <h3 className="font-display font-bold text-base">
+                {isAgenda ? 'Konfirmasi Hapus Catatan Surat' : 'Konfirmasi Hapus Notulen'}
+              </h3>
+              <p className="text-xs opacity-80">Data akan dihapus dari perangkat dan Cloud.</p>
+            </div>
+          </div>
+          <p className={`text-sm ${isDark ? 'text-stone-300' : 'text-stone-600'}`}>
+            Apakah Anda yakin ingin menghapus <span className="font-bold">&quot;{titleLabel}&quot;</span>?
+          </p>
+          <div className="flex gap-3 pt-2">
+            <button
+              type="button"
+              onClick={() => setConfirmDeleteTarget(null)}
+              className={`flex-1 px-4 py-2.5 rounded-xl font-bold text-xs cursor-pointer ${
+                isDark ? 'bg-stone-800 hover:bg-stone-700 text-stone-300' : 'bg-stone-100 hover:bg-stone-200 text-stone-700'
+              }`}
+            >
+              Batal
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                const target = confirmDeleteTarget;
+                setConfirmDeleteTarget(null);
+                if (target.type === 'agenda') {
+                  void handleDeleteAgenda(target.item.id);
+                } else {
+                  void handleDeleteNotulen(target.item);
+                }
+              }}
+              className="flex-1 px-4 py-2.5 rounded-xl bg-red-800 hover:bg-red-700 text-white font-bold text-xs uppercase tracking-wider flex items-center justify-center gap-2 cursor-pointer"
+            >
+              <Trash2 className="w-4 h-4" />
+              <span>Ya, Hapus</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  };
 
   const buildNotulenHtml = (item: Omit<NotulenItem, 'id' | 'updatedAt'>) => {
     const logoPgri = localStorage.getItem('logo-pgri') || localStorage.getItem('logo-kombel') || '';
@@ -1781,6 +2403,23 @@ export const EOfficeSubPanels: React.FC<EOfficeProps> = ({
               </p>
             </div>
             <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setStShowTtdStempel((prev) => !prev)}
+                className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold border cursor-pointer transition-colors ${
+                  stShowTtdStempel
+                    ? isDark
+                      ? 'bg-emerald-950/50 border-emerald-700/60 text-emerald-300'
+                      : 'bg-emerald-50 border-emerald-300 text-emerald-800'
+                    : isDark
+                      ? 'bg-stone-800 border-stone-700 text-stone-300'
+                      : 'bg-[#faf8f5] border-stone-200 text-stone-600'
+                }`}
+                title="Sembunyikan jika ingin mencetak kosong untuk tanda tangan & stempel basah"
+              >
+                <ShieldCheck className="w-3.5 h-3.5" />
+                <span>{stShowTtdStempel ? 'TTD & Stempel: Tampil' : 'TTD & Stempel: Basah'}</span>
+              </button>
               {isAdmin && (
                 <button
                   type="button"
@@ -1818,6 +2457,47 @@ export const EOfficeSubPanels: React.FC<EOfficeProps> = ({
                 <Share2 className="w-3.5 h-3.5" />
                 <span>Bagikan WA</span>
               </button>
+              {isAdmin && (
+                <button
+                  type="button"
+                  disabled={isRecordingQuickAgenda}
+                  onClick={async () => {
+                    if (isRecordingQuickAgenda) return;
+                    setIsRecordingQuickAgenda(true);
+                    try {
+                      const namaDelegasi = [
+                        ...selectedDelegates.map((d) => d.name),
+                        ...(stManualNama.trim() ? stManualNama.split('\n').map((s) => s.trim()).filter(Boolean) : [])
+                      ].join(', ');
+                      const res = await quickRecordOutgoingAgenda({
+                        nomorSurat: stNomor,
+                        asalTujuan: namaDelegasi || 'Anggota Delegasi PGRI Ranting Gelang',
+                        perihal: `Surat Tugas - ${stKeperluan}`,
+                        catatan: `Pelaksanaan: ${stHari}, ${stTanggal} di ${stTempat}`
+                      });
+                      if (!res.ok) {
+                        onNotice('error', res.error || 'Gagal mencatat Surat Tugas ke Surat Keluar.');
+                      } else if (res.error) {
+                        onNotice('error', `Tercatat lokal, namun sinkron Cloud gagal: ${res.error}`);
+                      } else {
+                        onNotice(
+                          'success',
+                          res.updatedExisting
+                            ? `Surat Tugas No. ${stNomor} diperbarui di Buku Agenda Surat Keluar.`
+                            : `Surat Tugas No. ${stNomor} berhasil dicatat ke Buku Agenda Surat Keluar.`
+                        );
+                      }
+                    } finally {
+                      setIsRecordingQuickAgenda(false);
+                    }
+                  }}
+                  className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold bg-amber-600/15 text-amber-800 dark:text-amber-300 border border-amber-500/35 hover:bg-amber-600/25 transition cursor-pointer disabled:opacity-60"
+                  title="Catat otomatis nomor dan perihal Surat Tugas ini ke Buku Agenda Surat Keluar"
+                >
+                  {isRecordingQuickAgenda ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <BookOpen className="w-3.5 h-3.5" />}
+                  <span>Catat ke Surat Keluar</span>
+                </button>
+              )}
               {isAdmin && onSaveArchiveItem && (
                 <button
                   type="button"
@@ -1825,7 +2505,8 @@ export const EOfficeSubPanels: React.FC<EOfficeProps> = ({
                     const base = createInitialDraft(teachers);
                     onSaveArchiveItem({
                       ...base,
-                      id: `inv-st-${Date.now()}`,
+                      id: loadedArchiveItem?.docCategory === 'surat_tugas' ? loadedArchiveItem.id : `inv-st-${Date.now()}`,
+                      docCategory: 'surat_tugas',
                       title: `Surat Tugas - ${stKeperluan.slice(0, 50)}`,
                       nomorSurat: stNomor,
                       perihal: 'Surat Tugas',
@@ -1833,7 +2514,12 @@ export const EOfficeSubPanels: React.FC<EOfficeProps> = ({
                       tanggalAcara: stTanggal,
                       tempatAcara: stTempat,
                       acara: stKeperluan,
-                      paragrafPembuka: stDasar
+                      paragrafPembuka: stDasar,
+                      tembusanList: stTembusanList,
+                      stSelectedIds,
+                      stManualNama,
+                      showTtdImages: stShowTtdStempel,
+                      showStempel: stShowTtdStempel
                     });
                   }}
                   disabled={isSavingCloud}
@@ -1860,7 +2546,6 @@ export const EOfficeSubPanels: React.FC<EOfficeProps> = ({
             <iframe
               title="Pratinjau Surat Tugas"
               srcDoc={buildSuratTugasHtml()}
-              scrolling="no"
               style={{ width: '210mm', height: '297mm' }}
               className="bg-transparent border-0 shadow-2xl mx-auto block shrink-0"
             />
@@ -2100,6 +2785,23 @@ export const EOfficeSubPanels: React.FC<EOfficeProps> = ({
               </p>
             </div>
             <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setPuShowTtdStempel((prev) => !prev)}
+                className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold border cursor-pointer transition-colors ${
+                  puShowTtdStempel
+                    ? isDark
+                      ? 'bg-emerald-950/50 border-emerald-700/60 text-emerald-300'
+                      : 'bg-emerald-50 border-emerald-300 text-emerald-800'
+                    : isDark
+                      ? 'bg-stone-800 border-stone-700 text-stone-300'
+                      : 'bg-[#faf8f5] border-stone-200 text-stone-600'
+                }`}
+                title="Sembunyikan jika ingin mencetak kosong untuk tanda tangan & stempel basah"
+              >
+                <ShieldCheck className="w-3.5 h-3.5" />
+                <span>{puShowTtdStempel ? 'TTD & Stempel: Tampil' : 'TTD & Stempel: Basah'}</span>
+              </button>
               {isAdmin && (
                 <button
                   type="button"
@@ -2140,6 +2842,43 @@ export const EOfficeSubPanels: React.FC<EOfficeProps> = ({
                 <Share2 className="w-3.5 h-3.5" />
                 <span>Bagikan WA</span>
               </button>
+              {isAdmin && (
+                <button
+                  type="button"
+                  disabled={isRecordingQuickAgenda}
+                  onClick={async () => {
+                    if (isRecordingQuickAgenda) return;
+                    setIsRecordingQuickAgenda(true);
+                    try {
+                      const res = await quickRecordOutgoingAgenda({
+                        nomorSurat: puNomor,
+                        asalTujuan: `Pengawas Ujian Silang (${puRows.length} Guru)`,
+                        perihal: `Surat Tugas Pengawas Ujian Silang - ${puNamaUjian}`,
+                        catatan: `Pelaksanaan: ${puHari}, ${puTanggalPelaksanaan} (${puWaktu})`
+                      });
+                      if (!res.ok) {
+                        onNotice('error', res.error || 'Gagal mencatat Pengawas Ujian ke Surat Keluar.');
+                      } else if (res.error) {
+                        onNotice('error', `Tercatat lokal, namun sinkron Cloud gagal: ${res.error}`);
+                      } else {
+                        onNotice(
+                          'success',
+                          res.updatedExisting
+                            ? `Surat Tugas Pengawas Ujian No. ${puNomor} diperbarui di Buku Agenda Surat Keluar.`
+                            : `Surat Tugas Pengawas Ujian No. ${puNomor} berhasil dicatat ke Buku Agenda Surat Keluar.`
+                        );
+                      }
+                    } finally {
+                      setIsRecordingQuickAgenda(false);
+                    }
+                  }}
+                  className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold bg-amber-600/15 text-amber-800 dark:text-amber-300 border border-amber-500/35 hover:bg-amber-600/25 transition cursor-pointer disabled:opacity-60"
+                  title="Catat otomatis Surat Tugas Pengawas Ujian ini ke Buku Agenda Surat Keluar"
+                >
+                  {isRecordingQuickAgenda ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <BookOpen className="w-3.5 h-3.5" />}
+                  <span>Catat ke Surat Keluar</span>
+                </button>
+              )}
               {isAdmin && onSaveArchiveItem && (
                 <button
                   type="button"
@@ -2147,15 +2886,21 @@ export const EOfficeSubPanels: React.FC<EOfficeProps> = ({
                     const base = createInitialDraft(teachers);
                     onSaveArchiveItem({
                       ...base,
-                      id: `inv-pu-${Date.now()}`,
+                      id: loadedArchiveItem?.docCategory === 'pengawas_ujian' ? loadedArchiveItem.id : `inv-pu-${Date.now()}`,
+                      docCategory: 'pengawas_ujian',
                       title: `Pengawas Ujian Silang - ${puNamaUjian.slice(0, 45)}`,
                       nomorSurat: puNomor,
                       perihal: 'Surat Tugas Pengawas Ujian Silang',
                       hari: puHari,
                       tanggalAcara: puTanggalPelaksanaan,
                       pukul: puWaktu,
+                      puWaktu,
                       acara: puNamaUjian,
-                      paragrafPembuka: puDasar
+                      paragrafPembuka: puDasar,
+                      tembusanList: puTembusanList,
+                      puRows,
+                      showTtdImages: puShowTtdStempel,
+                      showStempel: puShowTtdStempel
                     });
                   }}
                   disabled={isSavingCloud}
@@ -2182,7 +2927,6 @@ export const EOfficeSubPanels: React.FC<EOfficeProps> = ({
             <iframe
               title="Pratinjau Pengawas Ujian Silang"
               srcDoc={buildPengawasUjianHtml()}
-              scrolling="no"
               style={{ width: '210mm', height: '297mm' }}
               className="bg-transparent border-0 shadow-2xl mx-auto block shrink-0"
             />
@@ -2194,226 +2938,713 @@ export const EOfficeSubPanels: React.FC<EOfficeProps> = ({
 
   if (mode === 'agenda_surat') {
     return (
-      <div className="grid grid-cols-1 xl:grid-cols-12 gap-5 items-start">
-        {/* KIRI: KOTAK PENGISIAN & DAFTAR AGENDA */}
-        <div className="xl:col-span-5 space-y-5">
-          {isAdmin && (
-            <form onSubmit={handleAddAgenda} className={`rounded-2xl border p-5 space-y-3.5 ${cardClass}`}>
-              <div className="flex items-center gap-2.5">
-                <BookOpen className="w-5 h-5 text-red-800 dark:text-amber-400" />
-                <h2 className="font-display text-sm font-bold">Catat Surat Masuk / Surat Keluar</h2>
-              </div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label className={labelClass}>Jenis Surat</label>
-                  <select
-                    value={newAgenda.direction}
-                    onChange={(e) => setNewAgenda({ ...newAgenda, direction: e.target.value as 'Masuk' | 'Keluar' })}
-                    className={inputClass}
-                  >
-                    <option value="Keluar">Surat Keluar</option>
-                    <option value="Masuk">Surat Masuk</option>
-                  </select>
-                </div>
-                <div>
-                  <label className={labelClass}>Tanggal Surat *</label>
-                  <input type="date" required value={newAgenda.tanggalSurat} onChange={(e) => setNewAgenda({ ...newAgenda, tanggalSurat: e.target.value })} className={inputClass} />
-                </div>
-              </div>
-              <div>
-                <label className={labelClass}>Nomor Surat *</label>
-                <input required value={newAgenda.nomorSurat} onChange={(e) => setNewAgenda({ ...newAgenda, nomorSurat: e.target.value })} className={inputClass} />
-              </div>
-              <div>
-                <label className={labelClass}>{newAgenda.direction === 'Masuk' ? 'Pengirim Surat *' : 'Tujuan Surat *'}</label>
-                <input required value={newAgenda.asalTujuan} onChange={(e) => setNewAgenda({ ...newAgenda, asalTujuan: e.target.value })} placeholder="PGRI Cabang Sumberbaru / Sekolah" className={inputClass} />
-              </div>
-              <div>
-                <label className={labelClass}>Perihal *</label>
-                <input required value={newAgenda.perihal} onChange={(e) => setNewAgenda({ ...newAgenda, perihal: e.target.value })} placeholder="Undangan Rapat Kerja / Edaran Kontribusi" className={inputClass} />
-              </div>
-              <div>
-                <label className={labelClass}>Tautan Arsip PDF / Drive (opsional)</label>
-                <input type="url" value={newAgenda.lampiranUrl || ''} onChange={(e) => setNewAgenda({ ...newAgenda, lampiranUrl: e.target.value })} placeholder="https://drive.google.com/..." className={inputClass} />
-              </div>
-              <div className="flex justify-end">
-                <button type="submit" className="w-full sm:w-auto px-5 py-2.5 rounded-xl bg-red-800 hover:bg-red-700 text-white font-bold text-xs flex items-center justify-center gap-1.5 cursor-pointer transition-colors">
-                  <Plus className="w-4 h-4" />
-                  <span>Simpan ke Buku Agenda</span>
-                </button>
-              </div>
-            </form>
-          )}
-
-          <div className={`rounded-2xl border p-5 space-y-3.5 ${cardClass}`}>
-            <div className="flex flex-col gap-2.5">
-              <h3 className="font-display font-bold text-sm">Daftar Buku Agenda Surat ({filteredAgenda.length})</h3>
-              <div className="flex flex-wrap items-center gap-2">
-                {(['Semua', 'Masuk', 'Keluar'] as const).map((dir) => (
-                  <button
-                    key={dir}
-                    type="button"
-                    onClick={() => setAgendaFilter(dir)}
-                    className={`px-3 py-1 rounded-lg text-xs font-bold cursor-pointer transition-colors ${
-                      agendaFilter === dir
-                        ? 'bg-red-800 text-white'
-                        : isDark ? 'bg-stone-800 text-stone-300 hover:bg-stone-700' : 'bg-stone-100 text-stone-600 hover:bg-stone-200'
-                    }`}
-                  >
-                    {dir}
-                  </button>
-                ))}
-                <div className="relative flex-1 min-w-[140px]">
-                  <Search className="w-3.5 h-3.5 text-stone-400 absolute left-3 top-1/2 -translate-y-1/2" />
-                  <input
-                    value={agendaSearch}
-                    onChange={(e) => setAgendaSearch(e.target.value)}
-                    placeholder="Cari nomor / perihal..."
-                    className={`w-full pl-8 pr-3 py-1 rounded-lg border text-xs focus:outline-none focus:border-red-700 ${isDark ? 'bg-stone-950 border-stone-800 text-white' : 'bg-[#faf8f5] border-stone-200 text-stone-800'}`}
-                  />
-                </div>
-              </div>
-            </div>
-
-            {filteredAgenda.length === 0 ? (
-              <p className="text-xs text-stone-400 py-6 text-center">Belum ada catatan surat di Buku Agenda.</p>
-            ) : (
-              <div className="space-y-2.5 max-h-[380px] overflow-y-auto pr-1">
-                {filteredAgenda.map((item) => (
-                  <div key={item.id} className={`p-3.5 rounded-2xl border flex items-start justify-between gap-2.5 ${isDark ? 'bg-stone-950/60 border-stone-800' : 'bg-[#faf8f5] border-stone-200/80'}`}>
-                    <div className="space-y-1 min-w-0">
-                      <div className="flex flex-wrap items-center gap-1.5">
-                        <span className={`px-2 py-0.5 rounded-md text-[10px] font-extrabold uppercase ${
-                          item.direction === 'Masuk'
-                            ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400'
-                            : 'bg-red-800/15 text-red-800 dark:bg-amber-500/15 dark:text-amber-300'
-                        }`}>
-                          {item.direction}
-                        </span>
-                        <span className="font-mono text-[11px] font-bold truncate">{item.nomorSurat}</span>
-                      </div>
-                      <p className="font-bold text-xs">{item.perihal}</p>
-                      <p className="text-[11px] text-stone-400">
-                        {item.tanggalSurat} • {item.direction === 'Masuk' ? 'Dari:' : 'Kepada:'} {item.asalTujuan}
-                      </p>
-                    </div>
-                    <div className="flex items-center gap-1 shrink-0">
-                      {isSafeHttpUrl(item.lampiranUrl) && (
-                        <a
-                          href={item.lampiranUrl}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="p-1.5 rounded-lg bg-amber-500/15 text-amber-700 dark:text-amber-400"
-                          title="Buka Lampiran"
-                        >
-                          <ExternalLink className="w-3.5 h-3.5" />
-                        </a>
-                      )}
-                      {isAdmin && (
-                        <button
-                          type="button"
-                          onClick={() => handleDeleteAgenda(item.id)}
-                          className="p-1.5 rounded-lg text-red-600 dark:text-red-400 hover:bg-red-500/15 cursor-pointer"
-                          title="Hapus catatan"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        </div>
-
-        {/* KANAN: KOTAK PREVIEW */}
-        <div className={`xl:col-span-7 rounded-2xl border p-5 space-y-3 xl:sticky xl:top-4 ${cardClass}`}>
-          <div className="flex flex-wrap items-center justify-between gap-2">
+      <div className="space-y-5">
+        {/* RINGKASAN STATISTIK SURAT MASUK & KELUAR */}
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5">
+          <button
+            type="button"
+            onClick={() => {
+              setAgendaFilter('Masuk');
+              setAgendaStatusFilter('Semua');
+            }}
+            className={`text-left rounded-2xl border p-4 transition-all cursor-pointer flex items-center justify-between gap-3 ${
+              agendaFilter === 'Masuk' && agendaStatusFilter === 'Semua'
+                ? isDark
+                  ? 'bg-emerald-950/40 border-emerald-600/60 ring-1 ring-emerald-500/40'
+                  : 'bg-emerald-50/80 border-emerald-400 ring-1 ring-emerald-300'
+                : `${cardClass} hover:border-emerald-500/40`
+            }`}
+          >
             <div>
-              <div className="flex items-center gap-2 font-display text-xs sm:text-sm font-bold">
-                <Eye className="w-4 h-4 text-red-800 dark:text-amber-400" />
-                <span>Pratinjau Langsung Buku Agenda Surat (A4)</span>
-              </div>
-              <p className={`text-[11px] ${isDark ? 'text-stone-400' : 'text-stone-500'}`}>
-                Tampilan rekap mengikuti filter ({agendaFilter}) dan pencarian aktif.
+              <p className={`text-[11px] font-bold uppercase tracking-wider ${isDark ? 'text-emerald-400' : 'text-emerald-700'}`}>
+                Total Surat Masuk
+              </p>
+              <p className="font-display text-2xl font-extrabold mt-0.5">{agendaStats.totalMasuk}</p>
+              <p className={`text-[11px] mt-0.5 ${isDark ? 'text-stone-400' : 'text-stone-500'}`}>
+                Surat diterima dari luar
               </p>
             </div>
-            <div className="flex flex-wrap items-center gap-2">
-              {isAdmin && (
+            <div className={`p-2.5 rounded-xl ${isDark ? 'bg-emerald-500/15 text-emerald-400' : 'bg-emerald-100 text-emerald-700'}`}>
+              <Inbox className="w-5 h-5" />
+            </div>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              setAgendaFilter('Keluar');
+              setAgendaStatusFilter('Semua');
+            }}
+            className={`text-left rounded-2xl border p-4 transition-all cursor-pointer flex items-center justify-between gap-3 ${
+              agendaFilter === 'Keluar'
+                ? isDark
+                  ? 'bg-red-950/40 border-red-600/60 ring-1 ring-red-500/40'
+                  : 'bg-red-50/80 border-red-400 ring-1 ring-red-300'
+                : `${cardClass} hover:border-red-500/40`
+            }`}
+          >
+            <div>
+              <p className={`text-[11px] font-bold uppercase tracking-wider ${isDark ? 'text-amber-400' : 'text-red-800'}`}>
+                Total Surat Keluar
+              </p>
+              <p className="font-display text-2xl font-extrabold mt-0.5">{agendaStats.totalKeluar}</p>
+              <p className={`text-[11px] mt-0.5 ${isDark ? 'text-stone-400' : 'text-stone-500'}`}>
+                Surat diterbitkan ranting
+              </p>
+            </div>
+            <div className={`p-2.5 rounded-xl ${isDark ? 'bg-amber-500/15 text-amber-400' : 'bg-red-100 text-red-800'}`}>
+              <Send className="w-5 h-5" />
+            </div>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              setAgendaFilter('Masuk');
+              setAgendaStatusFilter('Baru');
+            }}
+            className={`text-left rounded-2xl border p-4 transition-all cursor-pointer flex items-center justify-between gap-3 ${
+              agendaFilter === 'Masuk' && agendaStatusFilter === 'Baru'
+                ? isDark
+                  ? 'bg-amber-950/40 border-amber-500/60 ring-1 ring-amber-500/40'
+                  : 'bg-amber-50/90 border-amber-400 ring-1 ring-amber-300'
+                : `${cardClass} hover:border-amber-500/40`
+            }`}
+          >
+            <div>
+              <p className={`text-[11px] font-bold uppercase tracking-wider ${isDark ? 'text-amber-400' : 'text-amber-700'}`}>
+                Perlu Tindak Lanjut
+              </p>
+              <p className="font-display text-2xl font-extrabold mt-0.5">{agendaStats.pendingMasuk}</p>
+              <p className={`text-[11px] mt-0.5 ${isDark ? 'text-stone-400' : 'text-stone-500'}`}>
+                Surat masuk belum selesai
+              </p>
+            </div>
+            <div className={`p-2.5 rounded-xl ${isDark ? 'bg-amber-500/15 text-amber-400' : 'bg-amber-100 text-amber-700'}`}>
+              <Clock className="w-5 h-5" />
+            </div>
+          </button>
+        </div>
+
+        <div className="grid grid-cols-1 xl:grid-cols-12 gap-5 items-start">
+          {/* KIRI: KOTAK PENGISIAN & DAFTAR AGENDA */}
+          <div className="xl:col-span-5 space-y-5">
+            {isAdmin && (
+              <form
+                onSubmit={handleAddAgenda}
+                className={`rounded-2xl border p-5 space-y-3.5 ${cardClass} ${
+                  editingAgendaId
+                    ? isDark
+                      ? 'ring-2 ring-amber-500/60 border-amber-500/50'
+                      : 'ring-2 ring-amber-400/70 border-amber-400'
+                    : ''
+                }`}
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2.5">
+                    <BookOpen className="w-5 h-5 text-red-800 dark:text-amber-400" />
+                    <div>
+                      <h2 className="font-display text-sm font-bold">
+                        {editingAgendaId
+                          ? `Edit Catatan Surat ${newAgenda.direction}`
+                          : 'Catat Surat Masuk / Surat Keluar'}
+                      </h2>
+                      <p className={`text-[11px] ${isDark ? 'text-stone-400' : 'text-stone-500'}`}>
+                        {newAgenda.direction === 'Masuk'
+                          ? 'Catat nomor surat asli pengirim, tanggal diterima, & disposisi.'
+                          : 'Catat surat resmi yang diterbitkan oleh PGRI Ranting Gelang.'}
+                      </p>
+                    </div>
+                  </div>
+                  {editingAgendaId && (
+                    <button
+                      type="button"
+                      onClick={handleCancelEditAgenda}
+                      className={`inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[11px] font-bold cursor-pointer transition-colors ${
+                        isDark ? 'bg-stone-800 text-stone-300 hover:bg-stone-700' : 'bg-stone-100 text-stone-700 hover:bg-stone-200'
+                      }`}
+                    >
+                      <X className="w-3.5 h-3.5" />
+                      <span>Batal</span>
+                    </button>
+                  )}
+                </div>
+
+                {/* Jenis Surat & Nomor Agenda */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className={labelClass}>Jenis Surat</label>
+                    <select
+                      value={newAgenda.direction}
+                      onChange={(e) => handleAgendaDirectionChange(e.target.value as 'Masuk' | 'Keluar')}
+                      className={inputClass}
+                    >
+                      <option value="Keluar">Surat Keluar</option>
+                      <option value="Masuk">Surat Masuk</option>
+                    </select>
+                  </div>
+                  <div>
+                    <div className="flex items-center justify-between mb-1.5">
+                      <label className={`text-xs font-semibold ${isDark ? 'text-stone-300' : 'text-stone-700'}`}>
+                        {newAgenda.direction === 'Masuk' ? 'No. Agenda Masuk' : 'No. Agenda Keluar'}
+                      </label>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const dirCount = agendaList.filter((x) => x.direction === newAgenda.direction).length;
+                          const nextAg = buildAutoAgendaNumber(newAgenda.direction, dirCount);
+                          setNewAgenda((prev) => ({ ...prev, nomorAgenda: nextAg }));
+                        }}
+                        className="text-[11px] font-bold text-red-800 dark:text-amber-400 hover:underline cursor-pointer"
+                      >
+                        Auto
+                      </button>
+                    </div>
+                    <input
+                      value={newAgenda.nomorAgenda || ''}
+                      onChange={(e) => setNewAgenda({ ...newAgenda, nomorAgenda: e.target.value })}
+                      placeholder={newAgenda.direction === 'Masuk' ? 'SM-001/2026' : 'SK-001/2026'}
+                      maxLength={60}
+                      className={inputClass}
+                    />
+                  </div>
+                </div>
+
+                {/* Kode Surat Keluar (hanya muncul untuk Surat Keluar) */}
+                {newAgenda.direction === 'Keluar' && (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className={labelClass}>Kode Jenis Surat Keluar</label>
+                      <select
+                        value={keluarCodeType}
+                        onChange={(e) => {
+                          const nextCode = e.target.value as OutgoingLetterCode;
+                          setKeluarCodeType(nextCode);
+                          if (!editingAgendaId) {
+                            const keluarCount = agendaList.filter((x) => x.direction === 'Keluar').length;
+                            setNewAgenda((prev) => ({
+                              ...prev,
+                              nomorSurat: buildAutoLetterNumber(nextCode, keluarCount)
+                            }));
+                          }
+                        }}
+                        className={inputClass}
+                      >
+                        {OUTGOING_CODE_OPTIONS.map((opt) => (
+                          <option key={opt.code} value={opt.code}>
+                            {opt.label}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label className={labelClass}>Tanggal Surat *</label>
+                      <input
+                        type="date"
+                        required
+                        value={newAgenda.tanggalSurat}
+                        onChange={(e) => setNewAgenda({ ...newAgenda, tanggalSurat: e.target.value })}
+                        className={inputClass}
+                      />
+                    </div>
+                  </div>
+                )}
+
+                {/* Tanggal Surat & Tanggal Diterima (khusus Surat Masuk) */}
+                {newAgenda.direction === 'Masuk' && (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className={labelClass}>Tanggal Diterima *</label>
+                      <input
+                        type="date"
+                        required
+                        value={newAgenda.tanggalTerima || ''}
+                        onChange={(e) => setNewAgenda({ ...newAgenda, tanggalTerima: e.target.value })}
+                        className={inputClass}
+                      />
+                    </div>
+                    <div>
+                      <label className={labelClass}>Tanggal Surat (Pengirim) *</label>
+                      <input
+                        type="date"
+                        required
+                        value={newAgenda.tanggalSurat}
+                        onChange={(e) => setNewAgenda({ ...newAgenda, tanggalSurat: e.target.value })}
+                        className={inputClass}
+                      />
+                    </div>
+                  </div>
+                )}
+
+                <div>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <label className={`text-xs font-semibold ${isDark ? 'text-stone-300' : 'text-stone-700'}`}>
+                      {newAgenda.direction === 'Masuk' ? 'Nomor Surat Asli (dari Pengirim) *' : 'Nomor Surat Keluar *'}
+                    </label>
+                    {newAgenda.direction === 'Keluar' && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const keluarCount = agendaList.filter((x) => x.direction === 'Keluar').length;
+                          const nextNum = buildAutoLetterNumber(keluarCodeType, keluarCount);
+                          setNewAgenda((prev) => ({ ...prev, nomorSurat: nextNum }));
+                        }}
+                        className="text-[11px] font-bold text-red-800 dark:text-amber-400 hover:underline cursor-pointer"
+                      >
+                        Generate Otomatis
+                      </button>
+                    )}
+                  </div>
+                  <input
+                    required
+                    maxLength={120}
+                    value={newAgenda.nomorSurat}
+                    onChange={(e) => setNewAgenda({ ...newAgenda, nomorSurat: e.target.value })}
+                    placeholder={
+                      newAgenda.direction === 'Masuk'
+                        ? 'Ketik nomor surat asli yang tertera di kertas surat'
+                        : '001/Und/PGRI-Rtg.Gelang/XI/2026'
+                    }
+                    className={inputClass}
+                  />
+                </div>
+
+                <div>
+                  <label className={labelClass}>
+                    {newAgenda.direction === 'Masuk' ? 'Pengirim / Asal Surat *' : 'Tujuan Surat (Kepada) *'}
+                  </label>
+                  <input
+                    required
+                    maxLength={200}
+                    value={newAgenda.asalTujuan}
+                    onChange={(e) => setNewAgenda({ ...newAgenda, asalTujuan: e.target.value })}
+                    placeholder={
+                      newAgenda.direction === 'Masuk'
+                        ? 'PGRI Cabang Sumberbaru / Dinas Pendidikan'
+                        : 'Seluruh Anggota PGRI Ranting Gelang / Kepala Sekolah'
+                    }
+                    className={inputClass}
+                  />
+                </div>
+
+                <div>
+                  <label className={labelClass}>Perihal / Isi Ringkas *</label>
+                  <input
+                    required
+                    maxLength={300}
+                    value={newAgenda.perihal}
+                    onChange={(e) => setNewAgenda({ ...newAgenda, perihal: e.target.value })}
+                    placeholder="Undangan Rapat Kerja / Edaran Kontribusi / Surat Tugas"
+                    className={inputClass}
+                  />
+                </div>
+
+                {/* Disposisi & Status Tindak Lanjut (Khusus Surat Masuk) */}
+                {newAgenda.direction === 'Masuk' && (
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <div className="sm:col-span-2">
+                      <label className={labelClass}>Disposisi / Arahan Tindak Lanjut</label>
+                      <input
+                        maxLength={300}
+                        value={newAgenda.disposisi || ''}
+                        onChange={(e) => setNewAgenda({ ...newAgenda, disposisi: e.target.value })}
+                        placeholder="Misal: Dihadiri Ketua & Sekretaris / Diteruskan ke Bendahara"
+                        className={inputClass}
+                      />
+                    </div>
+                    <div>
+                      <label className={labelClass}>Status</label>
+                      <select
+                        value={newAgenda.statusTindakLanjut || 'Baru'}
+                        onChange={(e) =>
+                          setNewAgenda({
+                            ...newAgenda,
+                            statusTindakLanjut: e.target.value as 'Baru' | 'Diproses' | 'Selesai'
+                          })
+                        }
+                        className={inputClass}
+                      >
+                        <option value="Baru">Baru</option>
+                        <option value="Diproses">Diproses</option>
+                        <option value="Selesai">Selesai</option>
+                      </select>
+                    </div>
+                  </div>
+                )}
+
+                <div>
+                  <label className={labelClass}>
+                    {newAgenda.direction === 'Masuk' ? 'Catatan Tambahan (opsional)' : 'Keterangan / Catatan Pengiriman (opsional)'}
+                  </label>
+                  <textarea
+                    rows={2}
+                    maxLength={500}
+                    value={newAgenda.catatan || ''}
+                    onChange={(e) => setNewAgenda({ ...newAgenda, catatan: e.target.value })}
+                    placeholder={
+                      newAgenda.direction === 'Masuk'
+                        ? 'Catatan arsip, lokasi berkas fisik, atau tindak lanjut rapat...'
+                        : 'Misal: Dikirim via Grup WA Ranting • Lampiran 1 berkas'
+                    }
+                    className={inputClass}
+                  />
+                </div>
+
+                <div>
+                  <label className={labelClass}>Tautan Arsip PDF / Drive (opsional)</label>
+                  <input
+                    type="url"
+                    maxLength={600}
+                    value={newAgenda.lampiranUrl || ''}
+                    onChange={(e) => setNewAgenda({ ...newAgenda, lampiranUrl: e.target.value })}
+                    placeholder="https://drive.google.com/..."
+                    className={inputClass}
+                  />
+                </div>
+
+                <div className="flex flex-wrap justify-end gap-2">
+                  {editingAgendaId && (
+                    <button
+                      type="button"
+                      onClick={handleCancelEditAgenda}
+                      className={`px-4 py-2.5 rounded-xl font-bold text-xs cursor-pointer transition-colors ${
+                        isDark ? 'bg-stone-800 text-stone-300 hover:bg-stone-700' : 'bg-stone-100 text-stone-700 hover:bg-stone-200'
+                      }`}
+                    >
+                      Batal Edit
+                    </button>
+                  )}
+                  <button
+                    type="submit"
+                    className="w-full sm:w-auto px-5 py-2.5 rounded-xl bg-red-800 hover:bg-red-700 text-white font-bold text-xs flex items-center justify-center gap-1.5 cursor-pointer transition-colors"
+                  >
+                    {editingAgendaId ? <Save className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
+                    <span>{editingAgendaId ? 'Simpan Perubahan' : 'Simpan ke Buku Agenda'}</span>
+                  </button>
+                </div>
+              </form>
+            )}
+
+            <div className={`rounded-2xl border p-5 space-y-3.5 ${cardClass}`}>
+              <div className="flex flex-col gap-2.5">
+                <h3 className="font-display font-bold text-sm">
+                  Daftar Buku Agenda Surat ({filteredAgenda.length})
+                </h3>
+                <div className="flex flex-wrap items-center gap-2">
+                  {(['Semua', 'Masuk', 'Keluar'] as const).map((dir) => (
+                    <button
+                      key={dir}
+                      type="button"
+                      onClick={() => {
+                        setAgendaFilter(dir);
+                        if (dir !== 'Masuk') setAgendaStatusFilter('Semua');
+                      }}
+                      className={`px-3 py-1 rounded-lg text-xs font-bold cursor-pointer transition-colors ${
+                        agendaFilter === dir
+                          ? 'bg-red-800 text-white'
+                          : isDark
+                            ? 'bg-stone-800 text-stone-300 hover:bg-stone-700'
+                            : 'bg-stone-100 text-stone-600 hover:bg-stone-200'
+                      }`}
+                    >
+                      {dir}
+                    </button>
+                  ))}
+                  <input
+                    type="month"
+                    value={agendaMonthFilter}
+                    onChange={(e) => setAgendaMonthFilter(e.target.value)}
+                    title="Filter berdasarkan bulan surat"
+                    className={`px-2.5 py-1 rounded-lg border text-xs focus:outline-none focus:border-red-700 ${
+                      isDark ? 'bg-stone-950 border-stone-800 text-stone-200' : 'bg-[#faf8f5] border-stone-200 text-stone-700'
+                    }`}
+                  />
+                  <div className="relative flex-1 min-w-[140px]">
+                    <Search className="w-3.5 h-3.5 text-stone-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                    <input
+                      value={agendaSearch}
+                      onChange={(e) => setAgendaSearch(e.target.value)}
+                      placeholder="Cari no / perihal / disposisi..."
+                      className={`w-full pl-8 pr-3 py-1 rounded-lg border text-xs focus:outline-none focus:border-red-700 ${
+                        isDark ? 'bg-stone-950 border-stone-800 text-white' : 'bg-[#faf8f5] border-stone-200 text-stone-800'
+                      }`}
+                    />
+                  </div>
+                </div>
+
+                {/* Filter Status Khusus Surat Masuk */}
+                {agendaFilter === 'Masuk' && (
+                  <div className="flex flex-wrap items-center gap-1.5 pt-0.5">
+                    <span className="text-[11px] font-semibold text-stone-400 mr-1">Status:</span>
+                    {(['Semua', 'Baru', 'Diproses', 'Selesai'] as const).map((st) => (
+                      <button
+                        key={st}
+                        type="button"
+                        onClick={() => setAgendaStatusFilter(st)}
+                        className={`px-2.5 py-0.5 rounded-md text-[11px] font-bold cursor-pointer transition-colors ${
+                          agendaStatusFilter === st
+                            ? 'bg-emerald-700 text-white'
+                            : isDark
+                              ? 'bg-stone-800 text-stone-300 hover:bg-stone-700'
+                              : 'bg-stone-100 text-stone-600 hover:bg-stone-200'
+                        }`}
+                      >
+                        {st}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {filteredAgenda.length === 0 ? (
+                <p className="text-xs text-stone-400 py-6 text-center">Belum ada catatan surat di Buku Agenda.</p>
+              ) : (
+                <div className="space-y-2.5 max-h-[420px] overflow-y-auto pr-1">
+                  {filteredAgenda.map((item) => {
+                    const isEditingThis = editingAgendaId === item.id;
+                    const statusVal = item.statusTindakLanjut || 'Baru';
+                    const statusBadgeClass =
+                      statusVal === 'Selesai'
+                        ? 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-400'
+                        : statusVal === 'Diproses'
+                          ? 'bg-sky-500/15 text-sky-700 dark:text-sky-400'
+                          : 'bg-amber-500/15 text-amber-800 dark:text-amber-300';
+
+                    return (
+                      <div
+                        key={item.id}
+                        className={`p-3.5 rounded-2xl border flex items-start justify-between gap-2.5 transition-colors ${
+                          isEditingThis
+                            ? isDark
+                              ? 'bg-amber-950/30 border-amber-500/60'
+                              : 'bg-amber-50/70 border-amber-400'
+                            : isDark
+                              ? 'bg-stone-950/60 border-stone-800'
+                              : 'bg-[#faf8f5] border-stone-200/80'
+                        }`}
+                      >
+                        <div className="space-y-1 min-w-0 flex-1">
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            <span
+                              className={`px-2 py-0.5 rounded-md text-[10px] font-extrabold uppercase ${
+                                item.direction === 'Masuk'
+                                  ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400'
+                                  : 'bg-red-800/15 text-red-800 dark:bg-amber-500/15 dark:text-amber-300'
+                              }`}
+                            >
+                              {item.direction}
+                            </span>
+                            {item.nomorAgenda && (
+                              <span
+                                className={`px-1.5 py-0.5 rounded-md font-mono text-[10px] font-bold ${
+                                  isDark ? 'bg-stone-800 text-stone-300' : 'bg-stone-200/80 text-stone-700'
+                                }`}
+                              >
+                                {item.nomorAgenda}
+                              </span>
+                            )}
+                            {item.direction === 'Masuk' && (
+                              <span className={`px-2 py-0.5 rounded-md text-[10px] font-bold ${statusBadgeClass}`}>
+                                {statusVal}
+                              </span>
+                            )}
+                          </div>
+                          <p className="font-mono text-[11px] font-bold break-all">{item.nomorSurat}</p>
+                          <p className="font-bold text-xs">{item.perihal}</p>
+                          <p className="text-[11px] text-stone-500 dark:text-stone-400">
+                            {item.direction === 'Masuk'
+                              ? `Diterima: ${formatAgendaDateShort(item.tanggalTerima || item.tanggalSurat)} • Tgl Surat: ${formatAgendaDateShort(item.tanggalSurat)} • Dari: ${item.asalTujuan}`
+                              : `${formatAgendaDateShort(item.tanggalSurat)} • Kepada: ${item.asalTujuan}`}
+                          </p>
+                          {item.direction === 'Masuk' && item.disposisi && (
+                            <p className="text-[11px] text-amber-800 dark:text-amber-300 font-medium">
+                              Disposisi: {item.disposisi}
+                            </p>
+                          )}
+                          {item.catatan && (
+                            <p className="text-[11px] text-stone-500 dark:text-stone-400 italic">
+                              Catatan: {item.catatan}
+                            </p>
+                          )}
+                          {isAdmin && item.direction === 'Masuk' && (
+                            <div className="flex flex-wrap items-center gap-1 pt-1">
+                              {(['Baru', 'Diproses', 'Selesai'] as const).map((st) => (
+                                <button
+                                  key={st}
+                                  type="button"
+                                  disabled={statusVal === st}
+                                  onClick={() => handleQuickStatusChange(item, st)}
+                                  className={`px-2 py-0.5 rounded text-[10px] font-bold transition-colors ${
+                                    statusVal === st
+                                      ? 'bg-emerald-700 text-white cursor-default'
+                                      : isDark
+                                        ? 'bg-stone-800 text-stone-400 hover:bg-stone-700 cursor-pointer'
+                                        : 'bg-stone-200/70 text-stone-600 hover:bg-stone-200 cursor-pointer'
+                                  }`}
+                                >
+                                  {st}
+                                </button>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-1 shrink-0">
+                          {isSafeHttpUrl(item.lampiranUrl) && (
+                            <a
+                              href={item.lampiranUrl}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="p-1.5 rounded-lg bg-amber-500/15 text-amber-700 dark:text-amber-400"
+                              title="Buka Lampiran"
+                            >
+                              <ExternalLink className="w-3.5 h-3.5" />
+                            </a>
+                          )}
+                          {isAdmin && (
+                            <>
+                              <button
+                                type="button"
+                                onClick={() => handleEditAgenda(item)}
+                                className="p-1.5 rounded-lg text-amber-700 dark:text-amber-400 hover:bg-amber-500/15 cursor-pointer"
+                                title="Edit catatan surat"
+                              >
+                                <Edit3 className="w-3.5 h-3.5" />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setConfirmDeleteTarget({ type: 'agenda', item })}
+                                className="p-1.5 rounded-lg text-red-600 dark:text-red-400 hover:bg-red-500/15 cursor-pointer"
+                                title="Hapus catatan"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* KANAN: KOTAK PREVIEW */}
+          <div className={`xl:col-span-7 rounded-2xl border p-5 space-y-3 xl:sticky xl:top-4 ${cardClass}`}>
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <div className="flex items-center gap-2 font-display text-xs sm:text-sm font-bold">
+                  <Eye className="w-4 h-4 text-red-800 dark:text-amber-400" />
+                  <span>
+                    {agendaFilter === 'Masuk'
+                      ? 'Pratinjau Buku Agenda Surat Masuk (A4)'
+                      : agendaFilter === 'Keluar'
+                        ? 'Pratinjau Buku Agenda Surat Keluar (A4)'
+                        : 'Pratinjau Buku Agenda Surat Gabungan (A4)'}
+                  </span>
+                </div>
+                <p className={`text-[11px] ${isDark ? 'text-stone-400' : 'text-stone-500'}`}>
+                  Kolom cetak otomatis menyesuaikan filter aktif ({agendaFilter}
+                  {agendaFilter === 'Masuk' && agendaStatusFilter !== 'Semua' ? ` • ${agendaStatusFilter}` : ''}).
+                </p>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                {isAdmin && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (newAgenda.direction === 'Masuk') {
+                        const masukCount = agendaList.filter((x) => x.direction === 'Masuk').length;
+                        const nextAg = buildAutoAgendaNumber('Masuk', masukCount);
+                        setNewAgenda((prev) => ({ ...prev, nomorAgenda: nextAg }));
+                        onNotice('success', `Nomor Agenda Surat Masuk otomatis diterapkan: ${nextAg}`);
+                      } else {
+                        const keluarCount = agendaList.filter((x) => x.direction === 'Keluar').length;
+                        const nextNum = buildAutoLetterNumber(keluarCodeType, keluarCount);
+                        const nextAg = buildAutoAgendaNumber('Keluar', keluarCount);
+                        setNewAgenda((prev) => ({ ...prev, nomorSurat: nextNum, nomorAgenda: nextAg }));
+                        onNotice('success', `Nomor Surat Keluar otomatis diterapkan: ${nextNum}`);
+                      }
+                    }}
+                    className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold border cursor-pointer transition-colors ${
+                      isDark
+                        ? 'bg-stone-800 border-stone-700 text-stone-200 hover:bg-stone-700'
+                        : 'bg-[#faf8f5] border-stone-200 text-stone-700 hover:bg-stone-100'
+                    }`}
+                  >
+                    <Hash className="w-3.5 h-3.5" />
+                    <span>{newAgenda.direction === 'Masuk' ? 'Auto No. Agenda' : 'Auto No. Surat'}</span>
+                  </button>
+                )}
                 <button
                   type="button"
                   onClick={() => {
-                    const nextNum = buildAutoLetterNumber(newAgenda.direction === 'Masuk' ? 'BA' : 'Und', agendaList.length);
-                    setNewAgenda((prev) => ({ ...prev, nomorSurat: nextNum }));
-                    onNotice('success', `Nomor surat otomatis diterapkan pada form agenda: ${nextNum}`);
+                    const summary = filteredAgenda
+                      .slice(0, 10)
+                      .map(
+                        (a, idx) =>
+                          `${idx + 1}. [${a.direction}${a.nomorAgenda ? ` ${a.nomorAgenda}` : ''}] ${a.nomorSurat} - ${a.perihal} (${formatAgendaDateShort(a.tanggalSurat)})${a.direction === 'Masuk' && a.statusTindakLanjut ? ` [${a.statusTindakLanjut}]` : ''}`
+                      )
+                      .join('\n');
+                    const titleLabel =
+                      agendaFilter === 'Masuk'
+                        ? 'SURAT MASUK'
+                        : agendaFilter === 'Keluar'
+                          ? 'SURAT KELUAR'
+                          : 'SURAT MASUK & KELUAR';
+                    const msg =
+                      `📚 *REKAP BUKU AGENDA ${titleLabel}*\n` +
+                      `PGRI Ranting Gelang • Total: ${filteredAgenda.length} Surat\n\n` +
+                      `${summary || 'Belum ada data surat.'}`;
+                    openWhatsAppShare(msg);
                   }}
-                  className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold border cursor-pointer transition-colors ${
-                    isDark ? 'bg-stone-800 border-stone-700 text-stone-200 hover:bg-stone-700' : 'bg-[#faf8f5] border-stone-200 text-stone-700 hover:bg-stone-100'
+                  className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold bg-emerald-600/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30 hover:bg-emerald-600/25 transition cursor-pointer"
+                >
+                  <Share2 className="w-3.5 h-3.5" />
+                  <span>Bagikan WA</span>
+                </button>
+                <button
+                  type="button"
+                  disabled={isExportingEofficePdf}
+                  onClick={async () => {
+                    if (isExportingEofficePdf) return;
+                    setIsExportingEofficePdf(true);
+                    try {
+                      await exportFullHtmlToPdfOrPrint(buildAgendaRekapHtml(), {
+                        filename: `Buku_Agenda_Surat_${agendaFilter}.pdf`,
+                        orientation: 'portrait'
+                      });
+                      onNotice(
+                        'success',
+                        isMobileDevice()
+                          ? `File PDF Buku Agenda Surat (${agendaFilter}) berhasil diunduh.`
+                          : `Jendela cetak Buku Agenda Surat (${agendaFilter}) dibuka.`
+                      );
+                    } finally {
+                      setIsExportingEofficePdf(false);
+                    }
+                  }}
+                  className={`px-4 py-2 rounded-xl bg-red-800 hover:bg-red-700 text-white text-xs font-bold flex items-center gap-1.5 transition-colors ${
+                    isExportingEofficePdf ? 'opacity-70 cursor-not-allowed' : 'cursor-pointer'
                   }`}
                 >
-                  <Hash className="w-3.5 h-3.5" />
-                  <span>Auto No. Surat</span>
+                  {isExportingEofficePdf ? <Loader2 className="w-4 h-4 animate-spin" /> : <Printer className="w-4 h-4" />}
+                  <span>{isExportingEofficePdf ? 'Menyiapkan PDF...' : 'Unduh Rekap PDF'}</span>
                 </button>
-              )}
-              <button
-                type="button"
-                onClick={() => {
-                  const summary = filteredAgenda
-                    .slice(0, 10)
-                    .map((a, idx) => `${idx + 1}. [${a.direction}] ${a.nomorSurat} - ${a.perihal} (${a.tanggalSurat})`)
-                    .join('\n');
-                  const msg =
-                    `📚 *REKAP BUKU AGENDA SURAT (${agendaFilter.toUpperCase()})*\n` +
-                    `PGRI Ranting Gelang • Total: ${filteredAgenda.length} Surat\n\n` +
-                    `${summary || 'Belum ada data surat.'}`;
-                  openWhatsAppShare(msg);
-                }}
-                className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold bg-emerald-600/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30 hover:bg-emerald-600/25 transition cursor-pointer"
-              >
-                <Share2 className="w-3.5 h-3.5" />
-                <span>Bagikan WA</span>
-              </button>
-              <button
-                type="button"
-                disabled={isExportingEofficePdf}
-                onClick={async () => {
-                  if (isExportingEofficePdf) return;
-                  setIsExportingEofficePdf(true);
-                  try {
-                    await exportFullHtmlToPdfOrPrint(buildAgendaRekapHtml(), {
-                      filename: `Buku_Agenda_Surat_${agendaFilter}.pdf`,
-                      orientation: 'portrait'
-                    });
-                    onNotice(
-                      'success',
-                      isMobileDevice()
-                        ? 'File PDF Rekap Buku Agenda Surat berhasil diunduh.'
-                        : 'Jendela cetak Rekap Buku Agenda Surat dibuka.'
-                    );
-                  } finally {
-                    setIsExportingEofficePdf(false);
-                  }
-                }}
-                className={`px-4 py-2 rounded-xl bg-red-800 hover:bg-red-700 text-white text-xs font-bold flex items-center gap-1.5 transition-colors ${
-                  isExportingEofficePdf ? 'opacity-70 cursor-not-allowed' : 'cursor-pointer'
-                }`}
-              >
-                {isExportingEofficePdf ? <Loader2 className="w-4 h-4 animate-spin" /> : <Printer className="w-4 h-4" />}
-                <span>{isExportingEofficePdf ? 'Menyiapkan PDF...' : 'Unduh Rekap PDF'}</span>
-              </button>
+              </div>
+            </div>
+            <div className={`rounded-2xl overflow-x-auto ${isDark ? 'bg-stone-950' : 'bg-stone-200/80'} py-4 px-2 sm:px-6`}>
+              <iframe
+                title="Pratinjau Buku Agenda Surat"
+                srcDoc={buildAgendaRekapHtml()}
+                scrolling="no"
+                style={{ width: '210mm', height: '297mm' }}
+                className="bg-transparent border-0 shadow-2xl mx-auto block shrink-0"
+              />
             </div>
           </div>
-          <div className={`rounded-2xl overflow-x-auto ${isDark ? 'bg-stone-950' : 'bg-stone-200/80'} py-4 px-2 sm:px-6`}>
-            <iframe
-              title="Pratinjau Buku Agenda Surat"
-              srcDoc={buildAgendaRekapHtml()}
-              scrolling="no"
-              style={{ width: '210mm', height: '297mm' }}
-              className="bg-transparent border-0 shadow-2xl mx-auto block shrink-0"
-            />
-          </div>
         </div>
+        {renderEofficeDeleteModal()}
       </div>
     );
   }
@@ -2427,9 +3658,24 @@ export const EOfficeSubPanels: React.FC<EOfficeProps> = ({
       <div className="xl:col-span-5 space-y-5">
         {isAdmin && (
           <form onSubmit={handleAddNotulen} className={`rounded-2xl border p-5 space-y-3.5 ${cardClass}`}>
-            <div className="flex items-center gap-2.5">
-              <ClipboardList className="w-5 h-5 text-red-800 dark:text-amber-400" />
-              <h2 className="font-display text-sm font-bold">Buat Notulen &amp; Berita Acara Rapat</h2>
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2.5">
+                <ClipboardList className="w-5 h-5 text-red-800 dark:text-amber-400" />
+                <h2 className="font-display text-sm font-bold">
+                  {editingNotulenId ? 'Edit Notulen & Berita Acara Rapat' : 'Buat Notulen & Berita Acara Rapat'}
+                </h2>
+              </div>
+              {editingNotulenId && (
+                <button
+                  type="button"
+                  onClick={handleCancelEditNotulen}
+                  className={`px-2.5 py-1 rounded-lg text-[11px] font-bold cursor-pointer ${
+                    isDark ? 'bg-stone-800 text-stone-300 hover:bg-stone-700' : 'bg-stone-100 text-stone-700 hover:bg-stone-200'
+                  }`}
+                >
+                  Batal Edit
+                </button>
+              )}
             </div>
 
             <div>
@@ -2478,10 +3724,21 @@ export const EOfficeSubPanels: React.FC<EOfficeProps> = ({
               <label className={labelClass}>Rencana Tindak Lanjut (RTL)</label>
               <textarea rows={2} value={notulenForm.tindakLanjut} onChange={(e) => setNotulenForm({ ...notulenForm, tindakLanjut: e.target.value })} className={inputClass} placeholder="Penanggung jawab & target waktu pelaksanaan..." />
             </div>
-            <div className="flex justify-end">
+            <div className="flex flex-wrap justify-end gap-2">
+              {editingNotulenId && (
+                <button
+                  type="button"
+                  onClick={handleCancelEditNotulen}
+                  className={`px-4 py-2.5 rounded-xl font-bold text-xs cursor-pointer ${
+                    isDark ? 'bg-stone-800 hover:bg-stone-700 text-stone-300' : 'bg-stone-100 hover:bg-stone-200 text-stone-700'
+                  }`}
+                >
+                  Batal
+                </button>
+              )}
               <button type="submit" className="w-full sm:w-auto px-5 py-2.5 rounded-xl bg-red-800 hover:bg-red-700 text-white font-bold text-xs flex items-center justify-center gap-1.5 cursor-pointer transition-colors">
-                <Plus className="w-4 h-4" />
-                <span>Simpan Notulen Rapat</span>
+                {editingNotulenId ? <Save className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
+                <span>{editingNotulenId ? 'Simpan Perubahan Notulen' : 'Simpan Notulen Rapat'}</span>
               </button>
             </div>
           </form>
@@ -2545,6 +3802,27 @@ export const EOfficeSubPanels: React.FC<EOfficeProps> = ({
                       <Download className="w-3 h-3" />
                       <span>Cetak</span>
                     </button>
+                    {isAdmin && (
+                      <>
+                        <button
+                          type="button"
+                          onClick={() => handleEditNotulen(item)}
+                          className="px-2.5 py-1 rounded-lg bg-amber-500/15 text-amber-700 dark:text-amber-400 hover:bg-amber-500/25 text-[11px] font-bold flex items-center gap-1 cursor-pointer"
+                          title="Edit notulen rapat"
+                        >
+                          <Edit3 className="w-3 h-3" />
+                          <span>Edit</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setConfirmDeleteTarget({ type: 'notulen', item })}
+                          className="p-1.5 rounded-lg text-red-600 dark:text-red-400 hover:bg-red-500/15 ml-auto cursor-pointer"
+                          title="Hapus notulen rapat"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </>
+                    )}
                   </div>
                 </div>
               ))}
@@ -2601,6 +3879,49 @@ export const EOfficeSubPanels: React.FC<EOfficeProps> = ({
                 <span>Auto No. Surat</span>
               </button>
             )}
+            {isAdmin && (
+              <button
+                type="button"
+                disabled={isRecordingQuickAgenda}
+                onClick={async () => {
+                  if (isRecordingQuickAgenda) return;
+                  setIsRecordingQuickAgenda(true);
+                  try {
+                    const target = activePreviewNotulen || notulenForm;
+                    const noMatch = target.eventTitle.match(/\(No\.\s*([^)]+)\)/i);
+                    const nomorBa = noMatch
+                      ? noMatch[1].trim()
+                      : buildAutoLetterNumber('BA', archiveCount + notulenList.length);
+                    const res = await quickRecordOutgoingAgenda({
+                      nomorSurat: nomorBa,
+                      tanggalSurat: target.tanggal,
+                      asalTujuan: 'Arsip & Pengurus PGRI Ranting Gelang',
+                      perihal: `Berita Acara & Notulen - ${target.eventTitle || 'Rapat Ranting'}`,
+                      catatan: `Lokasi: ${target.tempat} • Hadir: ${target.jumlahHadir} Orang`
+                    });
+                    if (!res.ok) {
+                      onNotice('error', res.error || 'Gagal mencatat Berita Acara ke Surat Keluar.');
+                    } else if (res.error) {
+                      onNotice('error', `Tercatat lokal, namun sinkron Cloud gagal: ${res.error}`);
+                    } else {
+                      onNotice(
+                        'success',
+                        res.updatedExisting
+                          ? `Berita Acara No. ${nomorBa} diperbarui di Buku Agenda Surat Keluar.`
+                          : `Berita Acara No. ${nomorBa} berhasil dicatat ke Buku Agenda Surat Keluar.`
+                      );
+                    }
+                  } finally {
+                    setIsRecordingQuickAgenda(false);
+                  }
+                }}
+                className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold bg-amber-600/15 text-amber-800 dark:text-amber-300 border border-amber-500/35 hover:bg-amber-600/25 transition cursor-pointer disabled:opacity-60"
+                title="Catat Berita Acara / Notulen ini ke Buku Agenda Surat Keluar"
+              >
+                {isRecordingQuickAgenda ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <BookOpen className="w-3.5 h-3.5" />}
+                <span>Catat ke Surat Keluar</span>
+              </button>
+            )}
             <button
               type="button"
               onClick={() => {
@@ -2635,12 +3956,12 @@ export const EOfficeSubPanels: React.FC<EOfficeProps> = ({
           <iframe
             title="Pratinjau Notulen & Berita Acara"
             srcDoc={buildNotulenHtml(activePreviewNotulen || notulenForm)}
-            scrolling="no"
             style={{ width: '210mm', height: '297mm' }}
             className="bg-transparent border-0 shadow-2xl mx-auto block shrink-0"
           />
         </div>
       </div>
+      {renderEofficeDeleteModal()}
     </div>
   );
 };
@@ -2688,10 +4009,12 @@ export const BuatUndangan: React.FC<BuatUndanganProps> = ({
   });
 
   const [viewMode, setViewMode] = useState<'editor' | 'surat_tugas' | 'pengawas_ujian' | 'agenda_surat' | 'notulen'>('editor');
+  const [loadedArchiveForSubPanel, setLoadedArchiveForSubPanel] = useState<InvitationData | null>(null);
   const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
   const [isSavingCloud, setIsSavingCloud] = useState(false);
   const [isSyncingArchive, setIsSyncingArchive] = useState(false);
   const [statusNotice, setStatusNotice] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [deleteArchiveTarget, setDeleteArchiveTarget] = useState<InvitationData | null>(null);
 
   // Collapsible sections in editor
   const [openSection, setOpenSection] = useState<'surat' | 'acara' | 'ttd'>('surat');
@@ -2730,7 +4053,7 @@ export const BuatUndangan: React.FC<BuatUndanganProps> = ({
 
     setAssets(currentAssets);
     const signers = readSignersFromKepengurusan();
-    const latestNpa = loadSavedNpa();
+    const latestNpa = resolveSignerNpasFromData(signers.ketuaNama, signers.sekretarisNama);
     setDraft((prev) => ({
       ...prev,
       ketuaNama: signers.ketuaNama,
@@ -3079,16 +4402,27 @@ export const BuatUndangan: React.FC<BuatUndanganProps> = ({
   };
 
   const handleLoadIntoEditor = (inv: InvitationData, asDuplicate = false) => {
-    if (asDuplicate) {
-      setDraft({
-        ...inv,
-        id: `inv-${Date.now()}`,
-        title: `${inv.title} (Salinan)`,
-        updatedAt: new Date().toISOString()
-      });
-    } else {
-      setDraft(inv);
+    const targetItem: InvitationData = asDuplicate
+      ? {
+          ...inv,
+          id: `inv-${Date.now()}`,
+          title: `${inv.title} (Salinan)`,
+          updatedAt: new Date().toISOString()
+        }
+      : inv;
+
+    if (targetItem.docCategory === 'surat_tugas') {
+      setLoadedArchiveForSubPanel({ ...targetItem });
+      setViewMode('surat_tugas');
+      return;
     }
+    if (targetItem.docCategory === 'pengawas_ujian') {
+      setLoadedArchiveForSubPanel({ ...targetItem });
+      setViewMode('pengawas_ujian');
+      return;
+    }
+
+    setDraft(targetItem);
     if (isAdmin) {
       setViewMode('editor');
     }
@@ -3260,6 +4594,49 @@ export const BuatUndangan: React.FC<BuatUndanganProps> = ({
                     </button>
                   )}
                 </div>
+
+                {/* Tautkan Jadwal Kegiatan Otomatis */}
+                {events.length > 0 && (
+                  <div>
+                    <label className={labelClass}>Ambil Data dari Jadwal Kegiatan (Opsional)</label>
+                    <select
+                      defaultValue=""
+                      onChange={(e) => {
+                        const evt = events.find((x) => x.id === e.target.value);
+                        if (!evt) return;
+                        const parsedDate = new Date(`${evt.date}T00:00:00`);
+                        const hariStr = !isNaN(parsedDate.getTime())
+                          ? parsedDate.toLocaleDateString('id-ID', { weekday: 'long' })
+                          : draft.hari;
+                        const tglStr = !isNaN(parsedDate.getTime())
+                          ? parsedDate.toLocaleDateString('id-ID', {
+                              day: 'numeric',
+                              month: 'long',
+                              year: 'numeric'
+                            })
+                          : evt.date;
+                        setDraft((prev) => ({
+                          ...prev,
+                          title: `Undangan - ${evt.title}`,
+                          hari: hariStr,
+                          tanggalAcara: tglStr,
+                          pukul: evt.time || prev.pukul,
+                          tempatAcara: evt.location || prev.tempatAcara,
+                          acara: evt.title
+                        }));
+                        showToast('success', `Data kegiatan "${evt.title}" berhasil diisikan.`);
+                      }}
+                      className={inputClass}
+                    >
+                      <option value="">-- Pilih Jadwal Kegiatan untuk Isi Otomatis --</option>
+                      {events.map((evt) => (
+                        <option key={evt.id} value={evt.id}>
+                          {evt.title} ({evt.date})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
 
                 {/* Judul Arsip */}
                 <div>
@@ -3602,7 +4979,7 @@ export const BuatUndangan: React.FC<BuatUndanganProps> = ({
                               </button>
                               <button
                                 type="button"
-                                onClick={() => handleDeleteArchive(inv.id)}
+                                onClick={() => setDeleteArchiveTarget(inv)}
                                 className="p-1 rounded-lg text-red-600 dark:text-red-400 hover:bg-red-500/15 ml-auto cursor-pointer"
                                 title="Hapus arsip undangan"
                               >
@@ -3633,23 +5010,104 @@ export const BuatUndangan: React.FC<BuatUndanganProps> = ({
                   </p>
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setDraft((prev) => {
+                        const nextVal = !(prev.showTtdImages && prev.showStempel);
+                        return { ...prev, showTtdImages: nextVal, showStempel: nextVal };
+                      })
+                    }
+                    className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold border cursor-pointer transition-colors ${
+                      draft.showTtdImages && draft.showStempel
+                        ? isDark
+                          ? 'bg-emerald-950/50 border-emerald-700/60 text-emerald-300'
+                          : 'bg-emerald-50 border-emerald-300 text-emerald-800'
+                        : isDark
+                          ? 'bg-stone-800 border-stone-700 text-stone-300'
+                          : 'bg-[#faf8f5] border-stone-200 text-stone-600'
+                    }`}
+                    title="Sembunyikan jika ingin mencetak kosong untuk tanda tangan & stempel basah"
+                  >
+                    <ShieldCheck className="w-3.5 h-3.5" />
+                    {draft.showTtdImages && draft.showStempel ? 'TTD & Stempel: Tampil' : 'TTD & Stempel: Basah'}
+                  </button>
                   {isAdmin && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const nextNum = buildAutoLetterNumber('Und', savedInvitations.length);
-                        setDraft((prev) => ({ ...prev, nomorSurat: nextNum }));
-                        showToast('success', `Nomor surat otomatis diterapkan: ${nextNum}`);
-                      }}
-                      className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold border cursor-pointer transition-colors ${
-                        isDark ? 'bg-stone-800 border-stone-700 text-stone-200 hover:bg-stone-700' : 'bg-[#faf8f5] border-stone-200 text-stone-700 hover:bg-stone-100'
-                      }`}
-                      title="Buat nomor surat otomatis sesuai format PGRI Ranting"
-                    >
-                      <Hash className="w-3.5 h-3.5" />
-                      Auto No. Surat
-                    </button>
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const nextNum = buildAutoLetterNumber('Und', savedInvitations.length);
+                          setDraft((prev) => ({ ...prev, nomorSurat: nextNum }));
+                          showToast('success', `Nomor surat otomatis diterapkan: ${nextNum}`);
+                        }}
+                        className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold border cursor-pointer transition-colors ${
+                          isDark ? 'bg-stone-800 border-stone-700 text-stone-200 hover:bg-stone-700' : 'bg-[#faf8f5] border-stone-200 text-stone-700 hover:bg-stone-100'
+                        }`}
+                        title="Buat nomor surat otomatis sesuai format PGRI Ranting"
+                      >
+                        <Hash className="w-3.5 h-3.5" />
+                        Auto No. Surat
+                      </button>
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          const tujuanText =
+                            draft.kepadaList.map((k) => k.trim()).filter(Boolean).join(', ') ||
+                            'Seluruh Anggota PGRI Ranting Gelang';
+                          const res = await quickRecordOutgoingAgenda({
+                            nomorSurat: draft.nomorSurat,
+                            asalTujuan: tujuanText,
+                            perihal: draft.perihal || draft.acara || 'Undangan Resmi',
+                            catatan: `Acara: ${draft.acara} (${draft.hari}, ${draft.tanggalAcara} • ${draft.tempatAcara})`
+                          });
+                          if (!res.ok) {
+                            showToast('error', res.error || 'Gagal mencatat undangan ke Surat Keluar.');
+                          } else if (res.error) {
+                            showToast('error', `Tercatat lokal, namun sinkron Cloud gagal: ${res.error}`);
+                          } else {
+                            showToast(
+                              'success',
+                              res.updatedExisting
+                                ? `Undangan No. ${draft.nomorSurat} diperbarui di Buku Agenda Surat Keluar.`
+                                : `Undangan No. ${draft.nomorSurat} berhasil dicatat ke Buku Agenda Surat Keluar.`
+                            );
+                          }
+                        }}
+                        className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold bg-amber-600/15 text-amber-800 dark:text-amber-300 border border-amber-500/35 hover:bg-amber-600/25 transition cursor-pointer"
+                        title="Catat otomatis nomor dan perihal undangan ini ke Buku Agenda Surat Keluar"
+                      >
+                        <BookOpen className="w-3.5 h-3.5" />
+                        Catat ke Surat Keluar
+                      </button>
+                    </>
                   )}
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      const msg =
+                        `✉️ *UNDANGAN RESMI PGRI RANTING GELANG*\n` +
+                        `Nomor: ${draft.nomorSurat}\n` +
+                        `Perihal: *${draft.perihal}*\n\n` +
+                        `📅 Hari/Tanggal: ${draft.hari}, ${draft.tanggalAcara}\n` +
+                        `⏰ Waktu: ${draft.pukul}\n` +
+                        `📍 Tempat: ${draft.tempatAcara}\n` +
+                        `📌 Agenda: ${draft.acara}\n\n` +
+                        `Mohon kehadiran Bapak/Ibu tepat waktu. Terima kasih.`;
+                      try {
+                        await navigator.clipboard.writeText(msg);
+                        showToast('success', 'Teks pengumuman undangan berhasil disalin ke clipboard.');
+                      } catch {
+                        showToast('error', 'Gagal menyalin teks ke clipboard.');
+                      }
+                    }}
+                    className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold border cursor-pointer transition-colors ${
+                      isDark ? 'bg-stone-800 border-stone-700 text-stone-200 hover:bg-stone-700' : 'bg-[#faf8f5] border-stone-200 text-stone-700 hover:bg-stone-100'
+                    }`}
+                  >
+                    <Copy className="w-3.5 h-3.5" />
+                    Salin Teks
+                  </button>
                   <button
                     type="button"
                     onClick={() => {
@@ -3708,9 +5166,59 @@ export const BuatUndangan: React.FC<BuatUndanganProps> = ({
           onSaveArchiveItem={handleSaveToArchive}
           isSavingCloud={isSavingCloud}
           archiveCount={savedInvitations.length}
+          loadedArchiveItem={loadedArchiveForSubPanel}
         />
       )}
 
+      {/* Modal Konfirmasi Hapus Arsip Undangan */}
+      {deleteArchiveTarget && (
+        <div
+          className="fixed inset-0 z-[95] flex items-center justify-center p-4 bg-stone-950/75 backdrop-blur-sm animate-in fade-in duration-200"
+          onClick={() => setDeleteArchiveTarget(null)}
+        >
+          <div
+            className={`w-full max-w-md rounded-2xl p-6 border shadow-2xl space-y-4 ${cardClass}`}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center gap-3 text-red-700 dark:text-red-400">
+              <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${isDark ? 'bg-red-950/70 border border-red-800/60' : 'bg-red-50 border border-red-200'}`}>
+                <Trash2 className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="font-display font-bold text-base">Konfirmasi Hapus Arsip Undangan</h3>
+                <p className="text-xs opacity-80">Data akan dihapus dari perangkat dan Cloud.</p>
+              </div>
+            </div>
+            <p className={`text-sm ${isDark ? 'text-stone-300' : 'text-stone-600'}`}>
+              Apakah Anda yakin ingin menghapus arsip undangan{' '}
+              <span className="font-bold">&quot;{deleteArchiveTarget.title || deleteArchiveTarget.perihal || deleteArchiveTarget.nomorSurat}&quot;</span>?
+            </p>
+            <div className="flex gap-3 pt-2">
+              <button
+                type="button"
+                onClick={() => setDeleteArchiveTarget(null)}
+                className={`flex-1 px-4 py-2.5 rounded-xl font-bold text-xs cursor-pointer ${
+                  isDark ? 'bg-stone-800 hover:bg-stone-700 text-stone-300' : 'bg-stone-100 hover:bg-stone-200 text-stone-700'
+                }`}
+              >
+                Batal
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const idToDelete = deleteArchiveTarget.id;
+                  setDeleteArchiveTarget(null);
+                  void handleDeleteArchive(idToDelete);
+                }}
+                className="flex-1 px-4 py-2.5 rounded-xl bg-red-800 hover:bg-red-700 text-white font-bold text-xs uppercase tracking-wider flex items-center justify-center gap-2 cursor-pointer"
+              >
+                <Trash2 className="w-4 h-4" />
+                <span>Ya, Hapus</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       </div>
   );
 };

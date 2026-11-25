@@ -12,7 +12,9 @@ import {
   MessageSquareHeart,
   LogIn,
   Printer,
-  Loader2
+  Loader2,
+  Pencil,
+  Search
 } from 'lucide-react';
 import { AspirasiItem, DanaSosialItem, PengurusRole } from '../../types';
 import { auth } from '../../lib/firebase';
@@ -50,11 +52,11 @@ export const SosialAspirasiView: React.FC<SosialAspirasiViewProps> = ({
   const isDark = theme === 'dark';
   const effectiveRole: PengurusRole = pengurusRole;
   const canManageDana =
-    activeRole === 'admin' || ['ketua', 'sekretaris', 'bendahara'].includes(effectiveRole);
+    activeRole === 'admin' && ['ketua', 'sekretaris', 'bendahara'].includes(effectiveRole);
   const canDeleteDana =
     activeRole === 'admin' && (effectiveRole === 'ketua' || effectiveRole === 'bendahara');
   const canReadAllAspirasi =
-    canManageConfidentialAspirasi(effectiveRole) || (activeRole === 'admin' && effectiveRole === 'ketua');
+    activeRole === 'admin' && canManageConfidentialAspirasi(effectiveRole);
 
   const [activeSubTab, setActiveSubTab] = useState<'dana' | 'aspirasi'>('dana');
 
@@ -67,8 +69,13 @@ export const SosialAspirasiView: React.FC<SosialAspirasiViewProps> = ({
     return [];
   });
   const [showDanaModal, setShowDanaModal] = useState(false);
+  const [editingDana, setEditingDana] = useState<DanaSosialItem | null>(null);
+  const [deleteDanaTarget, setDeleteDanaTarget] = useState<DanaSosialItem | null>(null);
+  const [danaSearch, setDanaSearch] = useState('');
+  const [danaFilterType, setDanaFilterType] = useState<'Semua' | 'Penggalangan' | 'Penyaluran'>('Semua');
+  const [danaFilterCategory, setDanaFilterCategory] = useState<string>('Semua');
   const [isPrintingDana, setIsPrintingDana] = useState(false);
-  const [danaForm, setDanaForm] = useState<Omit<DanaSosialItem, 'id'>>({
+  const createEmptyDanaForm = (): Omit<DanaSosialItem, 'id'> => ({
     type: 'Penyaluran',
     category: 'Sakit / Rawat Inap',
     recipientName: '',
@@ -78,6 +85,28 @@ export const SosialAspirasiView: React.FC<SosialAspirasiViewProps> = ({
     notes: '',
     status: 'Tersalurkan'
   });
+  const [danaForm, setDanaForm] = useState<Omit<DanaSosialItem, 'id'>>(createEmptyDanaForm);
+
+  const openAddDanaModal = () => {
+    setEditingDana(null);
+    setDanaForm(createEmptyDanaForm());
+    setShowDanaModal(true);
+  };
+
+  const openEditDanaModal = (item: DanaSosialItem) => {
+    setEditingDana(item);
+    setDanaForm({
+      type: item.type,
+      category: item.category,
+      recipientName: item.recipientName,
+      recipientSchool: item.recipientSchool || '',
+      amount: Number(item.amount) || 0,
+      date: item.date || new Date().toISOString().split('T')[0],
+      notes: item.notes || '',
+      status: item.status
+    });
+    setShowDanaModal(true);
+  };
 
   // --- ASPIRASI / ADVOKASI LKBH STATE ---
   const [aspirasiList, setAspirasiList] = useState<AspirasiItem[]>(() => {
@@ -223,6 +252,23 @@ export const SosialAspirasiView: React.FC<SosialAspirasiViewProps> = ({
       .reduce((s, d) => s + (Number(d.amount) || 0), 0);
     return { masuk, keluar, saldo: masuk - keluar };
   }, [danaList]);
+
+  const filteredDanaList = useMemo(() => {
+    const q = danaSearch.trim().toLowerCase();
+    return danaList.filter((item) => {
+      if (danaFilterType !== 'Semua' && item.type !== danaFilterType) return false;
+      if (danaFilterCategory !== 'Semua' && item.category !== danaFilterCategory) return false;
+      if (q) {
+        const match =
+          (item.recipientName || '').toLowerCase().includes(q) ||
+          (item.recipientSchool || '').toLowerCase().includes(q) ||
+          (item.notes || '').toLowerCase().includes(q) ||
+          (item.category || '').toLowerCase().includes(q);
+        if (!match) return false;
+      }
+      return true;
+    });
+  }, [danaList, danaSearch, danaFilterType, danaFilterCategory]);
 
   const handlePrintDanaSosial = async () => {
     if (isPrintingDana) return;
@@ -409,20 +455,24 @@ export const SosialAspirasiView: React.FC<SosialAspirasiViewProps> = ({
   const handleSaveDana = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!danaForm.recipientName.trim()) return;
+    const isEditing = Boolean(editingDana);
     const item: DanaSosialItem = {
-      id: `ds-${Date.now()}`,
+      id: editingDana ? editingDana.id : `ds-${Date.now()}`,
       ...danaForm,
       recipientName: danaForm.recipientName.trim().slice(0, 160),
       recipientSchool: danaForm.recipientSchool.trim().slice(0, 160),
       amount: Math.max(0, Number(danaForm.amount) || 0),
       notes: danaForm.notes.trim().slice(0, 600)
     };
-    const next = [item, ...danaList];
+    const next = isEditing
+      ? danaList.map((d) => (d.id === item.id ? item : d))
+      : [item, ...danaList];
     setDanaList(next);
     try {
       localStorage.setItem(DANA_SOSIAL_KEY, JSON.stringify(next));
     } catch {}
     setShowDanaModal(false);
+    setEditingDana(null);
 
     await savePerDocItem('dana_sosial', item.id, item, 'Dana Sosial');
     try {
@@ -431,14 +481,17 @@ export const SosialAspirasiView: React.FC<SosialAspirasiViewProps> = ({
     mutateCloudCollection<DanaSosialItem>(
       'danaSosial',
       [DANA_SOSIAL_KEY],
-      (latest) => [item, ...latest.filter((d) => d.id !== item.id)],
+      (latest) =>
+        isEditing
+          ? latest.map((d) => (d.id === item.id ? item : d))
+          : [item, ...latest.filter((d) => d.id !== item.id)],
       next,
       'Dana Sosial & Tali Asih'
     );
     logAuditEvent(
       'Dana Sosial',
-      `Catat ${item.type}`,
-      `${item.type} ${item.category} a.n. ${item.recipientName} sebesar Rp ${item.amount.toLocaleString('id-ID')}.`
+      isEditing ? `Edit ${item.type}` : `Catat ${item.type}`,
+      `${isEditing ? 'Memperbarui' : 'Mencatat'} ${item.type} ${item.category} a.n. ${item.recipientName} sebesar Rp ${item.amount.toLocaleString('id-ID')} (${item.status}).`
     );
   };
 
@@ -673,7 +726,7 @@ export const SosialAspirasiView: React.FC<SosialAspirasiViewProps> = ({
               {canManageDana && (
                 <button
                   type="button"
-                  onClick={() => setShowDanaModal(true)}
+                  onClick={openAddDanaModal}
                   className="px-4 py-2 rounded-xl bg-red-800 hover:bg-red-700 text-white text-xs font-bold flex items-center gap-1.5 cursor-pointer"
                 >
                   <Plus className="w-4 h-4" />
@@ -683,6 +736,49 @@ export const SosialAspirasiView: React.FC<SosialAspirasiViewProps> = ({
             </div>
           </div>
 
+          {/* Baris Pencarian & Filter Dana Sosial */}
+          {danaList.length > 0 && (
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+              <div className="relative">
+                <Search className="w-4 h-4 text-stone-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  value={danaSearch}
+                  onChange={(e) => setDanaSearch(e.target.value)}
+                  placeholder="Cari penerima, sekolah, atau catatan..."
+                  className={`w-full pl-9 pr-3 py-2 rounded-xl border text-xs outline-none ${
+                    isDark ? 'bg-stone-900 border-stone-800 text-white' : 'bg-white border-stone-200 text-stone-800'
+                  }`}
+                />
+              </div>
+              <select
+                value={danaFilterType}
+                onChange={(e) => setDanaFilterType(e.target.value as 'Semua' | 'Penggalangan' | 'Penyaluran')}
+                className={`px-3 py-2 rounded-xl border text-xs font-semibold outline-none cursor-pointer ${
+                  isDark ? 'bg-stone-900 border-stone-800 text-white' : 'bg-white border-stone-200 text-stone-800'
+                }`}
+              >
+                <option value="Semua">Semua Jenis Transaksi</option>
+                <option value="Penggalangan">Penggalangan</option>
+                <option value="Penyaluran">Penyaluran</option>
+              </select>
+              <select
+                value={danaFilterCategory}
+                onChange={(e) => setDanaFilterCategory(e.target.value)}
+                className={`px-3 py-2 rounded-xl border text-xs font-semibold outline-none cursor-pointer ${
+                  isDark ? 'bg-stone-900 border-stone-800 text-white' : 'bg-white border-stone-200 text-stone-800'
+                }`}
+              >
+                <option value="Semua">Semua Kategori Santunan</option>
+                <option value="Sakit / Rawat Inap">Sakit / Rawat Inap</option>
+                <option value="Duka Cita">Duka Cita</option>
+                <option value="Purna Tugas / Pensiun">Purna Tugas / Pensiun</option>
+                <option value="Pernikahan / Kelahiran">Pernikahan / Kelahiran</option>
+                <option value="Bencana / Lainnya">Bencana / Lainnya</option>
+              </select>
+            </div>
+          )}
+
           {danaList.length === 0 ? (
             <div className={`p-8 rounded-2xl border text-center ${cardClass}`}>
               <HeartHandshake className="w-10 h-10 text-red-700 dark:text-amber-400 mx-auto mb-2 opacity-75" />
@@ -691,9 +787,24 @@ export const SosialAspirasiView: React.FC<SosialAspirasiViewProps> = ({
                 Pengurus dapat mencatat penggalangan dan penyaluran santunan anggota sakit, duka cita, maupun purna tugas di sini.
               </p>
             </div>
+          ) : filteredDanaList.length === 0 ? (
+            <div className={`p-8 rounded-2xl border text-center ${cardClass}`}>
+              <p className="text-sm font-semibold">Tidak ada catatan yang cocok dengan pencarian/filter.</p>
+              <button
+                type="button"
+                onClick={() => {
+                  setDanaSearch('');
+                  setDanaFilterType('Semua');
+                  setDanaFilterCategory('Semua');
+                }}
+                className="mt-2 px-3 py-1.5 rounded-lg text-xs font-bold bg-red-800/15 text-red-800 dark:text-amber-400 cursor-pointer"
+              >
+                Reset Filter
+              </button>
+            </div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {danaList.map((item) => (
+              {filteredDanaList.map((item) => (
                 <div key={item.id} className={`p-4 rounded-2xl border space-y-2 ${cardClass}`}>
                   <div className="flex items-start justify-between gap-2">
                     <div className="flex flex-wrap items-center gap-1.5">
@@ -710,15 +821,29 @@ export const SosialAspirasiView: React.FC<SosialAspirasiViewProps> = ({
                         {item.category}
                       </span>
                     </div>
-                    {canDeleteDana && (
-                      <button
-                        type="button"
-                        onClick={() => handleDeleteDana(item)}
-                        className="p-1 text-stone-400 hover:text-red-600 dark:hover:text-red-400 cursor-pointer"
-                        title="Hapus"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
+                    {(canManageDana || canDeleteDana) && (
+                      <div className="flex items-center gap-1 shrink-0">
+                        {canManageDana && (
+                          <button
+                            type="button"
+                            onClick={() => openEditDanaModal(item)}
+                            className="p-1 text-stone-400 hover:text-amber-600 dark:hover:text-amber-400 cursor-pointer"
+                            title="Edit catatan"
+                          >
+                            <Pencil className="w-4 h-4" />
+                          </button>
+                        )}
+                        {canDeleteDana && (
+                          <button
+                            type="button"
+                            onClick={() => setDeleteDanaTarget(item)}
+                            className="p-1 text-stone-400 hover:text-red-600 dark:hover:text-red-400 cursor-pointer"
+                            title="Hapus"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        )}
+                      </div>
                     )}
                   </div>
                   <h3 className="font-bold text-sm">
@@ -959,16 +1084,28 @@ export const SosialAspirasiView: React.FC<SosialAspirasiViewProps> = ({
         </div>
       )}
 
-      {/* Modal Catat Dana Sosial */}
+      {/* Modal Catat / Edit Dana Sosial */}
       {showDanaModal && (
         <div
           className="fixed inset-0 z-[90] flex items-center justify-center p-4 bg-stone-950/75 backdrop-blur-sm"
-          onClick={() => setShowDanaModal(false)}
+          onClick={() => {
+            setShowDanaModal(false);
+            setEditingDana(null);
+          }}
         >
           <div className={`w-full max-w-md rounded-2xl p-6 border shadow-2xl ${cardClass}`} onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between pb-3 mb-4 border-b border-stone-500/20">
-              <h3 className="font-display font-bold text-base">Catat Dana Sosial / Tali Asih</h3>
-              <button type="button" onClick={() => setShowDanaModal(false)} className="p-1 text-stone-400 cursor-pointer">
+              <h3 className="font-display font-bold text-base">
+                {editingDana ? 'Edit Catatan Dana Sosial' : 'Catat Dana Sosial / Tali Asih'}
+              </h3>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowDanaModal(false);
+                  setEditingDana(null);
+                }}
+                className="p-1 text-stone-400 cursor-pointer"
+              >
                 <X className="w-5 h-5" />
               </button>
             </div>
@@ -1089,7 +1226,10 @@ export const SosialAspirasiView: React.FC<SosialAspirasiViewProps> = ({
               <div className="flex justify-end gap-2 pt-2">
                 <button
                   type="button"
-                  onClick={() => setShowDanaModal(false)}
+                  onClick={() => {
+                    setShowDanaModal(false);
+                    setEditingDana(null);
+                  }}
                   className="px-4 py-2 rounded-xl text-xs font-bold bg-stone-500/15 cursor-pointer"
                 >
                   Batal
@@ -1098,10 +1238,61 @@ export const SosialAspirasiView: React.FC<SosialAspirasiViewProps> = ({
                   type="submit"
                   className="px-4 py-2 rounded-xl text-xs font-bold bg-red-800 hover:bg-red-700 text-white cursor-pointer"
                 >
-                  Simpan
+                  {editingDana ? 'Simpan Perubahan' : 'Simpan'}
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Konfirmasi Hapus Dana Sosial */}
+      {deleteDanaTarget && (
+        <div
+          className="fixed inset-0 z-[95] flex items-center justify-center p-4 bg-stone-950/75 backdrop-blur-sm animate-in fade-in duration-200"
+          onClick={() => setDeleteDanaTarget(null)}
+        >
+          <div
+            className={`w-full max-w-md rounded-2xl p-6 border shadow-2xl space-y-4 ${cardClass}`}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center gap-3 text-red-700 dark:text-red-400">
+              <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${isDark ? 'bg-red-950/70 border border-red-800/60' : 'bg-red-50 border border-red-200'}`}>
+                <Trash2 className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="font-display font-bold text-base">Konfirmasi Hapus Catatan</h3>
+                <p className="text-xs opacity-80">Data akan dihapus dari perangkat dan Cloud.</p>
+              </div>
+            </div>
+            <p className={`text-sm ${isDark ? 'text-stone-300' : 'text-stone-600'}`}>
+              Hapus catatan <span className="font-bold">{deleteDanaTarget.type}</span> a.n.{' '}
+              <span className="font-bold">{deleteDanaTarget.recipientName}</span> sebesar{' '}
+              <span className="font-bold">Rp {(deleteDanaTarget.amount || 0).toLocaleString('id-ID')}</span>?
+            </p>
+            <div className="flex gap-3 pt-2">
+              <button
+                type="button"
+                onClick={() => setDeleteDanaTarget(null)}
+                className={`flex-1 px-4 py-2.5 rounded-xl font-bold text-xs cursor-pointer ${
+                  isDark ? 'bg-stone-800 hover:bg-stone-700 text-stone-300' : 'bg-stone-100 hover:bg-stone-200 text-stone-700'
+                }`}
+              >
+                Batal
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const target = deleteDanaTarget;
+                  setDeleteDanaTarget(null);
+                  void handleDeleteDana(target);
+                }}
+                className="flex-1 px-4 py-2.5 rounded-xl bg-red-800 hover:bg-red-700 text-white font-bold text-xs uppercase tracking-wider flex items-center justify-center gap-2 cursor-pointer"
+              >
+                <Trash2 className="w-4 h-4" />
+                <span>Ya, Hapus</span>
+              </button>
+            </div>
           </div>
         </div>
       )}

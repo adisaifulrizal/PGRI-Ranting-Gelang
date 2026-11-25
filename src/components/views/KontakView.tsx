@@ -14,7 +14,9 @@ import {
   Building,
   Lock,
   Calendar,
-  Sparkles
+  Sparkles,
+  Search,
+  ExternalLink
 } from 'lucide-react';
 import { Teacher } from '../../types';
 import { getOrgConfig, openWhatsAppShare, DEFAULT_KETUA_FALLBACK } from '../../lib/orgConfig';
@@ -78,8 +80,14 @@ export const KontakView: React.FC<KontakViewProps> = ({
     const alamat = (cfg.kopSekretariat || 'Jl. PTPN XII Gunung Gambir Desa Gelang, Kec. Sumberbaru - Kab. Jember')
       .replace(/^Sekretariat\s*:\s*/i, '')
       .trim();
+    const formattedRanting = cfg.kopRanting
+      ? `Sekretariat PGRI ${cfg.kopRanting
+          .replace(/^RANTING\s+/i, 'Ranting ')
+          .toLowerCase()
+          .replace(/\b\w/g, (char) => char.toUpperCase())}`
+      : 'Sekretariat PGRI Ranting Gelang';
     return {
-      rantingTitle: cfg.kopRanting ? `Sekretariat PGRI ${cfg.kopRanting.replace(/^RANTING\s+/i, 'Ranting ')}` : 'Sekretariat PGRI Ranting Gelang',
+      rantingTitle: formattedRanting,
       contactName,
       contactWa,
       email: 'pgrigelang@gmail.com',
@@ -109,8 +117,14 @@ export const KontakView: React.FC<KontakViewProps> = ({
       const alamat = (cfg.kopSekretariat || 'Jl. PTPN XII Gunung Gambir Desa Gelang, Kec. Sumberbaru - Kab. Jember')
         .replace(/^Sekretariat\s*:\s*/i, '')
         .trim();
+      const formattedRanting = cfg.kopRanting
+        ? `Sekretariat PGRI ${cfg.kopRanting
+            .replace(/^RANTING\s+/i, 'Ranting ')
+            .toLowerCase()
+            .replace(/\b\w/g, (char) => char.toUpperCase())}`
+        : 'Sekretariat PGRI Ranting Gelang';
       setSekretariatInfo({
-        rantingTitle: cfg.kopRanting ? `Sekretariat PGRI ${cfg.kopRanting.replace(/^RANTING\s+/i, 'Ranting ')}` : 'Sekretariat PGRI Ranting Gelang',
+        rantingTitle: formattedRanting,
         contactName,
         contactWa,
         email: 'pgrigelang@gmail.com',
@@ -234,10 +248,22 @@ export const KontakView: React.FC<KontakViewProps> = ({
     };
   }, [activeRole]);
 
-  // Modal State untuk Edit & Hapus Pesan
+  // Modal State untuk Edit & Hapus Pesan + Pencarian
   const [editingFeedback, setEditingFeedback] = useState<FeedbackMessage | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<FeedbackMessage | null>(null);
   const [editMessageText, setEditMessageText] = useState('');
+  const [feedbackSearch, setFeedbackSearch] = useState('');
+
+  const filteredFeedbackList = feedbackList.filter((item) => {
+    const q = feedbackSearch.trim().toLowerCase();
+    if (!q) return true;
+    return (
+      (item.name || '').toLowerCase().includes(q) ||
+      (item.school || '').toLowerCase().includes(q) ||
+      (item.message || '').toLowerCase().includes(q) ||
+      (item.phone || '').toLowerCase().includes(q)
+    );
+  });
 
   // Helper Inisial Nama untuk Avatar Pengisi
   const getInitials = (fullName: string) => {
@@ -422,51 +448,67 @@ export const KontakView: React.FC<KontakViewProps> = ({
               {sekretariatInfo.rantingTitle}
             </h3>
 
-            {/* Telepon / WhatsApp */}
-            <button
-              type="button"
-              onClick={() => openWhatsAppShare(`Halo ${sekretariatInfo.contactName}, saya ingin menanyakan informasi kegiatan PGRI Ranting Gelang.`, sekretariatInfo.contactWa)}
-              className={`w-full text-left flex items-start gap-3 text-xs rounded-xl p-1.5 -m-1.5 transition-colors cursor-pointer ${
-                isDark ? 'text-stone-400 hover:bg-stone-800/60' : 'text-stone-600 hover:bg-stone-50'
-              }`}
-              title="Klik untuk menghubungi via WhatsApp"
-            >
-              <div className={`p-2.5 rounded-xl ${isDark ? 'bg-emerald-950/60 text-emerald-400 border border-emerald-800/40' : 'bg-emerald-50 text-emerald-700 border border-emerald-200/80'} shrink-0`}>
-                <Phone className="w-4 h-4" />
-              </div>
-              <div>
-                <p className={`font-bold ${isDark ? 'text-stone-100' : 'text-stone-900'}`}>Telepon / WhatsApp</p>
-                <p className={`${isDark ? 'text-emerald-400' : 'text-emerald-700'} font-mono mt-0.5 font-semibold`}>
-                  +{sekretariatInfo.contactWa} ({sekretariatInfo.contactName})
-                </p>
-              </div>
-            </button>
+            <div className="space-y-3">
+              {/* Telepon / WhatsApp */}
+              <button
+                type="button"
+                onClick={() => openWhatsAppShare(`Halo ${sekretariatInfo.contactName}, saya ingin menanyakan informasi kegiatan PGRI Ranting Gelang.`, sekretariatInfo.contactWa)}
+                className={`group w-full text-left flex items-center justify-between gap-3 text-xs rounded-xl p-3 border transition-all duration-200 cursor-pointer ${
+                  isDark
+                    ? 'bg-stone-800/40 border-stone-800 text-stone-400 hover:bg-stone-800/80 hover:border-emerald-800/50'
+                    : 'bg-[#faf8f5] border-stone-200/80 text-stone-600 hover:bg-emerald-50/40 hover:border-emerald-200'
+                }`}
+                title="Klik untuk menghubungi via WhatsApp"
+              >
+                <div className="flex items-start gap-3.5 min-w-0">
+                  <div className={`p-2.5 rounded-xl ${isDark ? 'bg-emerald-950/60 text-emerald-400 border border-emerald-800/40' : 'bg-emerald-50 text-emerald-700 border border-emerald-200/80'} shrink-0`}>
+                    <Phone className="w-4 h-4" />
+                  </div>
+                  <div className="min-w-0">
+                    <p className={`font-bold ${isDark ? 'text-stone-100' : 'text-stone-900'}`}>WhatsApp :</p>
+                    <p className={`${isDark ? 'text-emerald-400' : 'text-emerald-700'} font-mono mt-0.5 font-semibold break-words`}>
+                      +{sekretariatInfo.contactWa.replace(/^(\d{2})(\d{3})(\d{4})(\d+)$/, '$1 $2-$3-$4')} ({sekretariatInfo.contactName})
+                    </p>
+                  </div>
+                </div>
+                <ExternalLink className={`w-3.5 h-3.5 shrink-0 transition-transform duration-200 group-hover:translate-x-0.5 ${isDark ? 'text-stone-500 group-hover:text-emerald-400' : 'text-stone-400 group-hover:text-emerald-700'}`} />
+              </button>
 
-            {/* Email Resmi */}
-            <a
-              href={`mailto:${sekretariatInfo.email}`}
-              className={`w-full flex items-start gap-3 text-xs rounded-xl p-1.5 -m-1.5 transition-colors ${
-                isDark ? 'text-stone-400 hover:bg-stone-800/60' : 'text-stone-600 hover:bg-stone-50'
-              }`}
-              title="Klik untuk mengirim email"
-            >
-              <div className={`p-2.5 rounded-xl ${isDark ? 'bg-red-950/60 text-amber-400 border border-red-800/40' : 'bg-red-50 text-red-800 border border-red-200/80'} shrink-0`}>
-                <Mail className="w-4 h-4" />
-              </div>
-              <div>
-                <p className={`font-bold ${isDark ? 'text-stone-100' : 'text-stone-900'}`}>Alamat Email Resmi</p>
-                <p className={`${isDark ? 'text-amber-400' : 'text-red-800'} mt-0.5 font-medium`}>{sekretariatInfo.email}</p>
-              </div>
-            </a>
+              {/* Email Resmi */}
+              <a
+                href={`mailto:${sekretariatInfo.email}`}
+                className={`group w-full flex items-center justify-between gap-3 text-xs rounded-xl p-3 border transition-all duration-200 ${
+                  isDark
+                    ? 'bg-stone-800/40 border-stone-800 text-stone-400 hover:bg-stone-800/80 hover:border-red-800/50'
+                    : 'bg-[#faf8f5] border-stone-200/80 text-stone-600 hover:bg-red-50/40 hover:border-red-200'
+                }`}
+                title="Klik untuk mengirim email"
+              >
+                <div className="flex items-start gap-3.5 min-w-0">
+                  <div className={`p-2.5 rounded-xl ${isDark ? 'bg-red-950/60 text-amber-400 border border-red-800/40' : 'bg-red-50 text-red-800 border border-red-200/80'} shrink-0`}>
+                    <Mail className="w-4 h-4" />
+                  </div>
+                  <div className="min-w-0">
+                    <p className={`font-bold ${isDark ? 'text-stone-100' : 'text-stone-900'}`}>Alamat Email :</p>
+                    <p className={`${isDark ? 'text-amber-400' : 'text-red-800'} mt-0.5 font-medium break-all`}>{sekretariatInfo.email}</p>
+                  </div>
+                </div>
+                <ExternalLink className={`w-3.5 h-3.5 shrink-0 transition-transform duration-200 group-hover:translate-x-0.5 ${isDark ? 'text-stone-500 group-hover:text-amber-400' : 'text-stone-400 group-hover:text-red-800'}`} />
+              </a>
 
-            {/* Alamat Kesekretariatan */}
-            <div className={`flex items-start gap-3 text-xs ${isDark ? 'text-stone-400' : 'text-stone-600'}`}>
-              <div className={`p-2.5 rounded-xl ${isDark ? 'bg-stone-800 text-amber-400 border border-stone-700' : 'bg-stone-100 text-red-800 border border-stone-200'} shrink-0`}>
-                <MapPin className="w-4 h-4" />
-              </div>
-              <div>
-                <p className={`font-bold ${isDark ? 'text-stone-100' : 'text-stone-900'}`}>Alamat Sekretariat</p>
-                <p className={`${isDark ? 'text-stone-400' : 'text-stone-500'} mt-0.5`}>{sekretariatInfo.alamat}</p>
+              {/* Alamat Kesekretariatan */}
+              <div className={`flex items-start gap-3.5 text-xs rounded-xl p-3 border ${
+                isDark
+                  ? 'bg-stone-800/40 border-stone-800 text-stone-400'
+                  : 'bg-[#faf8f5] border-stone-200/80 text-stone-600'
+              }`}>
+                <div className={`p-2.5 rounded-xl ${isDark ? 'bg-stone-800 text-amber-400 border border-stone-700' : 'bg-stone-100 text-red-800 border border-stone-200'} shrink-0`}>
+                  <MapPin className="w-4 h-4" />
+                </div>
+                <div className="min-w-0">
+                  <p className={`font-bold ${isDark ? 'text-stone-100' : 'text-stone-900'}`}>Alamat Sekretariat :</p>
+                  <p className={`${isDark ? 'text-stone-400' : 'text-stone-500'} mt-0.5 leading-relaxed`}>{sekretariatInfo.alamat}</p>
+                </div>
               </div>
             </div>
           </div>
@@ -655,6 +697,23 @@ export const KontakView: React.FC<KontakViewProps> = ({
               </span>
             </div>
 
+            {feedbackList.length > 0 && (
+              <div className="relative">
+                <Search className="w-3.5 h-3.5 text-stone-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  value={feedbackSearch}
+                  onChange={(e) => setFeedbackSearch(e.target.value)}
+                  placeholder="Cari nama pengirim, sekolah, atau isi pesan..."
+                  className={`w-full pl-9 pr-3 py-2 rounded-xl border text-xs outline-none ${
+                    isDark
+                      ? 'bg-stone-950 border-stone-800 text-stone-100 focus:border-amber-500'
+                      : 'bg-[#faf8f5] border-stone-200 text-stone-800 focus:border-red-700'
+                  }`}
+                />
+              </div>
+            )}
+
             <div className="space-y-3 max-h-[700px] overflow-y-auto pr-1 mt-4 custom-scrollbar">
               {feedbackList.length === 0 ? (
                 <div className="text-center py-16 px-4 space-y-2.5">
@@ -668,8 +727,21 @@ export const KontakView: React.FC<KontakViewProps> = ({
                     Masukan yang dikirim melalui formulir akan muncul di sini.
                   </p>
                 </div>
+              ) : filteredFeedbackList.length === 0 ? (
+                <div className="text-center py-10 px-4 space-y-2">
+                  <p className={`font-semibold text-xs ${isDark ? 'text-stone-300' : 'text-stone-600'}`}>
+                    Tidak ada pesan yang cocok dengan pencarian.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => setFeedbackSearch('')}
+                    className="px-3 py-1 rounded-lg text-[11px] font-bold bg-red-800/15 text-red-800 dark:text-amber-400 cursor-pointer"
+                  >
+                    Reset Pencarian
+                  </button>
+                </div>
               ) : (
-                feedbackList.map((item, idx) => (
+                filteredFeedbackList.map((item, idx) => (
                   <div
                     key={item.id}
                     style={{ animationDelay: `${idx * 60}ms` }}
@@ -715,6 +787,38 @@ export const KontakView: React.FC<KontakViewProps> = ({
 
                         {activeRole === 'admin' && (
                           <div className="flex items-center gap-1.5">
+                            {(() => {
+                              const digits = String(item.phone || '').replace(/[^0-9]/g, '');
+                              const waNumber = digits.startsWith('08')
+                                ? `62${digits.slice(1)}`
+                                : digits.startsWith('8')
+                                  ? `62${digits}`
+                                  : digits;
+                              if (waNumber.length < 9) return null;
+                              return (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    const replyMsg =
+                                      `Assalamu'alaikum Wr. Wb.\n` +
+                                      `Yth. Bapak/Ibu *${item.name}* (${item.school || '-'})\n\n` +
+                                      `Terima kasih atas masukan/pesan yang telah disampaikan kepada Pengurus PGRI Ranting Gelang terkait:\n` +
+                                      `_"${item.message.slice(0, 200)}"_\n\n` +
+                                      `Tanggapan kami: `;
+                                    openWhatsAppShare(replyMsg, waNumber);
+                                  }}
+                                  title="Balas langsung via WhatsApp"
+                                  className={`px-2.5 h-8 rounded-lg border text-[11px] font-bold flex items-center gap-1 active:scale-95 transition-colors cursor-pointer ${
+                                    isDark
+                                      ? 'border-emerald-700/60 bg-emerald-950/50 text-emerald-400 hover:bg-emerald-900/60'
+                                      : 'border-emerald-300 bg-emerald-50 text-emerald-700 hover:bg-emerald-100'
+                                  }`}
+                                >
+                                  <Send className="w-3 h-3" />
+                                  <span className="hidden sm:inline">Balas WA</span>
+                                </button>
+                              );
+                            })()}
                             <button
                               type="button"
                               onClick={() => handleOpenEdit(item)}

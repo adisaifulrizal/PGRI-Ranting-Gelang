@@ -9,7 +9,7 @@ const AUDIT_STORAGE_KEY = 'pgri-audit-logs';
 const ROLES_STORAGE_KEY = 'pgri-pengurus-roles';
 
 export const PENGURUS_ROLE_LABELS: Record<PengurusRole, string> = {
-  ketua: 'Ketua / Super Admin',
+  ketua: 'Admin Aplikasi',
   sekretaris: 'Sekretaris',
   bendahara: 'Bendahara',
   seksi: 'Pengurus Seksi',
@@ -112,7 +112,7 @@ export async function resolvePengurusRole(
         email: normalizedEmail,
         name: user.displayName || 'Ketua / Admin PGRI',
         role: 'ketua',
-        positionLabel: 'Ketua / Super Admin PGRI Ranting Gelang',
+        positionLabel: 'Admin Aplikasi PGRI Ranting Gelang',
         updatedAt: new Date().toISOString(),
       },
     };

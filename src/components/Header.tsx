@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Calendar, Menu, RefreshCw, Check } from 'lucide-react';
+import { Calendar, Menu, RefreshCw, Check, ShieldCheck, User } from 'lucide-react';
 import { ThemeToggle } from './ThemeToggle';
 import { PWAInstallButton } from './PWAInstallButton';
 
@@ -23,7 +23,20 @@ export const Header: React.FC<HeaderProps> = ({
   onToggleTheme,
   onSync,
   isSyncing,
+  activeRole = 'guru',
+  currentUser,
 }) => {
+  const isAdminMode = activeRole === 'admin';
+  const roleBadgeLabel = (() => {
+    if (!isAdminMode) return 'Mode Guru';
+    const rawRole = String(currentUser?.role || '').toLowerCase();
+    if (rawRole === 'superadmin') return 'Admin Aplikasi';
+    if (rawRole === 'sekretaris') return 'Sekretaris';
+    if (rawRole === 'bendahara') return 'Bendahara';
+    if (rawRole === 'seksi') return 'Pengurus Seksi';
+    return 'Mode Pengurus';
+  })();
+  const roleBadgeShort = isAdminMode ? 'Pengurus' : 'Guru';
   const [syncSuccess, setSyncSuccess] = useState(false);
   const prevSyncingRef = useRef<boolean | undefined>(isSyncing);
   const [logoKombel, setLogoKombel] = useState<string | null>(() => 
@@ -108,8 +121,30 @@ export const Header: React.FC<HeaderProps> = ({
         </div>
       </div>
 
-      {/* Right Tools: Date Display, Sync Button, & Theme Toggle */}
-      <div className="flex items-center gap-2 sm:gap-3.5 ml-auto">
+      {/* Right Tools: Role Badge, Date Display, Sync Button, & Theme Toggle */}
+      <div className="flex items-center gap-2 sm:gap-3 ml-auto">
+        {/* Active Role / Mode Indicator Badge */}
+        <div
+          title={isAdminMode ? `Hak akses aktif pada menu ini: ${roleBadgeLabel}` : 'Mode baca & layanan anggota (Guru)'}
+          className={`flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-xl border text-[11px] sm:text-xs font-bold transition-colors shrink-0 ${
+            isAdminMode
+              ? theme === 'dark'
+                ? 'bg-red-950/60 border-red-800/60 text-amber-300'
+                : 'bg-red-50 border-red-200 text-red-900'
+              : theme === 'dark'
+              ? 'bg-stone-900 border-stone-800 text-stone-300'
+              : 'bg-stone-100/80 border-stone-200/90 text-stone-700'
+          }`}
+        >
+          {isAdminMode ? (
+            <ShieldCheck className="w-3.5 h-3.5 text-red-700 dark:text-amber-400 shrink-0" />
+          ) : (
+            <User className="w-3.5 h-3.5 text-stone-500 dark:text-stone-400 shrink-0" />
+          )}
+          <span className="sm:hidden">{roleBadgeShort}</span>
+          <span className="hidden sm:inline whitespace-nowrap">{roleBadgeLabel}</span>
+        </div>
+
         {/* Institutional Date Display (Hidden on mobile) */}
         <div
           className={`hidden sm:flex items-center gap-2 px-3.5 py-1.5 rounded-xl border font-medium text-xs sm:text-sm transition-colors ${

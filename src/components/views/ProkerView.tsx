@@ -91,7 +91,7 @@ export const ProkerView: React.FC<ProkerViewProps> = ({
   theme = 'light'
 }) => {
   const isDark = theme === 'dark';
-  const canEdit = activeRole === 'admin' || ['ketua', 'sekretaris', 'seksi'].includes(pengurusRole);
+  const canEdit = activeRole === 'admin' && ['ketua', 'sekretaris', 'seksi'].includes(pengurusRole);
   const canDelete = activeRole === 'admin' && (pengurusRole === 'ketua' || pengurusRole === 'sekretaris');
 
   const [items, setItems] = useState<ProkerItem[]>(() => {
@@ -166,6 +166,7 @@ export const ProkerView: React.FC<ProkerViewProps> = ({
 
   const [showModal, setShowModal] = useState(false);
   const [editingItem, setEditingItem] = useState<ProkerItem | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<ProkerItem | null>(null);
   const [form, setForm] = useState<Omit<ProkerItem, 'id' | 'updatedAt'>>({
     title: '',
     seksi: SEKSI_OPTIONS[0],
@@ -747,7 +748,7 @@ export const ProkerView: React.FC<ProkerViewProps> = ({
                     {canDelete && (
                       <button
                         type="button"
-                        onClick={() => handleDelete(item)}
+                        onClick={() => setDeleteTarget(item)}
                         className="p-1.5 rounded-lg text-stone-400 hover:text-red-600 dark:hover:text-red-400 hover:bg-red-500/10 cursor-pointer"
                         title="Hapus Program"
                       >
@@ -994,6 +995,55 @@ export const ProkerView: React.FC<ProkerViewProps> = ({
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Konfirmasi Hapus Program Kerja */}
+      {deleteTarget && (
+        <div
+          className="fixed inset-0 z-[95] flex items-center justify-center p-4 bg-stone-950/75 backdrop-blur-sm animate-in fade-in duration-200"
+          onClick={() => setDeleteTarget(null)}
+        >
+          <div
+            className={`w-full max-w-md rounded-2xl p-6 border shadow-2xl space-y-4 ${cardClass}`}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center gap-3 text-red-700 dark:text-red-400">
+              <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${isDark ? 'bg-red-950/70 border border-red-800/60' : 'bg-red-50 border border-red-200'}`}>
+                <Trash2 className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="font-display font-bold text-base">Konfirmasi Hapus Program Kerja</h3>
+                <p className="text-xs opacity-80">Tindakan ini akan menghapus data dari perangkat dan Cloud.</p>
+              </div>
+            </div>
+            <p className={`text-sm ${isDark ? 'text-stone-300' : 'text-stone-600'}`}>
+              Apakah Anda yakin ingin menghapus program kerja <span className="font-bold">&quot;{deleteTarget.title}&quot;</span>?
+            </p>
+            <div className="flex gap-3 pt-2">
+              <button
+                type="button"
+                onClick={() => setDeleteTarget(null)}
+                className={`flex-1 px-4 py-2.5 rounded-xl font-bold text-xs cursor-pointer ${
+                  isDark ? 'bg-stone-800 hover:bg-stone-700 text-stone-300' : 'bg-stone-100 hover:bg-stone-200 text-stone-700'
+                }`}
+              >
+                Batal
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const target = deleteTarget;
+                  setDeleteTarget(null);
+                  void handleDelete(target);
+                }}
+                className="flex-1 px-4 py-2.5 rounded-xl bg-red-800 hover:bg-red-700 text-white font-bold text-xs uppercase tracking-wider flex items-center justify-center gap-2 cursor-pointer"
+              >
+                <Trash2 className="w-4 h-4" />
+                <span>Ya, Hapus</span>
+              </button>
+            </div>
           </div>
         </div>
       )}

@@ -184,10 +184,14 @@
       "properties": {
         "id": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
         "direction": { "type": "string", "enum": ["Masuk", "Keluar"] },
+        "nomorAgenda": { "type": "string", "maxLength": 60 },
         "nomorSurat": { "type": "string", "minLength": 1, "maxLength": 120 },
         "tanggalSurat": { "type": "string", "maxLength": 32 },
+        "tanggalTerima": { "type": "string", "maxLength": 32 },
         "asalTujuan": { "type": "string", "minLength": 1, "maxLength": 200 },
         "perihal": { "type": "string", "minLength": 1, "maxLength": 300 },
+        "disposisi": { "type": "string", "maxLength": 300 },
+        "statusTindakLanjut": { "type": "string", "enum": ["Baru", "Diproses", "Selesai"] },
         "lampiranUrl": { "type": "string", "maxLength": 600 },
         "catatan": { "type": "string", "maxLength": 500 }
       },
@@ -204,7 +208,7 @@
         "gender": { "type": "string", "enum": ["L", "P"] },
         "school": { "type": "string", "minLength": 1, "maxLength": 160 },
         "nip": { "type": "string", "maxLength": 40 },
-        "npa": { "type": "string", "pattern": "^\\d{11}$" },
+        "npa": { "type": "string", "maxLength": 11, "pattern": "^(\\d{11})?$" },
         "role": { "type": "string", "maxLength": 80 },
         "avatar": { "type": "string", "maxLength": 500 },
         "phone": { "type": "string", "maxLength": 40 },
@@ -217,7 +221,7 @@
         "activeStatus": { "type": "string", "enum": ["Tidak Aktif"] },
         "createdAt": { "type": "string", "maxLength": 64 }
       },
-      "required": ["id", "name", "school", "npa", "isActive", "activeStatus", "createdAt"]
+      "required": ["id", "name", "school", "isActive", "activeStatus", "createdAt"]
     },
     "KontakSubmission": {
       "title": "KontakSubmission",
